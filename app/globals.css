@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #faf7ef;
+  background-image: linear-gradient(#e4decb 1px, transparent 1px);
+  background-size: 100% 2.1em;
+  color: #23291f;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e4decb;
+  box-shadow: 0 1px 0 rgba(35, 41, 31, 0.06);
+}
+
+.btn-primary {
+  background: #23291f;
+  color: #faf7ef;
+}
+.btn-primary:hover {
+  opacity: 0.85;
+}
