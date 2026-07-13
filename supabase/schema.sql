@@ -79,6 +79,6 @@ create policy "posts_delete" on sourcing_posts
   for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
 
 -- 8. 접속을 허용할 두 사람의 이메일을 여기에 넣고 실행하세요.
--- insert into allowed_users (email) values
---   ('me@gmail.com'),
---   ('hyung@gmail.com');
+insert into allowed_users (email) values
+('dnr7350@gmail.com'),
+('krispark917@gmail.com');
