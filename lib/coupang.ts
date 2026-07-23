@@ -1,6 +1,18 @@
 import crypto from 'crypto';
+import { fetch as undiciFetch, ProxyAgent } from 'undici';
 
 const HOST = 'https://api-gateway.coupang.com';
+
+// COUPANG_PROXY_URL 환경변수가 있으면 고정 IP 프록시를 거쳐서 요청 (Vercel의
+// 랜덤 아웃바운드 IP 문제를 우회하기 위함 - Noble IP, Fixie 등의 프록시 URL)
+async function proxiedFetch(url: string, options: any) {
+  const proxyUrl = process.env.COUPANG_PROXY_URL || process.env.FIXIE_URL;
+  if (proxyUrl) {
+    const dispatcher = new ProxyAgent(proxyUrl);
+    return undiciFetch(url, { ...options, dispatcher }) as any;
+  }
+  return fetch(url, options);
+}
 
 // 쿠팡 API가 요구하는 시간 포맷: yyMMdd'T'HHmmss'Z' (UTC 기준)
 function coupangDatetime(): string {
@@ -56,7 +68,7 @@ export async function fetchCoupangOrderSheets({
     secretKey
   );
 
-  const res = await fetch(`${HOST}${path}?${query}`, {
+  const res = await proxiedFetch(`${HOST}${path}?${query}`, {
     method: 'GET',
     headers: {
       Authorization: authorization,
