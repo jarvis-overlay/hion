@@ -1,15 +1,17 @@
 'use client';
 
 import { useState } from 'react';
+import { toggleProductVisibility } from '@/app/dashboard/inventory/stock/actions';
 
 export default function StockTable({
   products,
   stockRows,
 }: {
-  products: any[];
+  products: any[]; // id, name, is_hidden
   stockRows: any[];
 }) {
   const [hideOutOfStock, setHideOutOfStock] = useState(true);
+  const [showHidden, setShowHidden] = useState(false);
 
   const stockByProduct: Record<string, { coupang: number; own: number }> = {};
   for (const p of products) {
@@ -27,6 +29,7 @@ export default function StockTable({
   }
 
   const visibleProducts = products.filter((p) => {
+    if (!showHidden && p.is_hidden) return false;
     if (!hideOutOfStock) return true;
     const s = stockByProduct[p.id] || { coupang: 0, own: 0 };
     return s.coupang + s.own !== 0;
@@ -35,15 +38,25 @@ export default function StockTable({
 
   return (
     <div className="card overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-paperLine">
-        <label className="flex items-center gap-2 text-xs text-inkSoft cursor-pointer">
-          <input
-            type="checkbox"
-            checked={hideOutOfStock}
-            onChange={(e) => setHideOutOfStock(e.target.checked)}
-          />
-          품절(재고 0) 상품 숨기기
-        </label>
+      <div className="flex items-center justify-between px-4 py-2 border-b border-paperLine flex-wrap gap-2">
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-xs text-inkSoft cursor-pointer">
+            <input
+              type="checkbox"
+              checked={hideOutOfStock}
+              onChange={(e) => setHideOutOfStock(e.target.checked)}
+            />
+            품절(재고 0) 상품 숨기기
+          </label>
+          <label className="flex items-center gap-2 text-xs text-inkSoft cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showHidden}
+              onChange={(e) => setShowHidden(e.target.checked)}
+            />
+            숨긴 상품도 보기
+          </label>
+        </div>
         {hiddenCount > 0 && (
           <span className="text-xs text-inkSoft">{hiddenCount}개 숨김</span>
         )}
@@ -55,6 +68,7 @@ export default function StockTable({
             <th className="text-right py-2 px-4">쿠팡 창고</th>
             <th className="text-right py-2 px-4">자사 물류창고</th>
             <th className="text-right py-2 px-4">합계</th>
+            <th className="text-right py-2 px-4">관리</th>
           </tr>
         </thead>
         <tbody>
@@ -62,7 +76,10 @@ export default function StockTable({
             const s = stockByProduct[p.id] || { coupang: 0, own: 0 };
             const total = s.coupang + s.own;
             return (
-              <tr key={p.id} className="border-b border-paperLine last:border-0">
+              <tr
+                key={p.id}
+                className={`border-b border-paperLine last:border-0 ${p.is_hidden ? 'opacity-50' : ''}`}
+              >
                 <td className="py-2 px-4 font-medium">{p.name}</td>
                 <td
                   className={`py-2 px-4 text-right font-mono ${
@@ -78,17 +95,23 @@ export default function StockTable({
                 >
                   {s.own}
                 </td>
-                <td className="py-2 px-4 text-right font-mono font-bold">
-                  {total}
+                <td className="py-2 px-4 text-right font-mono font-bold">{total}</td>
+                <td className="py-2 px-4 text-right">
+                  <button
+                    onClick={() => toggleProductVisibility(p.id, !p.is_hidden)}
+                    className="text-xs underline text-inkSoft hover:text-ink"
+                  >
+                    {p.is_hidden ? '다시 보이기' : '숨기기'}
+                  </button>
                 </td>
               </tr>
             );
           })}
           {!visibleProducts.length && (
             <tr>
-              <td colSpan={4} className="py-4 px-4 text-center text-inkSoft">
+              <td colSpan={5} className="py-4 px-4 text-center text-inkSoft">
                 {products.length
-                  ? '표시할 상품이 없어요 (품절 상품 숨김 처리됨).'
+                  ? '표시할 상품이 없어요.'
                   : '등록된 상품이 없어요.'}
               </td>
             </tr>

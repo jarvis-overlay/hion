@@ -22,9 +22,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  // ?days=60 처럼 넘기면 과거 60일치 백필. 안 넘기면 기본 2일(평소 크론 동작).
+  const daysParam = searchParams.get('days');
+  const daysBack = daysParam ? parseInt(daysParam, 10) : 2;
+
   const supabase = createAdminClient();
-  const orderResult = await runCoupangOrderSync(supabase, 'auto-sync@hion');
+  const orderResult = await runCoupangOrderSync(supabase, 'auto-sync@hion', daysBack);
   const stockResult = await runCoupangInventorySync(supabase, 'auto-sync@hion');
 
-  return NextResponse.json({ ...stockResult, ...orderResult });
+  return NextResponse.json({ ...stockResult, ...orderResult, daysBack });
 }

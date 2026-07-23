@@ -23,7 +23,7 @@ export default async function StockPage() {
 
   const { data: products } = await supabase
     .from('products')
-    .select('id, name')
+    .select('id, name, is_hidden')
     .order('name');
 
   const { data: stockRows } = await supabase
@@ -65,14 +65,15 @@ export default async function StockPage() {
   const todayTotalAmount = todaySales.reduce((s, p) => s + p.amount, 0);
   const todayTotalQty = todaySales.reduce((s, p) => s + p.qty, 0);
 
-  // 일자별 판매 히스토리용 (최근 30일)
+  // 일자별 판매 히스토리용 (최근 30일, 상품별 상세 포함)
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const { data: dailySalesRows } = await supabase
     .from('stock_movements')
-    .select('occurred_at, quantity, amount')
+    .select('occurred_at, quantity, amount, product_id, products(name)')
     .like('external_ref', 'coupang-order:%')
-    .gte('occurred_at', thirtyDaysAgo.toISOString());
+    .gte('occurred_at', thirtyDaysAgo.toISOString())
+    .order('occurred_at', { ascending: false });
 
   const { data: movements } = await supabase
     .from('stock_movements')

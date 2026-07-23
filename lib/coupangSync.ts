@@ -93,7 +93,8 @@ export async function runCoupangInventorySync(
 
 export async function runCoupangOrderSync(
   supabase: any,
-  authorEmail: string
+  authorEmail: string,
+  daysBack: number = 2 // 기본 2일. 과거분 백필할 땐 크게 넘겨서 호출 (예: 30)
 ) {
   const { data: cred } = await supabase
     .from('channel_credentials')
@@ -117,97 +118,109 @@ export async function runCoupangOrderSync(
     }
   }
 
-  // 최근 2일치를 조회 (하루 1번 자동동기화라도 놓치는 날 없게 여유를 둠)
   const fmt = (d: Date) =>
     `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
       d.getDate()
     ).padStart(2, '0')}`;
+
+  // 쿠팡 rg/orders API는 조회 기간이 최대 31일로 제한돼 있어서,
+  // daysBack이 그보다 크면 여러 구간으로 나눠서 순차 조회함
+  const MAX_RANGE_DAYS = 31;
   const today = new Date();
-  const from = new Date(today);
-  from.setDate(from.getDate() - 1);
+  const ranges: { from: Date; to: Date }[] = [];
+  let remaining = daysBack;
+  let cursor = new Date(today);
+
+  while (remaining > 0) {
+    const rangeDays = Math.min(remaining, MAX_RANGE_DAYS);
+    const to = new Date(cursor);
+    const from = new Date(cursor);
+    from.setDate(from.getDate() - rangeDays);
+    ranges.push({ from, to });
+    cursor = new Date(from);
+    remaining -= rangeDays;
+  }
 
   let logged = 0;
   let registered = 0;
   let skipped = 0;
 
   try {
-    let nextToken: string | undefined = undefined;
-    do {
-      const { data: orders, nextToken: next } = await fetchCoupangRGOrders({
-        vendorId: cred.vendor_id,
-        accessKey: cred.access_key,
-        secretKey: cred.secret_key,
-        paidDateFrom: fmt(from),
-        paidDateTo: fmt(today),
-        nextToken,
-      });
-      nextToken = next;
+    for (const range of ranges) {
+      let nextToken: string | undefined = undefined;
+      do {
+        const { data: orders, nextToken: next } = await fetchCoupangRGOrders({
+          vendorId: cred.vendor_id,
+          accessKey: cred.access_key,
+          secretKey: cred.secret_key,
+          paidDateFrom: fmt(range.from),
+          paidDateTo: fmt(range.to),
+          nextToken,
+        });
+        nextToken = next;
 
-      for (const order of orders) {
-        for (const item of order.orderItems || []) {
-          const vendorItemId = String(item.vendorItemId);
-          let productId = mapByVendorItem[vendorItemId];
-          const externalRef = `coupang-order:${order.orderId}:${vendorItemId}`;
+        for (const order of orders) {
+          for (const item of order.orderItems || []) {
+            const vendorItemId = String(item.vendorItemId);
+            let productId = mapByVendorItem[vendorItemId];
+            const externalRef = `coupang-order:${order.orderId}:${vendorItemId}`;
 
-          // 우리 시스템에 없는 상품이면 자동으로 새로 등록
-          // (upsert로 처리해서, 다른 동기화가 거의 동시에 같은 상품을 등록해도
-          //  중복 생성되지 않고 기존 것을 그대로 사용하게 됨)
-          if (!productId) {
-            const { data: newProduct } = await supabase
-              .from('products')
+            if (!productId) {
+              const { data: newProduct } = await supabase
+                .from('products')
+                .upsert(
+                  {
+                    name: item.productName || `쿠팡 상품 (${vendorItemId})`,
+                    coupang_vendor_item_id: vendorItemId,
+                    author_email: authorEmail,
+                    notes: '쿠팡 판매 동기화 중 자동 등록됨',
+                  },
+                  { onConflict: 'coupang_vendor_item_id' }
+                )
+                .select('id')
+                .single();
+
+              if (!newProduct) continue;
+              productId = newProduct.id;
+              mapByVendorItem[vendorItemId] = productId;
+              registered++;
+            }
+
+            const qty = Number(item.salesQuantity) || 0;
+            if (qty <= 0) continue;
+
+            const { data: inserted, error } = await supabase
+              .from('stock_movements')
               .upsert(
                 {
-                  name: item.productName || `쿠팡 상품 (${vendorItemId})`,
-                  coupang_vendor_item_id: vendorItemId,
+                  product_id: productId,
+                  warehouse: 'coupang',
+                  type: 'out',
+                  quantity: -qty,
+                  channel: 'coupang',
+                  amount: qty * Number(item.unitSalesPrice || 0),
+                  external_ref: externalRef,
+                  occurred_at: new Date(Number(order.paidAt)).toISOString(),
+                  note: `쿠팡 판매 (${item.productName || ''})`,
                   author_email: authorEmail,
-                  notes: '쿠팡 판매 동기화 중 자동 등록됨',
                 },
-                { onConflict: 'coupang_vendor_item_id' }
+                { onConflict: 'external_ref', ignoreDuplicates: true }
               )
-              .select('id')
-              .single();
+              .select();
 
-            if (!newProduct) continue;
-            productId = newProduct.id;
-            mapByVendorItem[vendorItemId] = productId;
-            registered++;
-          }
+            if (error) {
+              continue;
+            }
 
-          const qty = Number(item.salesQuantity) || 0;
-          if (qty <= 0) continue;
-
-          const { data: inserted, error } = await supabase
-            .from('stock_movements')
-            .upsert(
-              {
-                product_id: productId,
-                warehouse: 'coupang',
-                type: 'out',
-                quantity: -qty,
-                channel: 'coupang',
-                amount: qty * Number(item.unitSalesPrice || 0),
-                external_ref: externalRef,
-                occurred_at: new Date(Number(order.paidAt)).toISOString(),
-                note: `쿠팡 판매 (${item.productName || ''})`,
-                author_email: authorEmail,
-              },
-              { onConflict: 'external_ref', ignoreDuplicates: true }
-            )
-            .select();
-
-          if (error) {
-            // 유니크 제약이 아직 없는 등 예기치 못한 오류 - 조용히 건너뜀
-            continue;
-          }
-
-          if (inserted && inserted.length > 0) {
-            logged++;
-          } else {
-            skipped++;
+            if (inserted && inserted.length > 0) {
+              logged++;
+            } else {
+              skipped++;
+            }
           }
         }
-      }
-    } while (nextToken);
+      } while (nextToken);
+    }
   } catch (e) {
     // 재고 동기화는 이미 끝났으니, 판매내역 조회 실패는 조용히 무시
   }
