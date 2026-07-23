@@ -68,9 +68,3 @@ export async function deleteMovement(id: string) {
   await supabase.from('stock_movements').delete().eq('id', id);
   revalidatePath('/dashboard/inventory/stock');
 }
-
-export async function toggleProductVisibility(productId: string, hide: boolean) {
-  const supabase = createClient();
-  await supabase.from('products').update({ is_hidden: hide }).eq('id', productId);
-  revalidatePath('/dashboard/inventory/stock');
-}
