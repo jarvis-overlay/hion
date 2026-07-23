@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import SaleForm from '@/components/SaleForm';
 import StockTable from '@/components/StockTable';
+import ChannelSalesTable from '@/components/ChannelSalesTable';
 import HistoryList from '@/components/HistoryList';
 import CoupangSyncButton from '@/components/CoupangSyncButton';
 
@@ -39,7 +40,7 @@ export default async function StockPage() {
     .from('stock_movements')
     .select('*, products(name)')
     .like('external_ref', 'coupang-order:%')
-    .gte('created_at', startOfTodayKST().toISOString());
+    .gte('occurred_at', startOfTodayKST().toISOString());
 
   const salesByProduct: Record<
     string,
@@ -69,6 +70,20 @@ export default async function StockPage() {
     .order('created_at', { ascending: false })
     .limit(50);
 
+  // 채널별 판매 현황용 데이터 (전체 기간 누적)
+  const { data: salesRows } = await supabase
+    .from('stock_movements')
+    .select('product_id, channel, quantity')
+    .eq('type', 'out')
+    .not('channel', 'is', null);
+
+  const coupangStockByProduct: Record<string, number> = {};
+  for (const row of stockRows || []) {
+    if (row.warehouse === 'coupang') {
+      coupangStockByProduct[row.product_id] = row.quantity;
+    }
+  }
+
   return (
     <div>
       <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
@@ -81,6 +96,17 @@ export default async function StockPage() {
 
       <div className="mb-6">
         <StockTable products={products || []} stockRows={stockRows || []} />
+      </div>
+
+      <div className="mb-6">
+        <h2 className="font-display text-lg font-bold mb-3">
+          채널별 판매 현황 (누적)
+        </h2>
+        <ChannelSalesTable
+          products={products || []}
+          salesRows={salesRows || []}
+          coupangStockByProduct={coupangStockByProduct}
+        />
       </div>
 
       {coupangConnected && (

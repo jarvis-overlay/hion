@@ -65,7 +65,7 @@ export default function HistoryList({ movements }: { movements: any[] }) {
             {m.quantity}
           </span>
           <span className="text-[11px] text-inkSoft whitespace-nowrap">
-            {new Date(m.created_at).toLocaleDateString('ko-KR')}
+            {new Date(m.occurred_at || m.created_at).toLocaleDateString('ko-KR')}
           </span>
           {m.note && (
             <span className="text-xs text-inkSoft basis-full">{m.note}</span>

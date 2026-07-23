@@ -89,6 +89,87 @@ export async function fetchCoupangRGOrders({
   return { data: json.data || [], nextToken: json.nextToken };
 }
 
+export async function fetchCoupangProductList({
+  vendorId,
+  accessKey,
+  secretKey,
+  nextToken,
+}: {
+  vendorId: string;
+  accessKey: string;
+  secretKey: string;
+  nextToken?: string;
+}): Promise<{ data: any[]; nextToken?: string }> {
+  const path = `/v2/providers/seller_api/apis/api/v1/marketplace/seller-products`;
+  let query = `vendorId=${vendorId}&maxPerPage=100&status=APPROVED`;
+  if (nextToken) query += `&nextToken=${encodeURIComponent(nextToken)}`;
+
+  const authorization = buildAuthHeader(
+    'GET',
+    path,
+    query,
+    accessKey,
+    secretKey
+  );
+
+  const res = await proxiedFetch(`${HOST}${path}?${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: authorization,
+      'X-Requested-By': vendorId,
+      'Content-Type': 'application/json;charset=UTF-8',
+    },
+    cache: 'no-store',
+  });
+
+  const json = await res.json();
+  if (!res.ok || json.code !== 'SUCCESS') {
+    throw new Error(json?.message || `쿠팡 API 오류 (HTTP ${res.status})`);
+  }
+
+  return { data: json.data || [], nextToken: json.nextToken || undefined };
+}
+
+export async function fetchCoupangProductDetail({
+  vendorId,
+  accessKey,
+  secretKey,
+  sellerProductId,
+}: {
+  vendorId: string;
+  accessKey: string;
+  secretKey: string;
+  sellerProductId: string | number;
+}): Promise<any> {
+  const path = `/v2/providers/seller_api/apis/api/v1/marketplace/seller-products/${sellerProductId}`;
+  const query = '';
+
+  const authorization = buildAuthHeader(
+    'GET',
+    path,
+    query,
+    accessKey,
+    secretKey
+  );
+
+  const res = await proxiedFetch(`${HOST}${path}`, {
+    method: 'GET',
+    headers: {
+      Authorization: authorization,
+      'X-Requested-By': vendorId,
+      'Content-Type': 'application/json;charset=UTF-8',
+    },
+    cache: 'no-store',
+  });
+
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json?.message || `쿠팡 API 오류 (HTTP ${res.status})`);
+  }
+
+  return json;
+}
+
 export async function fetchCoupangInventoryForItem({
   vendorId,
   accessKey,

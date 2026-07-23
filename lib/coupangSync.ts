@@ -177,6 +177,7 @@ export async function runCoupangOrderSync(
             channel: 'coupang',
             amount: qty * Number(item.unitSalesPrice || 0),
             external_ref: externalRef,
+            occurred_at: new Date(Number(order.paidAt)).toISOString(),
             note: `쿠팡 판매 (${item.productName || ''})`,
             author_email: authorEmail,
           });
