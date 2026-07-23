@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import SaleForm from '@/components/SaleForm';
 import StockTable from '@/components/StockTable';
 import ChannelSalesTable from '@/components/ChannelSalesTable';
+import DailySalesHistory from '@/components/DailySalesHistory';
 import HistoryList from '@/components/HistoryList';
 import CoupangSyncButton from '@/components/CoupangSyncButton';
 
@@ -63,6 +64,15 @@ export default async function StockPage() {
   );
   const todayTotalAmount = todaySales.reduce((s, p) => s + p.amount, 0);
   const todayTotalQty = todaySales.reduce((s, p) => s + p.qty, 0);
+
+  // 일자별 판매 히스토리용 (최근 30일)
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const { data: dailySalesRows } = await supabase
+    .from('stock_movements')
+    .select('occurred_at, quantity, amount')
+    .like('external_ref', 'coupang-order:%')
+    .gte('occurred_at', thirtyDaysAgo.toISOString());
 
   const { data: movements } = await supabase
     .from('stock_movements')
@@ -147,6 +157,15 @@ export default async function StockPage() {
               오늘 아직 판매 동기화된 내역이 없어요.
             </p>
           )}
+        </div>
+      )}
+
+      {coupangConnected && (
+        <div className="mb-6">
+          <h2 className="font-display text-lg font-bold mb-3">
+            일자별 판매 히스토리 (쿠팡, 최근 30일)
+          </h2>
+          <DailySalesHistory rows={dailySalesRows || []} />
         </div>
       )}
 
