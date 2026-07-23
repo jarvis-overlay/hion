@@ -33,3 +33,12 @@ export async function deleteProduct(id: string) {
   await supabase.from('products').delete().eq('id', id);
   revalidatePath('/dashboard/inventory/products');
 }
+
+export async function updateCoupangMapping(id: string, vendorItemId: string) {
+  const supabase = createClient();
+  await supabase
+    .from('products')
+    .update({ coupang_vendor_item_id: vendorItemId.trim() || null })
+    .eq('id', id);
+  revalidatePath('/dashboard/inventory/products');
+}

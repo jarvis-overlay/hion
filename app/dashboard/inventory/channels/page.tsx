@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import CoupangCard from '@/components/CoupangCard';
 import NaverCard from '@/components/NaverCard';
+import CoupangSyncButton from '@/components/CoupangSyncButton';
 
 const COMING_SOON = [
   { name: '오늘의집' },
@@ -42,6 +43,12 @@ export default async function ChannelsPage() {
           </div>
         ))}
       </div>
+
+      {isConnected('coupang') && (
+        <div className="mt-4">
+          <CoupangSyncButton />
+        </div>
+      )}
     </div>
   );
 }
