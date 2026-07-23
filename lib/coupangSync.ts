@@ -103,7 +103,7 @@ export async function runCoupangOrderSync(
     .maybeSingle();
 
   if (!cred || !cred.connected || !cred.vendor_id) {
-    return { logged: 0, registered: 0, skipped: 0 };
+    return { logged: 0, registered: 0, skipped: 0, debug: 'no cred / not connected' };
   }
 
   const { data: products } = await supabase
@@ -145,9 +145,17 @@ export async function runCoupangOrderSync(
   let registered = 0;
   let skipped = 0;
   let lastError: string | undefined;
+  let rawOrderCount = 0;
+  const rangesTried: string[] = [];
+
+  const fmtDebug = (d: Date) =>
+    `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
+      d.getDate()
+    ).padStart(2, '0')}`;
 
   try {
     for (const range of ranges) {
+      rangesTried.push(`${fmtDebug(range.from)}~${fmtDebug(range.to)}`);
       let nextToken: string | undefined = undefined;
       do {
         const { data: orders, nextToken: next } = await fetchCoupangRGOrders({
@@ -159,6 +167,7 @@ export async function runCoupangOrderSync(
           nextToken,
         });
         nextToken = next;
+        rawOrderCount += orders.length;
 
         for (const order of orders) {
           for (const item of order.orderItems || []) {
@@ -223,10 +232,20 @@ export async function runCoupangOrderSync(
       } while (nextToken);
     }
   } catch (e: any) {
-    // 원인 파악을 위해 에러를 숨기지 않고 그대로 기록
     lastError = e?.message || String(e);
     console.error('runCoupangOrderSync error:', e);
   }
 
-  return { logged, registered, skipped, error: lastError };
+  return {
+    logged,
+    registered,
+    skipped,
+    error: lastError,
+    debug: {
+      vendorId: cred.vendor_id,
+      rangesTried,
+      rawOrderCount,
+      mappedProductCount: Object.keys(mapByVendorItem).length,
+    },
+  };
 }
