@@ -147,6 +147,8 @@ export async function runCoupangOrderSync(
   let lastError: string | undefined;
   let rawOrderCount = 0;
   const rangesTried: string[] = [];
+  let firstUpsertError: string | undefined;
+  let firstProductUpsertError: string | undefined;
 
   const fmtDebug = (d: Date) =>
     `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
@@ -176,7 +178,7 @@ export async function runCoupangOrderSync(
             const externalRef = `coupang-order:${order.orderId}:${vendorItemId}`;
 
             if (!productId) {
-              const { data: newProduct } = await supabase
+              const { data: newProduct, error: productError } = await supabase
                 .from('products')
                 .upsert(
                   {
@@ -190,6 +192,9 @@ export async function runCoupangOrderSync(
                 .select('id')
                 .single();
 
+              if (productError && !firstProductUpsertError) {
+                firstProductUpsertError = productError.message;
+              }
               if (!newProduct) continue;
               productId = newProduct.id;
               mapByVendorItem[vendorItemId] = productId;
@@ -219,6 +224,7 @@ export async function runCoupangOrderSync(
               .select();
 
             if (error) {
+              if (!firstUpsertError) firstUpsertError = error.message;
               continue;
             }
 
@@ -246,6 +252,8 @@ export async function runCoupangOrderSync(
       rangesTried,
       rawOrderCount,
       mappedProductCount: Object.keys(mapByVendorItem).length,
+      firstUpsertError,
+      firstProductUpsertError,
     },
   };
 }
