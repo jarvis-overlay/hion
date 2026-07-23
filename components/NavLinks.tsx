@@ -6,7 +6,10 @@ import { usePathname } from 'next/navigation';
 const GROUPS: { label: string | null; items: { href: string; label: string }[] }[] = [
   {
     label: null,
-    items: [{ href: '/dashboard/margin', label: '마진 계산기' }],
+    items: [
+      { href: '/dashboard', label: '홈' },
+      { href: '/dashboard/margin', label: '마진 계산기' },
+    ],
   },
   {
     label: '소싱',
@@ -36,7 +39,10 @@ export default function NavLinks() {
           {group.label && <div className="nav-section-label">{group.label}</div>}
           <div className="flex flex-col gap-0.5">
             {group.items.map((item) => {
-              const isActive = pathname?.startsWith(item.href);
+              const isActive =
+                item.href === '/dashboard'
+                  ? pathname === '/dashboard'
+                  : pathname?.startsWith(item.href);
               return (
                 <Link
                   key={item.href}

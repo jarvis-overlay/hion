@@ -10,8 +10,8 @@ export default async function Sidebar() {
 
   return (
     <aside className="w-60 shrink-0 h-screen sticky top-0 flex flex-col border-r border-paperLine bg-white">
-      <div className="px-5 py-6">
-        <img src="/logo.png" alt="HION HUB" className="h-7 w-auto object-contain" />
+      <div className="px-5 py-7">
+        <img src="/logo.png" alt="HION HUB" className="h-12 w-auto object-contain" />
       </div>
 
       <NavLinks />

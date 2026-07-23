@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { syncCoupangOrders } from '@/app/dashboard/inventory/channels/actions';
+import { syncCoupangInventory } from '@/app/dashboard/inventory/channels/actions';
 
 export default function CoupangSyncButton() {
   const [isPending, startTransition] = useTransition();
@@ -10,12 +10,12 @@ export default function CoupangSyncButton() {
   function handleSync() {
     setMessage(null);
     startTransition(async () => {
-      const result = await syncCoupangOrders();
+      const result = await syncCoupangInventory();
       if (result.error) {
         setMessage(`⚠️ ${result.error}`);
       } else {
         setMessage(
-          `반영 ${result.synced}건 · 이미 처리됨 ${result.skipped}건 · 매핑 안 된 상품 ${result.unmapped}건`
+          `변경 ${result.updated}건 · 변동없음 ${result.unchanged}건 · 실패 ${result.failed}건`
         );
       }
     });
@@ -23,11 +23,11 @@ export default function CoupangSyncButton() {
 
   return (
     <div className="card p-5">
-      <h3 className="font-display font-bold mb-2">주문 동기화</h3>
+      <h3 className="font-display font-bold mb-2">재고 동기화 (로켓그로스)</h3>
       <p className="text-xs text-inkSoft mb-3">
-        최근 7일간 결제완료된 쿠팡 주문을 가져와서 쿠팡 창고 재고에서 자동으로
-        차감해요. <b>상품 관리</b>에서 쿠팡 옵션ID(vendorItemId)를 등록해둔
-        상품만 매칭돼요.
+        쿠팡 로켓창고에 있는 실제 판매가능재고를 그대로 가져와서 쿠팡 창고
+        재고에 반영해요. <b>상품 관리</b>에서 쿠팡 옵션ID(vendorItemId)를
+        등록해둔 상품만 동기화돼요.
       </p>
       <button
         onClick={handleSync}

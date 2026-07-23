@@ -43,6 +43,51 @@ function buildAuthHeader(
   return `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${datetime}, signature=${signature}`;
 }
 
+export async function fetchCoupangInventoryForItem({
+  vendorId,
+  accessKey,
+  secretKey,
+  vendorItemId,
+}: {
+  vendorId: string;
+  accessKey: string;
+  secretKey: string;
+  vendorItemId: string;
+}): Promise<{ totalOrderableQuantity: number } | null> {
+  const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/inventory/summaries`;
+  const query = `vendorItemId=${vendorItemId}`;
+  const authorization = buildAuthHeader(
+    'GET',
+    path,
+    query,
+    accessKey,
+    secretKey
+  );
+
+  const res = await proxiedFetch(`${HOST}${path}?${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: authorization,
+      'X-Requested-By': vendorId,
+      'Content-Type': 'application/json;charset=UTF-8',
+    },
+    cache: 'no-store',
+  });
+
+  const json = await res.json();
+
+  if (!res.ok || json.code !== 200) {
+    throw new Error(json?.message || `쿠팡 API 오류 (HTTP ${res.status})`);
+  }
+
+  const entry = (json.data || [])[0];
+  if (!entry) return null;
+
+  return {
+    totalOrderableQuantity: entry.inventoryDetails?.totalOrderableQuantity ?? 0,
+  };
+}
+
 export async function fetchCoupangOrderSheets({
   vendorId,
   accessKey,

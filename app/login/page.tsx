@@ -20,7 +20,7 @@ export default function LoginPage() {
         <img
           src="/logo.png"
           alt="HION HUB"
-          className="h-9 w-auto object-contain mx-auto mb-6"
+          className="h-16 w-auto object-contain mx-auto mb-6"
         />
         <p className="text-sm text-inkSoft mb-8">
           마진 계산 · 소싱 · 재고 관리
