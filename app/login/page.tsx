@@ -17,9 +17,9 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
       <div className="card w-full max-w-sm p-8 text-center">
-        <h1 className="font-display text-2xl font-bold mb-1">소싱 허브</h1>
+        <h1 className="font-display text-2xl font-bold mb-1">HION HUB</h1>
         <p className="text-sm text-inkSoft mb-8">
-          소싱 정보 공유 &amp; 일정 관리
+          HION SYSTEM
         </p>
         <button
           onClick={signInWithGoogle}

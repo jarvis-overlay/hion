@@ -42,7 +42,7 @@ export default async function DashboardLayout({
   return (
     <>
       <Navbar />
-      <main className="max-w-4xl mx-auto px-5 py-8">{children}</main>
+      <main className="max-w-5xl mx-auto px-5 py-8">{children}</main>
     </>
   );
 }
