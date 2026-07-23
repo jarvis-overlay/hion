@@ -76,7 +76,6 @@ export async function runCoupangInventorySync(
           warehouse: 'coupang',
           type: newQty > prevQty ? 'in' : 'out',
           quantity: newQty - prevQty,
-          channel: 'coupang',
           note: `쿠팡 로켓창고 재고 동기화 (${prevQty} → ${newQty})`,
           author_email: authorEmail,
         });
@@ -155,34 +154,38 @@ export async function runCoupangOrderSync(
             continue;
           }
 
-          const { data: existing } = await supabase
-            .from('stock_movements')
-            .select('id')
-            .eq('external_ref', externalRef)
-            .maybeSingle();
-
-          if (existing) {
-            skipped++;
-            continue;
-          }
-
           const qty = Number(item.salesQuantity) || 0;
           if (qty <= 0) continue;
 
-          await supabase.from('stock_movements').insert({
-            product_id: productId,
-            warehouse: 'coupang',
-            type: 'out',
-            quantity: -qty,
-            channel: 'coupang',
-            amount: qty * Number(item.unitSalesPrice || 0),
-            external_ref: externalRef,
-            occurred_at: new Date(Number(order.paidAt)).toISOString(),
-            note: `쿠팡 판매 (${item.productName || ''})`,
-            author_email: authorEmail,
-          });
+          const { data: inserted, error } = await supabase
+            .from('stock_movements')
+            .upsert(
+              {
+                product_id: productId,
+                warehouse: 'coupang',
+                type: 'out',
+                quantity: -qty,
+                channel: 'coupang',
+                amount: qty * Number(item.unitSalesPrice || 0),
+                external_ref: externalRef,
+                occurred_at: new Date(Number(order.paidAt)).toISOString(),
+                note: `쿠팡 판매 (${item.productName || ''})`,
+                author_email: authorEmail,
+              },
+              { onConflict: 'external_ref', ignoreDuplicates: true }
+            )
+            .select();
 
-          logged++;
+          if (error) {
+            // 유니크 제약이 아직 없는 등 예기치 못한 오류 - 조용히 건너뜀
+            continue;
+          }
+
+          if (inserted && inserted.length > 0) {
+            logged++;
+          } else {
+            skipped++;
+          }
         }
       }
     } while (nextToken);
