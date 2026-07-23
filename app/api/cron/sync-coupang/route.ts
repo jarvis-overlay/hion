@@ -23,8 +23,8 @@ export async function GET(request: Request) {
   }
 
   const supabase = createAdminClient();
-  const stockResult = await runCoupangInventorySync(supabase, 'auto-sync@hion');
   const orderResult = await runCoupangOrderSync(supabase, 'auto-sync@hion');
+  const stockResult = await runCoupangInventorySync(supabase, 'auto-sync@hion');
 
   return NextResponse.json({ ...stockResult, ...orderResult });
 }

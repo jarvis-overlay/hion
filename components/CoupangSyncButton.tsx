@@ -19,7 +19,7 @@ export default function CoupangSyncButton({
         setMessage(`⚠️ ${result.error}`);
       } else {
         setMessage(
-          `재고 변경 ${result.updated ?? 0}건 · 판매기록 ${result.logged ?? 0}건 반영`
+          `신규 등록 ${result.registered ?? 0}개 · 재고 변경 ${result.updated ?? 0}건 · 판매기록 ${result.logged ?? 0}건`
         );
       }
     });
@@ -48,9 +48,8 @@ export default function CoupangSyncButton({
     <div className="card p-5">
       <h3 className="font-display font-bold mb-2">재고·판매 동기화 (쿠팡)</h3>
       <p className="text-xs text-inkSoft mb-3">
-        쿠팡 로켓창고의 실제 재고와, 오늘 판매된 상품 내역을 함께 가져와요.{' '}
-        <b>상품 관리</b>에서 쿠팡 옵션ID(vendorItemId)를 등록해둔 상품만
-        동기화돼요.
+        쿠팡 로켓창고의 실제 재고와 오늘 판매된 상품 내역을 가져와요. 우리
+        시스템에 없는 상품이 팔렸으면 <b>자동으로 상품 등록</b>까지 해줘요.
       </p>
       <button
         onClick={handleSync}

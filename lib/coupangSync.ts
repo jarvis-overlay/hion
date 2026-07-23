@@ -102,7 +102,7 @@ export async function runCoupangOrderSync(
     .maybeSingle();
 
   if (!cred || !cred.connected || !cred.vendor_id) {
-    return { logged: 0, unmapped: 0, skipped: 0 };
+    return { logged: 0, registered: 0, skipped: 0 };
   }
 
   const { data: products } = await supabase
@@ -127,7 +127,7 @@ export async function runCoupangOrderSync(
   from.setDate(from.getDate() - 1);
 
   let logged = 0;
-  let unmapped = 0;
+  let registered = 0;
   let skipped = 0;
 
   try {
@@ -146,12 +146,26 @@ export async function runCoupangOrderSync(
       for (const order of orders) {
         for (const item of order.orderItems || []) {
           const vendorItemId = String(item.vendorItemId);
-          const productId = mapByVendorItem[vendorItemId];
+          let productId = mapByVendorItem[vendorItemId];
           const externalRef = `coupang-order:${order.orderId}:${vendorItemId}`;
 
+          // 우리 시스템에 없는 상품이면 자동으로 새로 등록
           if (!productId) {
-            unmapped++;
-            continue;
+            const { data: newProduct } = await supabase
+              .from('products')
+              .insert({
+                name: item.productName || `쿠팡 상품 (${vendorItemId})`,
+                coupang_vendor_item_id: vendorItemId,
+                author_email: authorEmail,
+                notes: '쿠팡 판매 동기화 중 자동 등록됨',
+              })
+              .select('id')
+              .single();
+
+            if (!newProduct) continue;
+            productId = newProduct.id;
+            mapByVendorItem[vendorItemId] = productId;
+            registered++;
           }
 
           const qty = Number(item.salesQuantity) || 0;
@@ -193,5 +207,5 @@ export async function runCoupangOrderSync(
     // 재고 동기화는 이미 끝났으니, 판매내역 조회 실패는 조용히 무시
   }
 
-  return { logged, unmapped, skipped };
+  return { logged, registered, skipped };
 }

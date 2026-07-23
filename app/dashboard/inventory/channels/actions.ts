@@ -78,10 +78,11 @@ export async function syncCoupangInventory() {
   } = await supabase.auth.getUser();
   if (!user) return { error: '로그인이 필요해요.' };
 
-  const stockResult = await runCoupangInventorySync(supabase, user.email!);
-  if (stockResult.error) return stockResult;
-
+  // 판매 동기화를 먼저 실행 - 우리 시스템에 없는 상품이 팔렸으면 자동으로 등록
   const orderResult = await runCoupangOrderSync(supabase, user.email!);
+
+  // 그 다음 재고 동기화 - 방금 자동등록된 상품 재고도 바로 반영됨
+  const stockResult = await runCoupangInventorySync(supabase, user.email!);
 
   revalidatePath('/dashboard/inventory/stock');
   revalidatePath('/dashboard');
