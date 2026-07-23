@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'HION HUB',
-  description: 'HION SYSTEM',
+  description: '마진 계산 · 소싱 · 재고 관리',
 };
 
 export default function RootLayout({

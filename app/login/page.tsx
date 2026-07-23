@@ -15,11 +15,15 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
+    <main className="flex min-h-screen items-center justify-center px-4 bg-[#F7F8FA]">
       <div className="card w-full max-w-sm p-8 text-center">
-        <h1 className="font-display text-2xl font-bold mb-1">HION HUB</h1>
+        <img
+          src="/logo.png"
+          alt="HION HUB"
+          className="h-9 w-auto object-contain mx-auto mb-6"
+        />
         <p className="text-sm text-inkSoft mb-8">
-          HION SYSTEM
+          마진 계산 · 소싱 · 재고 관리
         </p>
         <button
           onClick={signInWithGoogle}

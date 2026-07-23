@@ -24,7 +24,7 @@ export default async function DashboardLayout({
 
   if (!allowed) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4">
+      <main className="flex min-h-screen items-center justify-center px-4 bg-[#F7F8FA]">
         <div className="card max-w-sm p-8 text-center">
           <h1 className="font-display text-xl font-bold mb-2">
             접근 권한이 없어요
@@ -40,9 +40,9 @@ export default async function DashboardLayout({
   }
 
   return (
-    <>
+    <div className="flex min-h-screen bg-white">
       <Navbar />
-      <main className="max-w-5xl mx-auto px-5 py-8">{children}</main>
-    </>
+      <main className="flex-1 min-w-0 px-8 py-8 max-w-5xl">{children}</main>
+    </div>
   );
 }
