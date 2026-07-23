@@ -33,6 +33,9 @@ export default async function Navbar() {
             <Link href="/dashboard/inventory/stock" className="hover:underline">
               재고 현황
             </Link>
+            <Link href="/dashboard/inventory/channels" className="hover:underline">
+              채널 연동
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-3 text-xs text-inkSoft">
