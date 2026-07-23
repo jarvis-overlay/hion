@@ -144,6 +144,7 @@ export async function runCoupangOrderSync(
   let logged = 0;
   let registered = 0;
   let skipped = 0;
+  let lastError: string | undefined;
 
   try {
     for (const range of ranges) {
@@ -221,9 +222,11 @@ export async function runCoupangOrderSync(
         }
       } while (nextToken);
     }
-  } catch (e) {
-    // 재고 동기화는 이미 끝났으니, 판매내역 조회 실패는 조용히 무시
+  } catch (e: any) {
+    // 원인 파악을 위해 에러를 숨기지 않고 그대로 기록
+    lastError = e?.message || String(e);
+    console.error('runCoupangOrderSync error:', e);
   }
 
-  return { logged, registered, skipped };
+  return { logged, registered, skipped, error: lastError };
 }
