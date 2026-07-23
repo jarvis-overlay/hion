@@ -43,6 +43,52 @@ function buildAuthHeader(
   return `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${datetime}, signature=${signature}`;
 }
 
+export async function fetchCoupangRGOrders({
+  vendorId,
+  accessKey,
+  secretKey,
+  paidDateFrom,
+  paidDateTo,
+  nextToken,
+}: {
+  vendorId: string;
+  accessKey: string;
+  secretKey: string;
+  paidDateFrom: string; // yyyymmdd
+  paidDateTo: string; // yyyymmdd
+  nextToken?: string;
+}): Promise<{ data: any[]; nextToken?: string }> {
+  const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/orders`;
+  let query = `paidDateFrom=${paidDateFrom}&paidDateTo=${paidDateTo}`;
+  if (nextToken) query += `&nextToken=${encodeURIComponent(nextToken)}`;
+
+  const authorization = buildAuthHeader(
+    'GET',
+    path,
+    query,
+    accessKey,
+    secretKey
+  );
+
+  const res = await proxiedFetch(`${HOST}${path}?${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: authorization,
+      'X-Requested-By': vendorId,
+      'Content-Type': 'application/json;charset=UTF-8',
+    },
+    cache: 'no-store',
+  });
+
+  const json = await res.json();
+
+  if (!res.ok || json.code !== 200) {
+    throw new Error(json?.message || `쿠팡 API 오류 (HTTP ${res.status})`);
+  }
+
+  return { data: json.data || [], nextToken: json.nextToken };
+}
+
 export async function fetchCoupangInventoryForItem({
   vendorId,
   accessKey,

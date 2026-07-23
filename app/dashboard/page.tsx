@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import CoupangSyncButton from '@/components/CoupangSyncButton';
 
 const CHANNEL_LABEL: Record<string, string> = {
   coupang: '쿠팡',
@@ -58,7 +59,10 @@ export default async function DashboardHome() {
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-bold mb-1">대시보드</h1>
+      <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
+        <h1 className="font-display text-2xl font-bold">대시보드</h1>
+        {isConnected('coupang') && <CoupangSyncButton compact />}
+      </div>
       <p className="text-sm text-inkSoft mb-6">전체 현황 한눈에 보기</p>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
