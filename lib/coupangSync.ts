@@ -150,15 +150,20 @@ export async function runCoupangOrderSync(
           const externalRef = `coupang-order:${order.orderId}:${vendorItemId}`;
 
           // 우리 시스템에 없는 상품이면 자동으로 새로 등록
+          // (upsert로 처리해서, 다른 동기화가 거의 동시에 같은 상품을 등록해도
+          //  중복 생성되지 않고 기존 것을 그대로 사용하게 됨)
           if (!productId) {
             const { data: newProduct } = await supabase
               .from('products')
-              .insert({
-                name: item.productName || `쿠팡 상품 (${vendorItemId})`,
-                coupang_vendor_item_id: vendorItemId,
-                author_email: authorEmail,
-                notes: '쿠팡 판매 동기화 중 자동 등록됨',
-              })
+              .upsert(
+                {
+                  name: item.productName || `쿠팡 상품 (${vendorItemId})`,
+                  coupang_vendor_item_id: vendorItemId,
+                  author_email: authorEmail,
+                  notes: '쿠팡 판매 동기화 중 자동 등록됨',
+                },
+                { onConflict: 'coupang_vendor_item_id' }
+              )
               .select('id')
               .single();
 
