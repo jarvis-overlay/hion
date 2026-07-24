@@ -1,4 +1,8 @@
-import { fetchCoupangInventoryForItem, fetchCoupangRGOrders } from '@/lib/coupang';
+import {
+  fetchCoupangInventoryForItem,
+  fetchCoupangRGOrders,
+  fetchCoupangProductDetail,
+} from '@/lib/coupang';
 
 export async function runCoupangInventorySync(
   supabase: any,
@@ -100,6 +104,61 @@ export async function runCoupangInventorySync(
   return { updated, unchanged, failed };
 }
 
+// 상품 정식 등록 기준:
+// 1) 로켓그로스 주문 (rg/orders API 자체가 로켓그로스 전용이라 이 함수를 타는 시점에 이미 충족됨)
+// 2) 품절이 아닐 것 (현재 주문가능재고 > 0)
+// 3) 바코드가 등록되어 있을 것
+// 위 조건을 만족하지 못하면 신규 상품으로 등록하지 않고 해당 판매 기록도 건너뛴다.
+async function isQualifiedForAutoRegister({
+  cred,
+  vendorItemId,
+  sellerProductId,
+}: {
+  cred: any;
+  vendorItemId: string;
+  sellerProductId?: string | number;
+}): Promise<{ ok: boolean; reason?: string }> {
+  // 2) 재고 확인
+  try {
+    const inv = await fetchCoupangInventoryForItem({
+      vendorId: cred.vendor_id,
+      accessKey: cred.access_key,
+      secretKey: cred.secret_key,
+      vendorItemId,
+    });
+    if (!inv || inv.totalOrderableQuantity <= 0) {
+      return { ok: false, reason: 'out_of_stock' };
+    }
+  } catch (e: any) {
+    return { ok: false, reason: `inventory_check_failed:${e?.message || e}` };
+  }
+
+  // 3) 바코드 확인 (sellerProductId가 있어야 상세조회 가능)
+  if (!sellerProductId) {
+    return { ok: false, reason: 'no_seller_product_id' };
+  }
+  try {
+    const detail = await fetchCoupangProductDetail({
+      vendorId: cred.vendor_id,
+      accessKey: cred.access_key,
+      secretKey: cred.secret_key,
+      sellerProductId,
+    });
+    const items = detail?.items || detail?.data?.items || [];
+    const matched = items.find(
+      (it: any) => String(it.vendorItemId) === String(vendorItemId)
+    );
+    const barcode = matched?.barcode || matched?.barCode || matched?.bar_code;
+    if (!barcode) {
+      return { ok: false, reason: 'no_barcode' };
+    }
+  } catch (e: any) {
+    return { ok: false, reason: `barcode_check_failed:${e?.message || e}` };
+  }
+
+  return { ok: true };
+}
+
 export async function runCoupangOrderSync(
   supabase: any,
   authorEmail: string,
@@ -148,11 +207,14 @@ export async function runCoupangOrderSync(
   let logged = 0;
   let registered = 0;
   let skipped = 0;
+  let disqualified = 0;
   let lastError: string | undefined;
   let rawOrderCount = 0;
   let firstUpsertError: string | undefined;
   let firstProductUpsertError: string | undefined;
   const rangesTried: string[] = [];
+  const disqualifiedReasons: Record<string, number> = {};
+  let sampleOrderItemKeys: string[] | undefined;
 
   try {
     for (const range of ranges) {
@@ -178,7 +240,26 @@ export async function runCoupangOrderSync(
             const productName =
               item.productName || `쿠팡 상품 (${vendorItemId})`;
 
+            if (!sampleOrderItemKeys) {
+              sampleOrderItemKeys = Object.keys(item);
+            }
+
             if (!productId) {
+              // 아직 매핑 안 된 옵션ID 발견 - 정식 등록 기준(재고 있음 + 바코드 존재)부터 확인
+              const qualification = await isQualifiedForAutoRegister({
+                cred,
+                vendorItemId,
+                sellerProductId: item.sellerProductId,
+              });
+
+              if (!qualification.ok) {
+                disqualified++;
+                const reason = qualification.reason || 'unknown';
+                disqualifiedReasons[reason] =
+                  (disqualifiedReasons[reason] || 0) + 1;
+                continue; // 기준 미달 - 등록도 안 하고 판매기록도 안 남김
+              }
+
               // 옵션ID는 처음 보지만, 이름이 같은 상품이 이미 있으면
               // (판매자배송/로켓그로스 등 같은 상품의 다른 옵션ID인 경우)
               // 새 상품을 만들지 않고 기존 상품에 옵션ID만 추가로 매핑한다.
@@ -196,7 +277,7 @@ export async function runCoupangOrderSync(
                   .insert({
                     name: productName,
                     author_email: authorEmail,
-                    notes: '쿠팡 판매 동기화 중 자동 등록됨',
+                    notes: '쿠팡 판매 동기화 중 자동 등록됨 (로켓그로스·재고있음·바코드확인)',
                   })
                   .select('id')
                   .single();
@@ -268,6 +349,7 @@ export async function runCoupangOrderSync(
     logged,
     registered,
     skipped,
+    disqualified,
     error: lastError,
     debug: {
       vendorId: cred.vendor_id,
@@ -276,6 +358,8 @@ export async function runCoupangOrderSync(
       mappedProductCount: Object.keys(mapByVendorItem).length,
       firstUpsertError,
       firstProductUpsertError,
+      disqualifiedReasons,
+      sampleOrderItemKeys,
     },
   };
 }

@@ -12,6 +12,7 @@ export default function StockTable({
 }) {
   const [hideOutOfStock, setHideOutOfStock] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const stockByProduct: Record<string, { coupang: number; own: number }> = {};
   for (const p of products) {
@@ -36,6 +37,30 @@ export default function StockTable({
   });
   const hiddenCount = products.length - visibleProducts.length;
 
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selected.size === visibleProducts.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(visibleProducts.map((p) => p.id)));
+    }
+  };
+
+  const bulkHide = async (hide: boolean) => {
+    for (const id of selected) {
+      await toggleProductVisibility(id, hide);
+    }
+    setSelected(new Set());
+  };
+
   return (
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-paperLine flex-wrap gap-2">
@@ -57,13 +82,44 @@ export default function StockTable({
             숨긴 상품도 보기
           </label>
         </div>
-        {hiddenCount > 0 && (
-          <span className="text-xs text-inkSoft">{hiddenCount}개 숨김</span>
-        )}
+        <div className="flex items-center gap-3">
+          {selected.size > 0 && (
+            <>
+              <span className="text-xs text-inkSoft">
+                {selected.size}개 선택됨
+              </span>
+              <button
+                onClick={() => bulkHide(true)}
+                className="text-xs px-2.5 py-1 rounded-full border border-paperLine text-inkSoft hover:text-ink"
+              >
+                선택 숨기기
+              </button>
+              <button
+                onClick={() => bulkHide(false)}
+                className="text-xs px-2.5 py-1 rounded-full border border-paperLine text-inkSoft hover:text-ink"
+              >
+                선택 보이기
+              </button>
+            </>
+          )}
+          {hiddenCount > 0 && (
+            <span className="text-xs text-inkSoft">{hiddenCount}개 숨김</span>
+          )}
+        </div>
       </div>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b-2 border-ink text-xs text-inkSoft uppercase tracking-wide">
+            <th className="text-left py-2 px-4 w-8">
+              <input
+                type="checkbox"
+                checked={
+                  visibleProducts.length > 0 &&
+                  selected.size === visibleProducts.length
+                }
+                onChange={toggleSelectAll}
+              />
+            </th>
             <th className="text-left py-2 px-4">상품</th>
             <th className="text-right py-2 px-4">쿠팡 창고</th>
             <th className="text-right py-2 px-4">자사 물류창고</th>
@@ -78,8 +134,17 @@ export default function StockTable({
             return (
               <tr
                 key={p.id}
-                className={`border-b border-paperLine last:border-0 ${p.is_hidden ? 'opacity-50' : ''}`}
+                className={`border-b border-paperLine last:border-0 ${
+                  p.is_hidden ? 'opacity-50' : ''
+                }`}
               >
+                <td className="py-2 px-4">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(p.id)}
+                    onChange={() => toggleSelected(p.id)}
+                  />
+                </td>
                 <td className="py-2 px-4 font-medium">{p.name}</td>
                 <td
                   className={`py-2 px-4 text-right font-mono ${
@@ -95,11 +160,13 @@ export default function StockTable({
                 >
                   {s.own}
                 </td>
-                <td className="py-2 px-4 text-right font-mono font-bold">{total}</td>
+                <td className="py-2 px-4 text-right font-mono font-bold">
+                  {total}
+                </td>
                 <td className="py-2 px-4 text-right">
                   <button
                     onClick={() => toggleProductVisibility(p.id, !p.is_hidden)}
-                    className="text-xs underline text-inkSoft hover:text-ink"
+                    className="text-xs underline text-inkSoft hover:text-ink whitespace-nowrap"
                   >
                     {p.is_hidden ? '다시 보이기' : '숨기기'}
                   </button>
@@ -109,7 +176,7 @@ export default function StockTable({
           })}
           {!visibleProducts.length && (
             <tr>
-              <td colSpan={5} className="py-4 px-4 text-center text-inkSoft">
+              <td colSpan={6} className="py-4 px-4 text-center text-inkSoft">
                 {products.length
                   ? '표시할 상품이 없어요.'
                   : '등록된 상품이 없어요.'}
