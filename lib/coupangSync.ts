@@ -142,6 +142,7 @@ export async function syncCoupangProductCatalog(
   const disqualifiedReasons: Record<string, number> = {};
   let sampleDetailKeys: string[] | undefined;
   let sampleItemKeys: string[] | undefined;
+  let sampleItemRaw: string | undefined;
 
   try {
     let nextToken: string | undefined = undefined;
@@ -175,7 +176,10 @@ export async function syncCoupangProductCatalog(
         const detailData = detail?.data || detail || {};
         const items = detailData.items || [];
         if (!sampleDetailKeys) sampleDetailKeys = Object.keys(detailData);
-        if (!sampleItemKeys && items[0]) sampleItemKeys = Object.keys(items[0]);
+        if (!sampleItemKeys && items[0]) {
+          sampleItemKeys = Object.keys(items[0]);
+          sampleItemRaw = JSON.stringify(items[0]).slice(0, 3000);
+        }
 
         let productRowId: string | undefined;
 
@@ -274,7 +278,7 @@ export async function syncCoupangProductCatalog(
     createdProducts,
     mappedVendorItems,
     error: lastError,
-    debug: { sampleDetailKeys, sampleItemKeys },
+    debug: { sampleDetailKeys, sampleItemKeys, sampleItemRaw },
   };
 }
 
