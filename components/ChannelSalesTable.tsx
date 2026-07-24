@@ -48,7 +48,7 @@ export default function ChannelSalesTable({
   salesRows: any[]; // product_id, channel, quantity, occurred_at
   coupangStockByProduct: Record<string, number>;
 }) {
-  const [range, setRange] = useState<RangeKey>('all');
+  const [range, setRange] = useState<RangeKey>('today');
   const [showHidden, setShowHidden] = useState(false);
 
   const cutoff = cutoffFor(range);
