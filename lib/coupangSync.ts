@@ -146,6 +146,9 @@ export async function syncCoupangProductCatalog(
   let sampleItemCertifications: string | undefined;
   let sampleItemContents: string | undefined;
   let sampleItemSearchTags: string | undefined;
+  let sampleRocketGrowthItemData: string | undefined;
+  let sampleMarketplaceItemData: string | undefined;
+  let sampleRocketGrowthAdditionalInfo: string | undefined;
 
   try {
     let nextToken: string | undefined = undefined;
@@ -190,6 +193,15 @@ export async function syncCoupangProductCatalog(
             1500
           );
           sampleItemSearchTags = JSON.stringify(items[0].searchTags ?? null);
+          sampleRocketGrowthItemData = JSON.stringify(
+            items[0].rocketGrowthItemData ?? null
+          );
+          sampleMarketplaceItemData = JSON.stringify(
+            items[0].marketplaceItemData ?? null
+          );
+          sampleRocketGrowthAdditionalInfo = JSON.stringify(
+            detailData.rocketGrowthAdditionalInformation ?? null
+          );
         }
 
         let productRowId: string | undefined;
@@ -197,7 +209,13 @@ export async function syncCoupangProductCatalog(
         for (const item of items) {
           scannedItems++;
           const vendorItemId = String(item.vendorItemId);
-          const barcode = item.barcode || item.barCode || item.bar_code;
+          // 쿠팡은 바코드를 items[].barcode 같은 단독 필드가 아니라
+          // attributes 배열 안에 "Global Trade Item Number"(GTIN)라는
+          // 이름의 속성으로 담아준다. 실측 데이터로 확인한 실제 위치.
+          const gtinAttr = (item.attributes || []).find(
+            (a: any) => a.attributeTypeName === 'Global Trade Item Number'
+          );
+          const barcode = gtinAttr?.attributeValueName?.trim();
 
           if (!barcode) {
             disqualified++;
@@ -296,6 +314,9 @@ export async function syncCoupangProductCatalog(
       sampleItemCertifications,
       sampleItemContents,
       sampleItemSearchTags,
+      sampleRocketGrowthItemData,
+      sampleMarketplaceItemData,
+      sampleRocketGrowthAdditionalInfo,
     },
   };
 }
