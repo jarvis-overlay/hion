@@ -209,10 +209,20 @@ export async function syncCoupangProductCatalog(
 
         for (const item of items) {
           scannedItems++;
-          const vendorItemId = String(item.vendorItemId);
-          // 실측 확인 결과: 쿠팡은 로켓그로스 상품의 실제 "상품 바코드"를
-          // item.attributes의 GTIN이 아니라 item.rocketGrowthItemData.barcode에 담아준다.
-          const barcode = item.rocketGrowthItemData?.barcode?.trim();
+
+          // 로켓그로스 데이터가 없는 옵션(=판매자배송 전용)은 기준(로켓그로스)에서
+          // 애초에 제외한다. vendorItemId/barcode 둘 다 여기 안에 들어있다
+          // (item 최상위가 아니라 rocketGrowthItemData 안에 있다는 걸 실측으로 확인).
+          const rgData = item.rocketGrowthItemData;
+          if (!rgData || !rgData.vendorItemId) {
+            disqualified++;
+            disqualifiedReasons['not_rocket_growth'] =
+              (disqualifiedReasons['not_rocket_growth'] || 0) + 1;
+            continue;
+          }
+
+          const vendorItemId = String(rgData.vendorItemId);
+          const barcode = rgData.barcode?.trim();
 
           if (!barcode) {
             disqualified++;
