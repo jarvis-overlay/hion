@@ -81,10 +81,11 @@ export default async function StockPage() {
     .order('created_at', { ascending: false })
     .limit(50);
 
-  // 채널별 판매 현황용 데이터 (전체 기간 누적)
+  // 채널별 판매 현황용 데이터 (전체 기간 누적 - occurred_at 포함해서
+  // 클라이언트에서 오늘/7일/30일/전체 필터링에 사용)
   const { data: salesRows } = await supabase
     .from('stock_movements')
-    .select('product_id, channel, quantity')
+    .select('product_id, channel, quantity, occurred_at')
     .eq('type', 'out')
     .not('channel', 'is', null);
 
@@ -111,7 +112,7 @@ export default async function StockPage() {
 
       <div className="mb-6">
         <h2 className="font-display text-lg font-bold mb-3">
-          채널별 판매 현황 (누적)
+          채널별 판매 현황
         </h2>
         <ChannelSalesTable
           products={products || []}
