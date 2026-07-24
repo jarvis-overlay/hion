@@ -142,7 +142,10 @@ export async function syncCoupangProductCatalog(
   const disqualifiedReasons: Record<string, number> = {};
   let sampleDetailKeys: string[] | undefined;
   let sampleItemKeys: string[] | undefined;
-  let sampleItemRaw: string | undefined;
+  let sampleItemAttributes: string | undefined;
+  let sampleItemCertifications: string | undefined;
+  let sampleItemContents: string | undefined;
+  let sampleItemSearchTags: string | undefined;
 
   try {
     let nextToken: string | undefined = undefined;
@@ -178,7 +181,15 @@ export async function syncCoupangProductCatalog(
         if (!sampleDetailKeys) sampleDetailKeys = Object.keys(detailData);
         if (!sampleItemKeys && items[0]) {
           sampleItemKeys = Object.keys(items[0]);
-          sampleItemRaw = JSON.stringify(items[0]).slice(0, 3000);
+          sampleItemAttributes = JSON.stringify(items[0].attributes ?? null);
+          sampleItemCertifications = JSON.stringify(
+            items[0].certifications ?? null
+          );
+          sampleItemContents = JSON.stringify(items[0].contents ?? null).slice(
+            0,
+            1500
+          );
+          sampleItemSearchTags = JSON.stringify(items[0].searchTags ?? null);
         }
 
         let productRowId: string | undefined;
@@ -278,7 +289,14 @@ export async function syncCoupangProductCatalog(
     createdProducts,
     mappedVendorItems,
     error: lastError,
-    debug: { sampleDetailKeys, sampleItemKeys, sampleItemRaw },
+    debug: {
+      sampleDetailKeys,
+      sampleItemKeys,
+      sampleItemAttributes,
+      sampleItemCertifications,
+      sampleItemContents,
+      sampleItemSearchTags,
+    },
   };
 }
 
