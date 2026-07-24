@@ -139,6 +139,7 @@ export async function syncCoupangProductCatalog(
   let createdProducts = 0;
   let mappedVendorItems = 0;
   let lastError: string | undefined;
+  let firstInventoryCheckError: string | undefined;
   const disqualifiedReasons: Record<string, number> = {};
   let sampleDetailKeys: string[] | undefined;
   let sampleItemKeys: string[] | undefined;
@@ -229,8 +230,11 @@ export async function syncCoupangProductCatalog(
               vendorItemId,
             });
             stockQty = inv?.totalOrderableQuantity ?? 0;
-          } catch {
+          } catch (e: any) {
             stockQty = 0;
+            if (!firstInventoryCheckError) {
+              firstInventoryCheckError = e?.message || String(e);
+            }
           }
 
           if (stockQty <= 0) {
@@ -304,6 +308,7 @@ export async function syncCoupangProductCatalog(
     mappedVendorItems,
     error: lastError,
     debug: {
+      firstInventoryCheckError,
       sampleDetailKeys,
       sampleItemKeys,
       sampleItemAttributes,
