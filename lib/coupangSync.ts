@@ -16,42 +16,51 @@ export async function runCoupangInventorySync(
     };
   }
 
-  const { data: products } = await supabase
-    .from('products')
-    .select('id, name, coupang_vendor_item_id')
-    .not('coupang_vendor_item_id', 'is', null);
+  // 상품 1개에 여러 옵션ID(vendorItemId)가 매핑될 수 있으므로
+  // product_vendor_items 테이블 기준으로 조회하고, 상품별로 그룹핑해서
+  // 재고를 합산한다 (판매자배송/로켓그로스 등 옵션ID가 여러 개인 경우 대응).
+  const { data: mappings } = await supabase
+    .from('product_vendor_items')
+    .select('product_id, vendor_item_id');
 
-  if (!products || products.length === 0) {
+  if (!mappings || mappings.length === 0) {
     return {
       error:
         '쿠팡 옵션ID(vendorItemId)가 등록된 상품이 없어요. 상품 관리에서 먼저 등록해줘.',
     };
   }
 
+  const vendorItemsByProduct: Record<string, string[]> = {};
+  for (const m of mappings) {
+    if (!vendorItemsByProduct[m.product_id]) {
+      vendorItemsByProduct[m.product_id] = [];
+    }
+    vendorItemsByProduct[m.product_id].push(m.vendor_item_id);
+  }
+
   let updated = 0;
   let unchanged = 0;
   let failed = 0;
 
-  for (const product of products) {
+  for (const [productId, vendorItemIds] of Object.entries(
+    vendorItemsByProduct
+  )) {
     try {
-      const result = await fetchCoupangInventoryForItem({
-        vendorId: cred.vendor_id,
-        accessKey: cred.access_key,
-        secretKey: cred.secret_key,
-        vendorItemId: String(product.coupang_vendor_item_id),
-      });
-
-      if (!result) {
-        failed++;
-        continue;
+      let totalQty = 0;
+      for (const vendorItemId of vendorItemIds) {
+        const result = await fetchCoupangInventoryForItem({
+          vendorId: cred.vendor_id,
+          accessKey: cred.access_key,
+          secretKey: cred.secret_key,
+          vendorItemId: String(vendorItemId),
+        });
+        if (result) totalQty += result.totalOrderableQuantity;
       }
-
-      const newQty = result.totalOrderableQuantity;
 
       const { data: stockRow } = await supabase
         .from('warehouse_stock')
         .select('id, quantity')
-        .eq('product_id', product.id)
+        .eq('product_id', productId)
         .eq('warehouse', 'coupang')
         .maybeSingle();
 
@@ -60,23 +69,23 @@ export async function runCoupangInventorySync(
       if (stockRow) {
         await supabase
           .from('warehouse_stock')
-          .update({ quantity: newQty })
+          .update({ quantity: totalQty })
           .eq('id', stockRow.id);
       } else {
         await supabase.from('warehouse_stock').insert({
-          product_id: product.id,
+          product_id: productId,
           warehouse: 'coupang',
-          quantity: newQty,
+          quantity: totalQty,
         });
       }
 
-      if (newQty !== prevQty) {
+      if (totalQty !== prevQty) {
         await supabase.from('stock_movements').insert({
-          product_id: product.id,
+          product_id: productId,
           warehouse: 'coupang',
-          type: newQty > prevQty ? 'in' : 'out',
-          quantity: newQty - prevQty,
-          note: `쿠팡 로켓창고 재고 동기화 (${prevQty} → ${newQty})`,
+          type: totalQty > prevQty ? 'in' : 'out',
+          quantity: totalQty - prevQty,
+          note: `쿠팡 로켓창고 재고 동기화 (${prevQty} → ${totalQty})`,
           author_email: authorEmail,
         });
         updated++;
@@ -94,7 +103,7 @@ export async function runCoupangInventorySync(
 export async function runCoupangOrderSync(
   supabase: any,
   authorEmail: string,
-  daysBack: number = 2 // 기본 2일. 과거분 백필할 땐 크게 넘겨서 호출 (예: 30)
+  daysBack: number = 2
 ) {
   const { data: cred } = await supabase
     .from('channel_credentials')
@@ -106,16 +115,13 @@ export async function runCoupangOrderSync(
     return { logged: 0, registered: 0, skipped: 0, debug: 'no cred / not connected' };
   }
 
-  const { data: products } = await supabase
-    .from('products')
-    .select('id, coupang_vendor_item_id')
-    .not('coupang_vendor_item_id', 'is', null);
+  const { data: mappings } = await supabase
+    .from('product_vendor_items')
+    .select('product_id, vendor_item_id');
 
   const mapByVendorItem: Record<string, string> = {};
-  for (const p of products || []) {
-    if (p.coupang_vendor_item_id) {
-      mapByVendorItem[String(p.coupang_vendor_item_id)] = p.id;
-    }
+  for (const m of mappings || []) {
+    mapByVendorItem[String(m.vendor_item_id)] = m.product_id;
   }
 
   const fmt = (d: Date) =>
@@ -123,9 +129,7 @@ export async function runCoupangOrderSync(
       d.getDate()
     ).padStart(2, '0')}`;
 
-  // 쿠팡 rg/orders API는 조회 기간이 최대 31일로 제한돼 있어서,
-  // daysBack이 그보다 크면 여러 구간으로 나눠서 순차 조회함
-  const MAX_RANGE_DAYS = 31;
+  const MAX_RANGE_DAYS = 30;
   const today = new Date();
   const ranges: { from: Date; to: Date }[] = [];
   let remaining = daysBack;
@@ -146,18 +150,13 @@ export async function runCoupangOrderSync(
   let skipped = 0;
   let lastError: string | undefined;
   let rawOrderCount = 0;
-  const rangesTried: string[] = [];
   let firstUpsertError: string | undefined;
   let firstProductUpsertError: string | undefined;
-
-  const fmtDebug = (d: Date) =>
-    `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
-      d.getDate()
-    ).padStart(2, '0')}`;
+  const rangesTried: string[] = [];
 
   try {
     for (const range of ranges) {
-      rangesTried.push(`${fmtDebug(range.from)}~${fmtDebug(range.to)}`);
+      rangesTried.push(`${fmt(range.from)}~${fmt(range.to)}`);
       let nextToken: string | undefined = undefined;
       do {
         const { data: orders, nextToken: next } = await fetchCoupangRGOrders({
@@ -176,29 +175,52 @@ export async function runCoupangOrderSync(
             const vendorItemId = String(item.vendorItemId);
             let productId = mapByVendorItem[vendorItemId];
             const externalRef = `coupang-order:${order.orderId}:${vendorItemId}`;
+            const productName =
+              item.productName || `쿠팡 상품 (${vendorItemId})`;
 
             if (!productId) {
-              const { data: newProduct, error: productError } = await supabase
+              // 옵션ID는 처음 보지만, 이름이 같은 상품이 이미 있으면
+              // (판매자배송/로켓그로스 등 같은 상품의 다른 옵션ID인 경우)
+              // 새 상품을 만들지 않고 기존 상품에 옵션ID만 추가로 매핑한다.
+              const { data: existingByName } = await supabase
                 .from('products')
-                .upsert(
-                  {
-                    name: item.productName || `쿠팡 상품 (${vendorItemId})`,
-                    coupang_vendor_item_id: vendorItemId,
+                .select('id')
+                .eq('name', productName)
+                .maybeSingle();
+
+              let targetProductId = existingByName?.id;
+
+              if (!targetProductId) {
+                const { data: newProduct, error: productError } = await supabase
+                  .from('products')
+                  .insert({
+                    name: productName,
                     author_email: authorEmail,
                     notes: '쿠팡 판매 동기화 중 자동 등록됨',
-                  },
-                  { onConflict: 'coupang_vendor_item_id' }
-                )
-                .select('id')
-                .single();
+                  })
+                  .select('id')
+                  .single();
 
-              if (productError && !firstProductUpsertError) {
-                firstProductUpsertError = productError.message;
+                if (productError && !firstProductUpsertError) {
+                  firstProductUpsertError = productError.message;
+                }
+                if (!newProduct) continue;
+                targetProductId = newProduct.id;
+                registered++;
               }
-              if (!newProduct) continue;
-              productId = newProduct.id;
+
+              const { error: mapError } = await supabase
+                .from('product_vendor_items')
+                .upsert(
+                  { product_id: targetProductId, vendor_item_id: vendorItemId },
+                  { onConflict: 'vendor_item_id' }
+                );
+              if (mapError && !firstProductUpsertError) {
+                firstProductUpsertError = mapError.message;
+              }
+
+              productId = targetProductId;
               mapByVendorItem[vendorItemId] = productId;
-              registered++;
             }
 
             const qty = Number(item.salesQuantity) || 0;
@@ -216,7 +238,7 @@ export async function runCoupangOrderSync(
                   amount: qty * Number(item.unitSalesPrice || 0),
                   external_ref: externalRef,
                   occurred_at: new Date(Number(order.paidAt)).toISOString(),
-                  note: `쿠팡 판매 (${item.productName || ''})`,
+                  note: `쿠팡 판매 (${productName})`,
                   author_email: authorEmail,
                 },
                 { onConflict: 'external_ref', ignoreDuplicates: true }
