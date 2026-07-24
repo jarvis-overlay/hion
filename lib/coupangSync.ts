@@ -209,13 +209,9 @@ export async function syncCoupangProductCatalog(
         for (const item of items) {
           scannedItems++;
           const vendorItemId = String(item.vendorItemId);
-          // 쿠팡은 바코드를 items[].barcode 같은 단독 필드가 아니라
-          // attributes 배열 안에 "Global Trade Item Number"(GTIN)라는
-          // 이름의 속성으로 담아준다. 실측 데이터로 확인한 실제 위치.
-          const gtinAttr = (item.attributes || []).find(
-            (a: any) => a.attributeTypeName === 'Global Trade Item Number'
-          );
-          const barcode = gtinAttr?.attributeValueName?.trim();
+          // 실측 확인 결과: 쿠팡은 로켓그로스 상품의 실제 "상품 바코드"를
+          // item.attributes의 GTIN이 아니라 item.rocketGrowthItemData.barcode에 담아준다.
+          const barcode = item.rocketGrowthItemData?.barcode?.trim();
 
           if (!barcode) {
             disqualified++;
