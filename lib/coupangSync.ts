@@ -390,6 +390,7 @@ export async function runCoupangOrderSync(
   let firstUpsertError: string | undefined;
   const rangesTried: string[] = [];
   const unmappedVendorItemIds = new Set<string>();
+  const unmappedNames: Record<string, string> = {};
 
   try {
     for (const range of ranges) {
@@ -418,6 +419,7 @@ export async function runCoupangOrderSync(
               // 정식 상품이 아니므로 판매기록도 남기지 않는다.
               unmapped++;
               unmappedVendorItemIds.add(vendorItemId);
+              unmappedNames[vendorItemId] = productName;
               continue;
             }
 
@@ -475,6 +477,7 @@ export async function runCoupangOrderSync(
       mappedVendorItemCount: Object.keys(mapByVendorItem).length,
       firstUpsertError,
       unmappedVendorItemIds: Array.from(unmappedVendorItemIds).slice(0, 10),
+      unmappedNames,
     },
   };
 }
