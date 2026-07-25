@@ -364,7 +364,10 @@ export async function runCoupangOrderSync(
     ).padStart(2, '0')}`;
 
   const MAX_RANGE_DAYS = 30;
-  const today = new Date();
+  // 서버는 UTC로 돌기 때문에 그냥 new Date()를 쓰면 한국시간 기준 "오늘"보다
+  // 하루 늦게 계산될 수 있다. KST(UTC+9) 기준 오늘 날짜로 보정한다.
+  const kstOffsetMs = 9 * 60 * 60 * 1000;
+  const today = new Date(Date.now() + kstOffsetMs);
   const ranges: { from: Date; to: Date }[] = [];
   let remaining = daysBack;
   let cursor = new Date(today);
