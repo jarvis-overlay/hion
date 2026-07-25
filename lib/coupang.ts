@@ -101,7 +101,7 @@ export async function fetchCoupangProductList({
   nextToken?: string;
 }): Promise<{ data: any[]; nextToken?: string }> {
   const path = `/v2/providers/seller_api/apis/api/v1/marketplace/seller-products`;
-  let query = `vendorId=${vendorId}&maxPerPage=100&status=APPROVED`;
+  let query = `vendorId=${vendorId}&maxPerPage=100`;
   if (nextToken) query += `&nextToken=${encodeURIComponent(nextToken)}`;
 
   const authorization = buildAuthHeader(

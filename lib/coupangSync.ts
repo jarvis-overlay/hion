@@ -150,6 +150,7 @@ export async function syncCoupangProductCatalog(
   let sampleRocketGrowthItemData: string | undefined;
   let sampleMarketplaceItemData: string | undefined;
   let sampleRocketGrowthAdditionalInfo: string | undefined;
+  const allScannedProducts: any[] = [];
 
   try {
     let nextToken: string | undefined = undefined;
@@ -182,6 +183,19 @@ export async function syncCoupangProductCatalog(
 
         const detailData = detail?.data || detail || {};
         const items = detailData.items || [];
+
+        // 반품 상품 판별 기준을 찾기 위해, 스캔되는 상품 전체의 식별 정보를 기록
+        allScannedProducts.push({
+          sellerProductId: String(sellerProductId),
+          sellerProductName: p.sellerProductName ?? detailData.sellerProductName,
+          statusName: p.statusName ?? detailData.statusName,
+          registrationType: detailData.registrationType,
+          extraInfoMessage: detailData.extraInfoMessage,
+          vendorItemIds: items.map(
+            (it: any) => it.rocketGrowthItemData?.vendorItemId
+          ),
+        });
+
         if (!sampleDetailKeys) sampleDetailKeys = Object.keys(detailData);
         if (!sampleItemKeys && items[0]) {
           sampleItemKeys = Object.keys(items[0]);
@@ -328,6 +342,7 @@ export async function syncCoupangProductCatalog(
       sampleRocketGrowthItemData,
       sampleMarketplaceItemData,
       sampleRocketGrowthAdditionalInfo,
+      allScannedProducts,
     },
   };
 }

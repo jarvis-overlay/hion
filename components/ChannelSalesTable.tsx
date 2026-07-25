@@ -64,7 +64,14 @@ export default function ChannelSalesTable({
       Math.abs(row.quantity);
   }
 
-  const visibleProducts = products.filter((p) => showHidden || !p.is_hidden);
+  // 실제 판매된(선택 기간 내 판매량 > 0) 상품만 노출한다 - 판매 없는 상품은
+  // 목록 자체에 나타나지 않는다 (0으로 표시되지 않고 아예 안 보임).
+  const visibleProducts = products.filter((p) => {
+    if (!(showHidden || !p.is_hidden)) return false;
+    const byChannel = salesByProduct[p.id] || {};
+    const total = Object.values(byChannel).reduce((s, v) => s + v, 0);
+    return total > 0;
+  });
   const hiddenCount = products.length - visibleProducts.length;
 
   return (
@@ -165,7 +172,7 @@ export default function ChannelSalesTable({
           {!visibleProducts.length && (
             <tr>
               <td colSpan={9} className="py-4 px-4 text-center text-inkSoft">
-                등록된 상품이 없어요.
+                이 기간에 판매된 상품이 없어요.
               </td>
             </tr>
           )}
