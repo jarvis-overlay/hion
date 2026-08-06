@@ -439,8 +439,14 @@ export async function runCoupangOrderSync(
             }
 
             const externalRef = `coupang-order:${order.orderId}:${vendorItemId}`;
-            const qty = Number(item.salesQuantity) || 0;
-            if (qty <= 0) continue;
+            const salesQty = Number(item.salesQuantity) || 0;
+            if (salesQty === 0) continue;
+
+            // 쿠팡이 반품을 같은 주문 목록 안에서 음수 salesQuantity로 내려주는
+            // 경우를 대비한 처리 - 무조건 버리지 않고 입고(반품)로 남긴다.
+            const isReturn = salesQty < 0;
+            const qty = Math.abs(salesQty);
+            const unitPrice = Number(item.unitSalesPrice || 0);
 
             const { data: inserted, error } = await supabase
               .from('stock_movements')
@@ -448,13 +454,15 @@ export async function runCoupangOrderSync(
                 {
                   product_id: productId,
                   warehouse: 'coupang',
-                  type: 'out',
-                  quantity: -qty,
+                  type: isReturn ? 'in' : 'out',
+                  quantity: isReturn ? qty : -qty,
                   channel: 'coupang',
-                  amount: qty * Number(item.unitSalesPrice || 0),
+                  amount: (isReturn ? -1 : 1) * qty * unitPrice,
                   external_ref: externalRef,
                   occurred_at: new Date(Number(order.paidAt)).toISOString(),
-                  note: `쿠팡 판매 (${productName})`,
+                  note: isReturn
+                    ? `쿠팡 반품 (${productName})`
+                    : `쿠팡 판매 (${productName})`,
                   author_email: authorEmail,
                 },
                 { onConflict: 'external_ref', ignoreDuplicates: true }

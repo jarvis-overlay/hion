@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { runCoupangInventorySync, runCoupangOrderSync } from '@/lib/coupangSync';
+import {
+  runCoupangInventorySync,
+  runCoupangOrderSync,
+  syncCoupangProductCatalog,
+} from '@/lib/coupangSync';
 
 export const maxDuration = 60;
 
@@ -27,8 +31,25 @@ export async function GET(request: Request) {
   const daysBack = daysParam ? parseInt(daysParam, 10) : 2;
 
   const supabase = createAdminClient();
+
+  // 자동 크론이 제거된 뒤로는 이 라우트가 유일한 정기 동기화 지점이므로,
+  // 여기서 카탈로그(옵션ID 매핑) 동기화까지 함께 최신화한다.
+  let catalogResult: any = {};
+  try {
+    catalogResult = await syncCoupangProductCatalog(supabase, 'auto-sync@hion');
+  } catch (e: any) {
+    catalogResult = { error: e?.message || String(e) };
+  }
+
   const orderResult = await runCoupangOrderSync(supabase, 'auto-sync@hion', daysBack);
   const stockResult = await runCoupangInventorySync(supabase, 'auto-sync@hion');
 
-  return NextResponse.json({ ...stockResult, ...orderResult, daysBack });
+  return NextResponse.json({
+    ...stockResult,
+    ...orderResult,
+    daysBack,
+    catalogCreated: catalogResult.createdProducts ?? 0,
+    catalogMapped: catalogResult.mappedVendorItems ?? 0,
+    catalogError: catalogResult.error,
+  });
 }

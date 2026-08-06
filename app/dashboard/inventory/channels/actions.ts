@@ -2,7 +2,16 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { runCoupangInventorySync, runCoupangOrderSync } from '@/lib/coupangSync';
+import {
+  runCoupangInventorySync,
+  runCoupangOrderSync,
+  syncCoupangProductCatalog,
+} from '@/lib/coupangSync';
+
+// 카탈로그 동기화(상품마다 상세조회+옵션별 재고조회를 순차 호출)까지 같이
+// 돌리면서 실행시간이 길어져, 기본 제한(설정 안 하면 플랫폼 기본값, 대략 10초)에
+// 걸려 중간에 함수가 끊기는 걸 막기 위해 크론 라우트와 동일하게 60초로 늘려둔다.
+export const maxDuration = 60;
 
 export async function saveCoupangCredentials(formData: FormData) {
   const supabase = createClient();
@@ -78,7 +87,17 @@ export async function syncCoupangInventory() {
   } = await supabase.auth.getUser();
   if (!user) return { error: '로그인이 필요해요.' };
 
-  // 판매 동기화를 먼저 실행 - 우리 시스템에 없는 상품이 팔렸으면 자동으로 등록
+  // 카탈로그 동기화를 가장 먼저 실행 - 옵션ID(vendorItemId)→상품 매핑을
+  // 최신 상태로 갱신해야 새로 팔린 옵션이 "매핑 안 됨"으로 누락되지 않는다.
+  // 실패해도 기존 매핑으로 아래 판매/재고 동기화는 계속 진행한다.
+  let catalogResult: any = {};
+  try {
+    catalogResult = await syncCoupangProductCatalog(supabase, user.email!);
+  } catch (e: any) {
+    catalogResult = { error: e?.message || String(e) };
+  }
+
+  // 판매 동기화 - 우리 시스템에 없는 상품이 팔렸으면 자동으로 등록
   const orderResult = await runCoupangOrderSync(supabase, user.email!);
 
   // 그 다음 재고 동기화 - 방금 자동등록된 상품 재고도 바로 반영됨
@@ -86,5 +105,11 @@ export async function syncCoupangInventory() {
 
   revalidatePath('/dashboard/inventory/stock');
   revalidatePath('/dashboard');
-  return { ...stockResult, ...orderResult };
+  return {
+    ...stockResult,
+    ...orderResult,
+    catalogCreated: catalogResult.createdProducts ?? 0,
+    catalogMapped: catalogResult.mappedVendorItems ?? 0,
+    catalogError: catalogResult.error,
+  };
 }
