@@ -10,8 +10,6 @@ import {
   fetchCoupangReturnRequests,
 } from '@/lib/coupang';
 
-export const maxDuration = 30;
-
 async function getCoupangCred(supabase: any) {
   const { data: cred } = await supabase
     .from('channel_credentials')
