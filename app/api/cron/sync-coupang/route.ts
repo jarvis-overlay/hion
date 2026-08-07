@@ -71,5 +71,8 @@ export async function GET(request: Request) {
     catalogError: catalogResult.error,
     returnsLogged: returnResult.logged,
     returnsError: returnResult.error,
+    returnsDebug: returnResult.debug,
+    returnsSkipped: returnResult.skipped,
+    returnsUnmapped: returnResult.unmapped,
   });
 }
