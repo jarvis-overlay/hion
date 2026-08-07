@@ -30,19 +30,33 @@ export async function GET(request: Request) {
   const daysParam = searchParams.get('days');
   const daysBack = daysParam ? parseInt(daysParam, 10) : 2;
 
+  // ?catalog=0 이면 카탈로그(전체 상품 재스캔) 단계를 건너뛴다. 카탈로그
+  // 스캔은 상품 목록조회 + 상품마다 상세조회 + 옵션마다 재고조회까지 하는
+  // 무거운 작업이라 Fixie 프록시 요청을 많이 쓴다. 하루 여러 번 자동
+  // 동기화할 때는 하루 1번(예: 자정)만 카탈로그를 돌리고, 나머지는
+  // 이 파라미터로 주문/재고만 가볍게 동기화하도록 cron-job.org에서
+  // URL을 다르게 등록해서 쓴다.
+  const skipCatalog = searchParams.get('catalog') === '0';
+
   const supabase = createAdminClient();
 
-  // 자동 크론이 제거된 뒤로는 이 라우트가 유일한 정기 동기화 지점이므로,
-  // 여기서 카탈로그(옵션ID 매핑) 동기화까지 함께 최신화한다.
   let catalogResult: any = {};
-  try {
-    catalogResult = await syncCoupangProductCatalog(supabase, 'auto-sync@hion');
-  } catch (e: any) {
-    catalogResult = { error: e?.message || String(e) };
+  if (!skipCatalog) {
+    try {
+      catalogResult = await syncCoupangProductCatalog(supabase, 'auto-sync@hion');
+    } catch (e: any) {
+      catalogResult = { error: e?.message || String(e) };
+    }
   }
 
   const orderResult = await runCoupangOrderSync(supabase, 'auto-sync@hion', daysBack);
-  const stockResult = await runCoupangInventorySync(supabase, 'auto-sync@hion');
+  // 카탈로그 동기화를 방금 돌렸으면 거기서 이미 조회한 재고값을 재사용해서
+  // 같은 옵션ID 재고를 두 번 조회하지 않는다.
+  const stockResult = await runCoupangInventorySync(
+    supabase,
+    'auto-sync@hion',
+    catalogResult.inventoryByVendorItem
+  );
 
   return NextResponse.json({
     ...stockResult,

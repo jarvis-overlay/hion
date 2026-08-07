@@ -100,8 +100,13 @@ export async function syncCoupangInventory() {
   // 판매 동기화 - 우리 시스템에 없는 상품이 팔렸으면 자동으로 등록
   const orderResult = await runCoupangOrderSync(supabase, user.email!);
 
-  // 그 다음 재고 동기화 - 방금 자동등록된 상품 재고도 바로 반영됨
-  const stockResult = await runCoupangInventorySync(supabase, user.email!);
+  // 그 다음 재고 동기화 - 방금 자동등록된 상품 재고도 바로 반영됨.
+  // 카탈로그 동기화에서 이미 조회한 재고값은 재사용해서 API를 중복 호출하지 않는다.
+  const stockResult = await runCoupangInventorySync(
+    supabase,
+    user.email!,
+    catalogResult.inventoryByVendorItem
+  );
 
   revalidatePath('/dashboard/inventory/stock');
   revalidatePath('/dashboard');

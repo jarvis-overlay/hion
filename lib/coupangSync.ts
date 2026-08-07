@@ -7,7 +7,10 @@ import {
 
 export async function runCoupangInventorySync(
   supabase: any,
-  authorEmail: string
+  authorEmail: string,
+  // 같은 실행 안에서 카탈로그 동기화가 이미 조회해둔 재고값이 있으면 이걸
+  // 재사용하고, 없는 항목만 API를 호출한다 (Fixie 프록시 요청 수 절약).
+  inventoryOverride?: Record<string, number>
 ) {
   const { data: cred } = await supabase
     .from('channel_credentials')
@@ -53,11 +56,16 @@ export async function runCoupangInventorySync(
     try {
       let totalQty = 0;
       for (const vendorItemId of vendorItemIds) {
+        const key = String(vendorItemId);
+        if (inventoryOverride && key in inventoryOverride) {
+          totalQty += inventoryOverride[key];
+          continue;
+        }
         const result = await fetchCoupangInventoryForItem({
           vendorId: cred.vendor_id,
           accessKey: cred.access_key,
           secretKey: cred.secret_key,
-          vendorItemId: String(vendorItemId),
+          vendorItemId: key,
         });
         if (result) totalQty += result.totalOrderableQuantity;
       }
@@ -151,6 +159,8 @@ export async function syncCoupangProductCatalog(
   let sampleMarketplaceItemData: string | undefined;
   let sampleRocketGrowthAdditionalInfo: string | undefined;
   const allScannedProducts: any[] = [];
+  // 이 스캔 중 조회한 옵션별 재고값 (뒤이은 재고 동기화가 재조회 안 해도 되게)
+  const inventoryByVendorItem: Record<string, number> = {};
 
   try {
     let nextToken: string | undefined = undefined;
@@ -260,6 +270,7 @@ export async function syncCoupangProductCatalog(
               firstInventoryCheckError = e?.message || String(e);
             }
           }
+          inventoryByVendorItem[vendorItemId] = stockQty;
 
           if (stockQty <= 0) {
             disqualified++;
@@ -330,6 +341,7 @@ export async function syncCoupangProductCatalog(
     disqualifiedReasons,
     createdProducts,
     mappedVendorItems,
+    inventoryByVendorItem,
     error: lastError,
     debug: {
       firstInventoryCheckError,
