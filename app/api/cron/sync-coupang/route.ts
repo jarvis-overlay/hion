@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import {
   runCoupangInventorySync,
   runCoupangOrderSync,
+  runCoupangReturnSync,
   syncCoupangProductCatalog,
 } from '@/lib/coupangSync';
 
@@ -52,6 +53,7 @@ export async function GET(request: Request) {
   }
 
   const orderResult = await runCoupangOrderSync(supabase, 'auto-sync@hion', daysBack, rawDebug);
+  const returnResult = await runCoupangReturnSync(supabase, 'auto-sync@hion', daysBack);
   // 카탈로그 동기화를 방금 돌렸으면 거기서 이미 조회한 재고값을 재사용해서
   // 같은 옵션ID 재고를 두 번 조회하지 않는다.
   const stockResult = await runCoupangInventorySync(
@@ -67,5 +69,7 @@ export async function GET(request: Request) {
     catalogCreated: catalogResult.createdProducts ?? 0,
     catalogMapped: catalogResult.mappedVendorItems ?? 0,
     catalogError: catalogResult.error,
+    returnsLogged: returnResult.logged,
+    returnsError: returnResult.error,
   });
 }

@@ -59,9 +59,10 @@ export default function ChannelSalesTable({
   const salesByProduct: Record<string, Record<string, number>> = {};
   for (const row of filteredRows) {
     if (!salesByProduct[row.product_id]) salesByProduct[row.product_id] = {};
+    // 판매(out)는 quantity가 음수, 반품(in)은 양수라서 -quantity를 더하면
+    // 반품이 자동으로 차감된 순 판매수량이 된다.
     salesByProduct[row.product_id][row.channel] =
-      (salesByProduct[row.product_id][row.channel] || 0) +
-      Math.abs(row.quantity);
+      (salesByProduct[row.product_id][row.channel] || 0) + -row.quantity;
   }
 
   // 실제 판매된(선택 기간 내 판매량 > 0) 상품만 노출한다 - 판매 없는 상품은

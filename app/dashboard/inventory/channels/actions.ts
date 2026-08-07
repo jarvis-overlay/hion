@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import {
   runCoupangInventorySync,
   runCoupangOrderSync,
+  runCoupangReturnSync,
   syncCoupangProductCatalog,
 } from '@/lib/coupangSync';
 
@@ -95,6 +96,9 @@ export async function syncCoupangInventory() {
   // 판매 동기화 - 우리 시스템에 없는 상품이 팔렸으면 자동으로 등록
   const orderResult = await runCoupangOrderSync(supabase, user.email!);
 
+  // 반품 동기화 - 판매 동기화와 별도 API라 따로 호출해야 함
+  const returnResult = await runCoupangReturnSync(supabase, user.email!);
+
   // 그 다음 재고 동기화 - 방금 자동등록된 상품 재고도 바로 반영됨.
   // 카탈로그 동기화에서 이미 조회한 재고값은 재사용해서 API를 중복 호출하지 않는다.
   const stockResult = await runCoupangInventorySync(
@@ -111,5 +115,7 @@ export async function syncCoupangInventory() {
     catalogCreated: catalogResult.createdProducts ?? 0,
     catalogMapped: catalogResult.mappedVendorItems ?? 0,
     catalogError: catalogResult.error,
+    returnsLogged: returnResult.logged,
+    returnsError: returnResult.error,
   };
 }

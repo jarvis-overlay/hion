@@ -215,6 +215,54 @@ export async function fetchCoupangInventoryForItem({
   };
 }
 
+export async function fetchCoupangReturnRequests({
+  vendorId,
+  accessKey,
+  secretKey,
+  createdAtFrom,
+  createdAtTo,
+  nextToken,
+}: {
+  vendorId: string;
+  accessKey: string;
+  secretKey: string;
+  createdAtFrom: string; // yyyy-MM-ddTHH:mm
+  createdAtTo: string; // yyyy-MM-ddTHH:mm
+  nextToken?: string;
+}): Promise<{ data: any[]; nextToken?: string }> {
+  const path = `/v2/providers/openapi/apis/api/v6/vendors/${vendorId}/returnRequests`;
+  let query = `searchType=timeFrame&createdAtFrom=${encodeURIComponent(
+    createdAtFrom
+  )}&createdAtTo=${encodeURIComponent(createdAtTo)}`;
+  if (nextToken) query += `&nextToken=${encodeURIComponent(nextToken)}`;
+
+  const authorization = buildAuthHeader(
+    'GET',
+    path,
+    query,
+    accessKey,
+    secretKey
+  );
+
+  const res = await proxiedFetch(`${HOST}${path}?${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: authorization,
+      'X-Requested-By': vendorId,
+      'Content-Type': 'application/json;charset=UTF-8',
+    },
+    cache: 'no-store',
+  });
+
+  const json = await res.json();
+
+  if (!res.ok || json.code !== 200) {
+    throw new Error(json?.message || `쿠팡 API 오류 (HTTP ${res.status})`);
+  }
+
+  return { data: json.data || [], nextToken: json.nextToken || undefined };
+}
+
 export async function fetchCoupangOrderSheets({
   vendorId,
   accessKey,

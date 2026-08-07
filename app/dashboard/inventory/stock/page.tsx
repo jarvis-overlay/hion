@@ -40,11 +40,14 @@ export default async function StockPage() {
   const coupangConnected =
     channels?.find((c) => c.channel === 'coupang')?.connected || false;
 
-  // 실제 판매(주문) 기록만 골라서 오늘 판매 요약 계산
+  // 실제 판매(주문) + 반품 기록을 함께 골라서 오늘 판매 요약 계산.
+  // 판매(out)는 quantity가 음수, 반품(in)은 양수로 들어있어서 그냥
+  // -quantity를 더하면 반품이 자동으로 차감된다 (재고 동기화 기록은
+  // channel이 비어있어서 여기 안 걸림).
   const { data: todaySalesRaw } = await supabase
     .from('stock_movements')
     .select('*, products(name)')
-    .like('external_ref', 'coupang-order:%')
+    .eq('channel', 'coupang')
     .gte('occurred_at', startOfTodayKST().toISOString());
 
   const salesByProduct: Record<
@@ -60,7 +63,7 @@ export default async function StockPage() {
         amount: 0,
       };
     }
-    salesByProduct[key].qty += Math.abs(row.quantity);
+    salesByProduct[key].qty += -row.quantity;
     salesByProduct[key].amount += Number(row.amount) || 0;
   }
   const todaySales = Object.values(salesByProduct).sort(
@@ -75,7 +78,7 @@ export default async function StockPage() {
   const { data: dailySalesRows } = await supabase
     .from('stock_movements')
     .select('occurred_at, quantity, amount, product_id, products(name)')
-    .like('external_ref', 'coupang-order:%')
+    .eq('channel', 'coupang')
     .gte('occurred_at', thirtyDaysAgo.toISOString())
     .order('occurred_at', { ascending: false });
 
@@ -90,7 +93,6 @@ export default async function StockPage() {
   const { data: salesRows } = await supabase
     .from('stock_movements')
     .select('product_id, channel, quantity, occurred_at')
-    .eq('type', 'out')
     .not('channel', 'is', null);
 
   const coupangStockByProduct: Record<string, number> = {};

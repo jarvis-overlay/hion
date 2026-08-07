@@ -3,6 +3,7 @@ import {
   fetchCoupangRGOrders,
   fetchCoupangProductDetail,
   fetchCoupangProductList,
+  fetchCoupangReturnRequests,
 } from '@/lib/coupang';
 
 export async function runCoupangInventorySync(
@@ -523,5 +524,159 @@ export async function runCoupangOrderSync(
       unmappedNames,
       rawOrdersSample: includeRawOrders ? rawOrdersSample : undefined,
     },
+  };
+}
+
+// ============================================================
+// 쿠팡 반품/취소 동기화
+// - 주문조회 API(rg/orders)는 반품 건을 아예 포함하지 않아서(실측 확인됨),
+//   반품/취소 전용 API(returnRequests)를 별도로 호출해서 매출/재고 이력에
+//   반영한다. 원래 판매가는 이 API가 안 주기 때문에, 같은 주문(orderId)의
+//   판매 기록(stock_movements)에서 단가를 역산해서 환불액을 계산한다.
+// ============================================================
+export async function runCoupangReturnSync(
+  supabase: any,
+  authorEmail: string,
+  daysBack: number = 2
+) {
+  const { data: cred } = await supabase
+    .from('channel_credentials')
+    .select('*')
+    .eq('channel', 'coupang')
+    .maybeSingle();
+
+  if (!cred || !cred.connected || !cred.vendor_id) {
+    return { logged: 0, skipped: 0, unmapped: 0, debug: 'no cred / not connected' };
+  }
+
+  const { data: mappings } = await supabase
+    .from('product_vendor_items')
+    .select('product_id, vendor_item_id');
+
+  const mapByVendorItem: Record<string, string> = {};
+  for (const m of mappings || []) {
+    mapByVendorItem[String(m.vendor_item_id)] = m.product_id;
+  }
+
+  // yyyy-MM-ddTHH:mm (KST) 포맷
+  const fmtDateTime = (d: Date) => {
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(
+      d.getUTCDate()
+    )}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+  };
+
+  const MAX_RANGE_DAYS = 31;
+  const kstOffsetMs = 9 * 60 * 60 * 1000;
+  const today = new Date(Date.now() + kstOffsetMs);
+  const ranges: { from: Date; to: Date }[] = [];
+  let remaining = daysBack;
+  let cursor = new Date(today);
+
+  while (remaining > 0) {
+    const rangeDays = Math.min(remaining, MAX_RANGE_DAYS);
+    const to = new Date(cursor);
+    const from = new Date(cursor);
+    from.setDate(from.getDate() - rangeDays);
+    ranges.push({ from, to });
+    cursor = new Date(from);
+    remaining -= rangeDays;
+  }
+
+  let logged = 0;
+  let skipped = 0;
+  let unmapped = 0;
+  let lastError: string | undefined;
+  let rawReturnCount = 0;
+
+  try {
+    for (const range of ranges) {
+      let nextToken: string | undefined = undefined;
+      do {
+        const { data: receipts, nextToken: next } =
+          await fetchCoupangReturnRequests({
+            vendorId: cred.vendor_id,
+            accessKey: cred.access_key,
+            secretKey: cred.secret_key,
+            createdAtFrom: fmtDateTime(range.from),
+            createdAtTo: fmtDateTime(range.to),
+            nextToken,
+          });
+        nextToken = next;
+        rawReturnCount += receipts.length;
+
+        for (const receipt of receipts) {
+          for (const item of receipt.returnItems || []) {
+            const vendorItemId = String(item.vendorItemId);
+            const productId = mapByVendorItem[vendorItemId];
+            const productName =
+              item.vendorItemName || item.sellerProductName || `쿠팡 상품 (${vendorItemId})`;
+            const cancelCount = Number(item.cancelCount) || 0;
+
+            if (!productId || cancelCount === 0) {
+              if (!productId) unmapped++;
+              continue;
+            }
+
+            // 원래 판매가를 이 API가 안 주므로, 같은 주문의 판매 기록에서
+            // 단가를 역산한다 (없으면 환불액은 0으로 남는다).
+            let unitPrice = 0;
+            const { data: origSale } = await supabase
+              .from('stock_movements')
+              .select('quantity, amount')
+              .eq('external_ref', `coupang-order:${receipt.orderId}:${vendorItemId}`)
+              .maybeSingle();
+            if (origSale && origSale.quantity) {
+              unitPrice = Math.abs(Number(origSale.amount) / Number(origSale.quantity));
+            }
+
+            const externalRef = `coupang-return:${receipt.receiptId}:${vendorItemId}`;
+
+            const { data: inserted, error } = await supabase
+              .from('stock_movements')
+              .upsert(
+                {
+                  product_id: productId,
+                  warehouse: 'coupang',
+                  type: 'in',
+                  quantity: cancelCount,
+                  channel: 'coupang',
+                  amount: -cancelCount * unitPrice,
+                  external_ref: externalRef,
+                  occurred_at: new Date(receipt.createdAt).toISOString(),
+                  note: `쿠팡 반품 (${productName}) - ${
+                    receipt.reasonCodeText || receipt.cancelReasonCategory2 || '사유 미상'
+                  }`,
+                  author_email: authorEmail,
+                },
+                { onConflict: 'external_ref', ignoreDuplicates: true }
+              )
+              .select();
+
+            if (error) {
+              if (!lastError) lastError = error.message;
+              continue;
+            }
+
+            if (inserted && inserted.length > 0) {
+              logged++;
+            } else {
+              skipped++;
+            }
+          }
+        }
+      } while (nextToken);
+    }
+  } catch (e: any) {
+    lastError = e?.message || String(e);
+    console.error('runCoupangReturnSync error:', e);
+  }
+
+  return {
+    logged,
+    skipped,
+    unmapped,
+    error: lastError,
+    debug: { rawReturnCount },
   };
 }

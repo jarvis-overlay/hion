@@ -19,7 +19,9 @@ export default function DailySalesHistory({ rows }: { rows: any[] }) {
   for (const row of rows) {
     const date = toKstDateStr(row.occurred_at);
     if (!byDate[date]) byDate[date] = { amount: 0, qty: 0, items: [] };
-    const qty = Math.abs(row.quantity);
+    // 판매(out)는 quantity가 음수, 반품(in)은 양수라서 -quantity를 더하면
+    // 반품이 자동으로 차감된 순 판매수량이 된다.
+    const qty = -row.quantity;
     const amount = Number(row.amount) || 0;
     byDate[date].qty += qty;
     byDate[date].amount += amount;
