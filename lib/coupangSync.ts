@@ -436,10 +436,18 @@ export async function runCoupangOrderSync(
   const ranges: { from: Date; to: Date }[] = [];
   let remaining = daysBack;
   let cursor = new Date(today);
+  let isFirstRange = true;
 
   while (remaining > 0) {
     const rangeDays = Math.min(remaining, MAX_RANGE_DAYS);
     const to = new Date(cursor);
+    if (isFirstRange) {
+      // 실측 확인: 쿠팡 API는 paidDateTo로 지정한 날짜를 포함하지 않는다
+      // (그 이전까지만 조회됨). 그래서 항상 "오늘"을 paidDateTo로 넘기면
+      // 오늘 주문이 통째로 빠진다 - 최신 구간의 끝은 하루 뒤로 잡는다.
+      to.setDate(to.getDate() + 1);
+      isFirstRange = false;
+    }
     const from = new Date(cursor);
     from.setDate(from.getDate() - rangeDays);
     ranges.push({ from, to });
