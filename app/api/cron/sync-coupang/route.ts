@@ -37,6 +37,8 @@ export async function GET(request: Request) {
   // 이 파라미터로 주문/재고만 가볍게 동기화하도록 cron-job.org에서
   // URL을 다르게 등록해서 쓴다.
   const skipCatalog = searchParams.get('catalog') === '0';
+  // 반품이 실제로 API 응답에서 어떻게 표현되는지 확인하기 위한 임시 디버그
+  const rawDebug = searchParams.get('rawdebug') === '1';
 
   const supabase = createAdminClient();
 
@@ -49,7 +51,7 @@ export async function GET(request: Request) {
     }
   }
 
-  const orderResult = await runCoupangOrderSync(supabase, 'auto-sync@hion', daysBack);
+  const orderResult = await runCoupangOrderSync(supabase, 'auto-sync@hion', daysBack, rawDebug);
   // 카탈로그 동기화를 방금 돌렸으면 거기서 이미 조회한 재고값을 재사용해서
   // 같은 옵션ID 재고를 두 번 조회하지 않는다.
   const stockResult = await runCoupangInventorySync(

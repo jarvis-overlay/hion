@@ -362,7 +362,10 @@ export async function syncCoupangProductCatalog(
 export async function runCoupangOrderSync(
   supabase: any,
   authorEmail: string,
-  daysBack: number = 2
+  daysBack: number = 2,
+  // true면 쿠팡이 실제로 내려주는 주문 원본 JSON을 그대로 담아서 반환한다.
+  // 반품이 API 응답에서 정확히 어떤 형태로 표현되는지 확인하기 위한 임시 디버그용.
+  includeRawOrders = false
 ) {
   const { data: cred } = await supabase
     .from('channel_credentials')
@@ -418,6 +421,7 @@ export async function runCoupangOrderSync(
   const rangesTried: string[] = [];
   const unmappedVendorItemIds = new Set<string>();
   const unmappedNames: Record<string, string> = {};
+  const rawOrdersSample: any[] = [];
 
   try {
     for (const range of ranges) {
@@ -434,6 +438,10 @@ export async function runCoupangOrderSync(
         });
         nextToken = next;
         rawOrderCount += orders.length;
+
+        if (includeRawOrders && rawOrdersSample.length < 30) {
+          rawOrdersSample.push(...orders.slice(0, 30 - rawOrdersSample.length));
+        }
 
         for (const order of orders) {
           for (const item of order.orderItems || []) {
@@ -513,6 +521,7 @@ export async function runCoupangOrderSync(
       firstUpsertError,
       unmappedVendorItemIds: Array.from(unmappedVendorItemIds).slice(0, 10),
       unmappedNames,
+      rawOrdersSample: includeRawOrders ? rawOrdersSample : undefined,
     },
   };
 }
