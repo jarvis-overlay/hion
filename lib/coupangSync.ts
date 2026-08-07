@@ -96,44 +96,17 @@ export async function runCoupangInventorySync(
       if (totalQty !== prevQty) {
         const delta = totalQty - prevQty;
 
-        // 로켓그로스는 셀러가 대량으로 한 번에 입고시키는 구조라, 재고가
-        // 늘었는데 그 폭이 작으면(RETURN_GUESS_MAX개 이하) 반품 API에 안
-        // 잡히는 로켓그로스 반품일 가능성이 높다고 보고 매출에서 추정
-        // 차감한다. 폭이 크면 정상 대량 입고(발주)로 보고 그대로 둔다.
-        const RETURN_GUESS_MAX = 3;
-        const looksLikeReturn = delta > 0 && delta <= RETURN_GUESS_MAX;
-
-        let amount: number | null = null;
-        let note = `쿠팡 로켓창고 재고 동기화 (${prevQty} → ${totalQty})`;
-        let channel: string | null = null;
-
-        if (looksLikeReturn) {
-          const { data: lastSale } = await supabase
-            .from('stock_movements')
-            .select('quantity, amount')
-            .eq('product_id', productId)
-            .eq('channel', 'coupang')
-            .eq('type', 'out')
-            .order('occurred_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          const unitPrice =
-            lastSale && lastSale.quantity
-              ? Math.abs(Number(lastSale.amount) / Number(lastSale.quantity))
-              : 0;
-          amount = -delta * unitPrice;
-          channel = 'coupang';
-          note = `쿠팡 재고 증가 감지 - 반품 추정 (${prevQty} → ${totalQty}), 실제 반품 여부는 확인 필요`;
-        }
-
+        // 재고 증가폭으로 반품 여부를 추정하는 로직은 재고 API를 자주
+        // 호출할 때(수동 테스트, 짧은 폴링 등) 일시적인 재고 변동까지
+        // "반품"으로 잘못 잡아서 매출 데이터를 오염시키는 문제가 있어
+        // 제거했다. 그냥 재고 변화만 기록하고 매출 통계(channel)에는
+        // 반영하지 않는다.
         await supabase.from('stock_movements').insert({
           product_id: productId,
           warehouse: 'coupang',
           type: delta > 0 ? 'in' : 'out',
           quantity: delta,
-          channel,
-          amount,
-          note,
+          note: `쿠팡 로켓창고 재고 동기화 (${prevQty} → ${totalQty})`,
           author_email: authorEmail,
         });
         updated++;
