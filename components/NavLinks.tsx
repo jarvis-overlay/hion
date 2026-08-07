@@ -27,6 +27,10 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
       { href: '/dashboard/inventory/channels', label: '채널 연동' },
     ],
   },
+  {
+    label: '개발자',
+    items: [{ href: '/dashboard/api-test', label: 'API 테스트' }],
+  },
 ];
 
 export default function NavLinks() {

@@ -89,6 +89,47 @@ export async function fetchCoupangRGOrders({
   return { data: json.data || [], nextToken: json.nextToken };
 }
 
+export async function fetchCoupangRGOrderById({
+  vendorId,
+  accessKey,
+  secretKey,
+  orderId,
+}: {
+  vendorId: string;
+  accessKey: string;
+  secretKey: string;
+  orderId: string;
+}): Promise<any> {
+  const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/order/${orderId}`;
+  const query = '';
+
+  const authorization = buildAuthHeader(
+    'GET',
+    path,
+    query,
+    accessKey,
+    secretKey
+  );
+
+  const res = await proxiedFetch(`${HOST}${path}`, {
+    method: 'GET',
+    headers: {
+      Authorization: authorization,
+      'X-Requested-By': vendorId,
+      'Content-Type': 'application/json;charset=UTF-8',
+    },
+    cache: 'no-store',
+  });
+
+  const json = await res.json();
+
+  if (!res.ok || json.code !== 200) {
+    throw new Error(json?.message || `쿠팡 API 오류 (HTTP ${res.status})`);
+  }
+
+  return json.data;
+}
+
 export async function fetchCoupangProductList({
   vendorId,
   accessKey,
