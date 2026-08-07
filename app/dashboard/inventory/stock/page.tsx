@@ -6,6 +6,10 @@ import DailySalesHistory from '@/components/DailySalesHistory';
 import HistoryList from '@/components/HistoryList';
 import CoupangSyncButton from '@/components/CoupangSyncButton';
 
+// syncCoupangInventory 서버 액션(카탈로그+주문+재고 동기화)이 오래 걸릴 수
+// 있어 기본 실행시간 제한을 60초로 늘려둔다.
+export const maxDuration = 60;
+
 function startOfTodayKST() {
   const now = new Date();
   const kstOffsetMs = 9 * 60 * 60 * 1000;

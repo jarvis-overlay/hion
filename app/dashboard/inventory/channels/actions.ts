@@ -8,11 +8,6 @@ import {
   syncCoupangProductCatalog,
 } from '@/lib/coupangSync';
 
-// 카탈로그 동기화(상품마다 상세조회+옵션별 재고조회를 순차 호출)까지 같이
-// 돌리면서 실행시간이 길어져, 기본 제한(설정 안 하면 플랫폼 기본값, 대략 10초)에
-// 걸려 중간에 함수가 끊기는 걸 막기 위해 크론 라우트와 동일하게 60초로 늘려둔다.
-export const maxDuration = 60;
-
 export async function saveCoupangCredentials(formData: FormData) {
   const supabase = createClient();
   const {

@@ -3,6 +3,11 @@ import CoupangCard from '@/components/CoupangCard';
 import NaverCard from '@/components/NaverCard';
 import CoupangSyncButton from '@/components/CoupangSyncButton';
 
+// 이 페이지에서 호출하는 syncCoupangInventory 서버 액션이 카탈로그+주문+재고
+// 동기화를 순차로 다 돌리면서 실행시간이 길어져, 기본 제한(플랫폼 기본값, 대략
+// 10초)에 걸려 끊기는 걸 막기 위해 크론 라우트와 동일하게 60초로 늘려둔다.
+export const maxDuration = 60;
+
 const COMING_SOON = [
   { name: '오늘의집' },
   { name: '에이블리' },
