@@ -89,6 +89,54 @@ export async function fetchCoupangRGOrders({
   return { data: json.data || [], nextToken: json.nextToken };
 }
 
+// 정해진 함수 목록에 없는 API도 자유롭게 테스트해볼 수 있도록, path/query를
+// 그대로 받아서 서명만 붙여 호출하는 범용 함수. 응답 코드와 무관하게 원본
+// JSON을 그대로 돌려준다 (에러 메시지도 눈으로 확인할 수 있게).
+export async function fetchCoupangRaw({
+  vendorId,
+  accessKey,
+  secretKey,
+  method,
+  path,
+  query,
+}: {
+  vendorId: string;
+  accessKey: string;
+  secretKey: string;
+  method: string;
+  path: string;
+  query: string;
+}): Promise<{ status: number; body: any }> {
+  const authorization = buildAuthHeader(
+    method,
+    path,
+    query,
+    accessKey,
+    secretKey
+  );
+
+  const url = query ? `${HOST}${path}?${query}` : `${HOST}${path}`;
+  const res = await proxiedFetch(url, {
+    method,
+    headers: {
+      Authorization: authorization,
+      'X-Requested-By': vendorId,
+      'Content-Type': 'application/json;charset=UTF-8',
+    },
+    cache: 'no-store',
+  });
+
+  const text = await res.text();
+  let body: any = text;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // JSON이 아니면 텍스트 그대로 보여준다
+  }
+
+  return { status: res.status, body };
+}
+
 export async function fetchCoupangRGOrderById({
   vendorId,
   accessKey,

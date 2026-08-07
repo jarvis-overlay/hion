@@ -5,6 +5,7 @@ import {
   fetchCoupangInventoryForItem,
   fetchCoupangProductDetail,
   fetchCoupangProductList,
+  fetchCoupangRaw,
   fetchCoupangRGOrderById,
   fetchCoupangRGOrders,
   fetchCoupangReturnRequests,
@@ -83,6 +84,19 @@ export async function testCoupangApi(endpoint: string, params: Record<string, st
           nextToken: params.nextToken || undefined,
         });
         break;
+      case 'custom': {
+        // path에 {vendorId}가 들어있으면 실제 vendorId로 자동 치환해준다
+        // (쿠팡 문서 예시 URL을 그대로 복붙해도 되게).
+        const rawPath = (params.path || '').replace(/\{vendorId\}/g, cred.vendor_id);
+        const result = await fetchCoupangRaw({
+          ...base,
+          method: params.method || 'GET',
+          path: rawPath,
+          query: params.query || '',
+        });
+        data = result;
+        break;
+      }
       default:
         return { error: '알 수 없는 API 종류예요.' };
     }

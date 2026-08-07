@@ -54,6 +54,23 @@ const ENDPOINTS: {
       { key: 'nextToken', label: 'nextToken (선택)' },
     ],
   },
+  {
+    key: 'custom',
+    label: '직접 입력 (커스텀 URL)',
+    fields: [
+      { key: 'method', label: 'HTTP 메서드 (기본 GET)', placeholder: 'GET' },
+      {
+        key: 'path',
+        label: 'path (쿠팡 문서의 {vendorId}는 자동 치환됨)',
+        placeholder: '/v2/providers/openapi/apis/api/v6/vendors/{vendorId}/returnRequests',
+      },
+      {
+        key: 'query',
+        label: 'query string (? 뒷부분만, & 로 연결)',
+        placeholder: 'searchType=timeFrame&createdAtFrom=2026-08-06T00:00&createdAtTo=2026-08-07T23:59',
+      },
+    ],
+  },
 ];
 
 export default function ApiTestForm() {
