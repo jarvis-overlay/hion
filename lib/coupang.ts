@@ -107,8 +107,11 @@ export async function fetchCoupangRaw({
   path: string;
   query: string;
 }): Promise<{ status: number; body: any }> {
+  // 쿠팡 서명은 HTTP 메서드를 대문자 그대로 요구한다 - 소문자로 넘어오면
+  // 서명 불일치("Invalid signature")로 401이 난다.
+  const httpMethod = (method || 'GET').toUpperCase();
   const authorization = buildAuthHeader(
-    method,
+    httpMethod,
     path,
     query,
     accessKey,
@@ -117,7 +120,7 @@ export async function fetchCoupangRaw({
 
   const url = query ? `${HOST}${path}?${query}` : `${HOST}${path}`;
   const res = await proxiedFetch(url, {
-    method,
+    method: httpMethod,
     headers: {
       Authorization: authorization,
       'X-Requested-By': vendorId,
