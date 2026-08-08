@@ -79,6 +79,8 @@ export async function GET(request: Request) {
     catalogError: catalogResult.error,
     catalogSkipped: catalogResult.skipped ?? false,
     catalogSyncedAt: catalogResult.catalogSyncedAt,
+    catalogMergedReturns: catalogResult.mergedReturnItems ?? 0,
+    catalogUnmatchedReturns: catalogResult.unmatchedReturnItems ?? 0,
     returnsLogged: returnResult.logged,
     returnsError: returnResult.error,
     returnsDebug: returnResult.debug,

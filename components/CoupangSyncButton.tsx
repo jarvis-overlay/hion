@@ -19,10 +19,14 @@ export default function CoupangSyncButton({
         setMessage(`⚠️ ${result.error}`);
       } else {
         const catalogPart = result.catalogSkipped
-          ? ` · 카탈로그는 최근에 돌려서 생략(1시간 쿨다운)`
+          ? ` · 카탈로그는 최근에 돌려서 생략(3시간 쿨다운)`
           : result.catalogError
           ? ` · 카탈로그 갱신 실패(${result.catalogError})`
-          : ` · 매핑 갱신 ${result.catalogMapped ?? 0}건`;
+          : ` · 매핑 갱신 ${result.catalogMapped ?? 0}건 (반품등급 병합 ${result.catalogMergedReturns ?? 0}건${
+              result.catalogUnmatchedReturns
+                ? `, 미매칭 ${result.catalogUnmatchedReturns}건`
+                : ''
+            })`;
         setMessage(
           `신규 등록 ${result.registered ?? 0}개 · 재고 변경 ${result.updated ?? 0}건 · 판매기록 ${result.logged ?? 0}건 · 반품 ${result.returnsLogged ?? 0}건${catalogPart}`
         );
