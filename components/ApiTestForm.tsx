@@ -3,10 +3,19 @@
 import { useState, useTransition } from 'react';
 import { testCoupangApi } from '@/app/dashboard/api-test/actions';
 
+type Field = {
+  key: string;
+  label: string;
+  placeholder?: string;
+  // 'date'면 yyyymmdd로, 'datetime'이면 yyyy-MM-ddTHH:mm으로 자동 변환해서
+  // 전송한다 - 날짜 형식을 직접 타이핑 안 해도 되게.
+  inputType?: 'text' | 'date' | 'datetime';
+};
+
 const ENDPOINTS: {
   key: string;
   label: string;
-  fields: { key: string; label: string; placeholder?: string }[];
+  fields: Field[];
 }[] = [
   {
     key: 'productList',
@@ -27,8 +36,8 @@ const ENDPOINTS: {
     key: 'orderList',
     label: '주문 목록 조회 (rg/orders)',
     fields: [
-      { key: 'paidDateFrom', label: 'paidDateFrom', placeholder: '20260806' },
-      { key: 'paidDateTo', label: 'paidDateTo', placeholder: '20260807' },
+      { key: 'paidDateFrom', label: 'paidDateFrom', inputType: 'date' },
+      { key: 'paidDateTo', label: 'paidDateTo', inputType: 'date' },
       { key: 'nextToken', label: 'nextToken (선택)' },
     ],
   },
@@ -41,16 +50,8 @@ const ENDPOINTS: {
     key: 'returnList',
     label: '반품/취소 목록 조회',
     fields: [
-      {
-        key: 'createdAtFrom',
-        label: 'createdAtFrom',
-        placeholder: '2026-08-01T00:00',
-      },
-      {
-        key: 'createdAtTo',
-        label: 'createdAtTo',
-        placeholder: '2026-08-07T23:59',
-      },
+      { key: 'createdAtFrom', label: 'createdAtFrom', inputType: 'datetime' },
+      { key: 'createdAtTo', label: 'createdAtTo', inputType: 'datetime' },
       { key: 'nextToken', label: 'nextToken (선택)' },
     ],
   },
@@ -60,14 +61,11 @@ const ENDPOINTS: {
     fields: [
       { key: 'method', label: 'HTTP 메서드 (기본 GET)', placeholder: 'GET' },
       {
-        key: 'path',
-        label: 'path (쿠팡 문서의 {vendorId}는 자동 치환됨)',
-        placeholder: '/v2/providers/openapi/apis/api/v6/vendors/{vendorId}/returnRequests',
-      },
-      {
-        key: 'query',
-        label: 'query string (? 뒷부분만, & 로 연결)',
-        placeholder: 'searchType=timeFrame&createdAtFrom=2026-08-06T00:00&createdAtTo=2026-08-07T23:59',
+        key: 'url',
+        label:
+          'path + query (쿠팡 문서의 {vendorId}는 자동 치환됨, ? 뒤에 쿼리스트링까지 한 번에)',
+        placeholder:
+          '/v2/providers/openapi/apis/api/v6/vendors/{vendorId}/returnRequests?searchType=timeFrame&createdAtFrom=2026-08-06T00:00&createdAtTo=2026-08-07T23:59',
       },
     ],
   },
@@ -87,11 +85,33 @@ export default function ApiTestForm() {
     setResult(null);
   }
 
+  function handleClear() {
+    setValues({});
+    setResult(null);
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setResult(null);
     startTransition(async () => {
-      const res = await testCoupangApi(endpointKey, values);
+      // 커스텀 URL은 path+query를 한 필드에 같이 입력받아서, 예전 endpoint의
+      // 남은 query string이 엉뚱하게 같이 전송되는 걸 막는다.
+      let sendValues: Record<string, string> = values;
+      if (endpointKey === 'custom') {
+        const [path, query = ''] = (values.url || '').split('?');
+        sendValues = { method: values.method || '', path, query };
+      } else {
+        // 날짜 선택기(date input)는 "2026-08-06" 형태로 값을 주는데, 쿠팡
+        // API는 필드마다 형식이 달라서(yyyymmdd vs yyyy-MM-ddTHH:mm) 여기서
+        // 맞춰서 변환한다. datetime-local은 이미 원하는 형식 그대로라 손 안 댐.
+        sendValues = { ...values };
+        for (const f of endpoint.fields) {
+          if (f.inputType === 'date' && sendValues[f.key]) {
+            sendValues[f.key] = sendValues[f.key].replace(/-/g, '');
+          }
+        }
+      }
+      const res = await testCoupangApi(endpointKey, sendValues);
       setResult(JSON.stringify(res, null, 2));
     });
   }
@@ -124,7 +144,13 @@ export default function ApiTestForm() {
                   {f.label}
                 </label>
                 <input
-                  type="text"
+                  type={
+                    f.inputType === 'date'
+                      ? 'date'
+                      : f.inputType === 'datetime'
+                      ? 'datetime-local'
+                      : 'text'
+                  }
                   value={values[f.key] || ''}
                   placeholder={f.placeholder}
                   onChange={(e) =>
@@ -137,13 +163,22 @@ export default function ApiTestForm() {
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={isPending}
-          className="btn-primary px-4 py-2 text-sm font-semibold disabled:opacity-50 self-start"
-        >
-          {isPending ? '조회 중...' : '조회하기'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={isPending}
+            className="btn-primary px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          >
+            {isPending ? '조회 중...' : '조회하기'}
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            className="px-4 py-2 text-sm font-semibold rounded-lg border border-paperLine hover:bg-paper/60"
+          >
+            초기화
+          </button>
+        </div>
       </form>
 
       {result && (
