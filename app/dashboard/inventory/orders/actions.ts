@@ -33,6 +33,11 @@ export async function addPurchaseOrder(formData: FormData) {
   const quantity = Number(formData.get('quantity') || 0);
   const unit_price_cny = Number(formData.get('unit_price_cny') || 0);
   const exchange_rate = Number(formData.get('exchange_rate') || 190);
+  const unit_price_krw_raw = formData.get('unit_price_krw');
+  const unit_price_krw =
+    unit_price_krw_raw && String(unit_price_krw_raw).trim() !== ''
+      ? Number(unit_price_krw_raw)
+      : null;
   const note = String(formData.get('note') || '').trim();
 
   if (!product_id || !order_date || quantity <= 0) return;
@@ -43,6 +48,7 @@ export async function addPurchaseOrder(formData: FormData) {
     quantity,
     unit_price_cny,
     exchange_rate,
+    unit_price_krw,
     note: note || null,
     author_email: user.email,
   });

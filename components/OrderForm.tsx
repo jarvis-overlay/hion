@@ -121,6 +121,25 @@ export default function OrderForm({ products }: { products: any[] }) {
         </div>
       </div>
 
+      <div className="flex items-center gap-2 text-xs text-inkSoft -mb-1">
+        <span className="flex-1 border-t border-paperLine" />
+        또는
+        <span className="flex-1 border-t border-paperLine" />
+      </div>
+
+      <div>
+        <label className="text-xs text-inkSoft">
+          최종 매입단가 (원화, 부가세·관세 등 다 포함해서 직접 입력 - 채우면
+          위 위안/환율 계산 대신 이 값을 써요)
+        </label>
+        <input
+          name="unit_price_krw"
+          type="number"
+          placeholder="예: 20000"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono w-full mt-1"
+        />
+      </div>
+
       <textarea
         name="note"
         placeholder="특이사항 (품질, 협상, 배송 이슈 등)"

@@ -25,7 +25,7 @@ export default async function AnalyticsPage() {
 
   const { data: purchaseOrders } = await supabase
     .from('purchase_orders')
-    .select('product_id, quantity, unit_price_cny, exchange_rate');
+    .select('product_id, quantity, unit_price_cny, exchange_rate, unit_price_krw');
 
   const { data: stockRows } = await supabase
     .from('warehouse_stock')
@@ -46,8 +46,11 @@ export default async function AnalyticsPage() {
     if (!costByProduct[po.product_id]) {
       costByProduct[po.product_id] = { costSum: 0, qtySum: 0 };
     }
-    costByProduct[po.product_id].costSum +=
-      Number(po.quantity) * Number(po.unit_price_cny) * Number(po.exchange_rate);
+    const unitCost =
+      po.unit_price_krw != null
+        ? Number(po.unit_price_krw)
+        : Number(po.unit_price_cny) * Number(po.exchange_rate);
+    costByProduct[po.product_id].costSum += Number(po.quantity) * unitCost;
     costByProduct[po.product_id].qtySum += Number(po.quantity);
   }
 
