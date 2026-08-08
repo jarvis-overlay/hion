@@ -9,6 +9,7 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
     items: [
       { href: '/dashboard', label: '홈' },
       { href: '/dashboard/margin', label: '마진 계산기' },
+      { href: '/dashboard/analytics', label: '성과 분석' },
     ],
   },
   {
