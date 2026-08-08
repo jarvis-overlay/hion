@@ -4,7 +4,10 @@ import { useState, useTransition } from 'react';
 import {
   deleteProduct,
   updateCoupangMapping,
+  updateCouponDiscount,
 } from '@/app/dashboard/inventory/products/actions';
+
+const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
 
 export default function ProductCard({ product }: { product: any }) {
   const [isPending, startTransition] = useTransition();
@@ -12,11 +15,20 @@ export default function ProductCard({ product }: { product: any }) {
   const [vendorItemId, setVendorItemId] = useState(
     product.coupang_vendor_item_id || ''
   );
+  const [editingDiscount, setEditingDiscount] = useState(false);
+  const [discount, setDiscount] = useState(String(product.coupon_discount || 0));
 
   function saveMapping() {
     startTransition(async () => {
       await updateCoupangMapping(product.id, vendorItemId);
       setEditingMapping(false);
+    });
+  }
+
+  function saveDiscount() {
+    startTransition(async () => {
+      await updateCouponDiscount(product.id, Number(discount) || 0);
+      setEditingDiscount(false);
     });
   }
 
@@ -72,6 +84,40 @@ export default function ProductCard({ product }: { product: any }) {
             />
             <button
               onClick={saveMapping}
+              disabled={isPending}
+              className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+            >
+              저장
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="pt-2 border-t border-paperLine">
+        {!editingDiscount ? (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-inkSoft">
+              쿠폰 할인액 (정상 재고 판매에만 적용):{' '}
+              <span className="font-mono text-ink">{fmt(product.coupon_discount || 0)}원</span>
+            </span>
+            <button
+              onClick={() => setEditingDiscount(true)}
+              className="text-xs text-inkSoft hover:text-ink underline"
+            >
+              수정
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              value={discount}
+              onChange={(e) => setDiscount(e.target.value)}
+              type="number"
+              placeholder="0"
+              className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono flex-1"
+            />
+            <button
+              onClick={saveDiscount}
               disabled={isPending}
               className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
             >
