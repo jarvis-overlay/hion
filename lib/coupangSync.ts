@@ -138,7 +138,8 @@ export async function runCoupangInventorySync(
 // 전체 재스캔이라, 뭐가 얼마나 자주 이 함수를 부르든 상관없이 최소 이
 // 간격(분) 안에는 실제 API를 다시 두드리지 않는다. 프록시(Fixie) 요청
 // 할당량이 반복 호출로 순식간에 소진되는 걸 막기 위한 안전장치.
-const CATALOG_COOLDOWN_MINUTES = 60;
+// 하루 6/9/12/15/18/21/24시, 3시간 간격으로만 돌게 하려는 의도라 180분으로 맞춤.
+const CATALOG_COOLDOWN_MINUTES = 180;
 
 export async function syncCoupangProductCatalog(
   supabase: any,
