@@ -85,14 +85,17 @@ export async function testCoupangApi(endpoint: string, params: Record<string, st
         });
         break;
       case 'custom': {
-        // path에 {vendorId}가 들어있으면 실제 vendorId로 자동 치환해준다
-        // (쿠팡 문서 예시 URL을 그대로 복붙해도 되게).
+        // path/query에 {vendorId}가 들어있으면 실제 vendorId로 자동
+        // 치환해준다 (쿠팡 문서 예시 URL을 그대로 복붙해도 되게 - path
+        // 파라미터로 쓰는 API도 있고 query 파라미터로 쓰는 API도 있어서
+        // 둘 다 처리).
         const rawPath = (params.path || '').replace(/\{vendorId\}/g, cred.vendor_id);
+        const rawQuery = (params.query || '').replace(/\{vendorId\}/g, cred.vendor_id);
         const result = await fetchCoupangRaw({
           ...base,
           method: params.method || 'GET',
           path: rawPath,
-          query: params.query || '',
+          query: rawQuery,
         });
         data = result;
         break;
