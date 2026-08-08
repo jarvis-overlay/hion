@@ -75,20 +75,23 @@ export default function ProductCard({ product }: { product: any }) {
             </button>
           </div>
         ) : (
-          <div className="flex gap-2">
-            <input
-              value={vendorItemId}
-              onChange={(e) => setVendorItemId(e.target.value)}
-              placeholder="쿠팡 옵션ID (vendorItemId)"
-              className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono flex-1"
-            />
-            <button
-              onClick={saveMapping}
-              disabled={isPending}
-              className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
-            >
-              저장
-            </button>
+          <div>
+            <label className="text-xs text-inkSoft">쿠팡 옵션ID 입력</label>
+            <div className="flex gap-2 mt-1">
+              <input
+                value={vendorItemId}
+                onChange={(e) => setVendorItemId(e.target.value)}
+                placeholder="쿠팡 옵션ID (vendorItemId)"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono flex-1"
+              />
+              <button
+                onClick={saveMapping}
+                disabled={isPending}
+                className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                저장
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -108,21 +111,26 @@ export default function ProductCard({ product }: { product: any }) {
             </button>
           </div>
         ) : (
-          <div className="flex gap-2">
-            <input
-              value={discount}
-              onChange={(e) => setDiscount(e.target.value)}
-              type="number"
-              placeholder="0"
-              className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono flex-1"
-            />
-            <button
-              onClick={saveDiscount}
-              disabled={isPending}
-              className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
-            >
-              저장
-            </button>
+          <div>
+            <label className="text-xs text-inkSoft">
+              쿠폰 할인액 입력 (원, 정상 재고 판매에만 적용됨)
+            </label>
+            <div className="flex gap-2 mt-1">
+              <input
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+                type="number"
+                placeholder="0"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono flex-1"
+              />
+              <button
+                onClick={saveDiscount}
+                disabled={isPending}
+                className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                저장
+              </button>
+            </div>
           </div>
         )}
       </div>
