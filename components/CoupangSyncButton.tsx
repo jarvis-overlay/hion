@@ -18,7 +18,9 @@ export default function CoupangSyncButton({
       if (result.error) {
         setMessage(`⚠️ ${result.error}`);
       } else {
-        const catalogPart = result.catalogError
+        const catalogPart = result.catalogSkipped
+          ? ` · 카탈로그는 최근에 돌려서 생략(1시간 쿨다운)`
+          : result.catalogError
           ? ` · 카탈로그 갱신 실패(${result.catalogError})`
           : ` · 매핑 갱신 ${result.catalogMapped ?? 0}건`;
         setMessage(

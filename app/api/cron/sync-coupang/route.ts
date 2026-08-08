@@ -38,6 +38,10 @@ export async function GET(request: Request) {
   // 이 파라미터로 주문/재고만 가볍게 동기화하도록 cron-job.org에서
   // URL을 다르게 등록해서 쓴다.
   const skipCatalog = searchParams.get('catalog') === '0';
+  // 카탈로그 동기화는 함수 안에 자체 쿨다운(기본 1시간)이 있어서 너무 자주
+  // 불러도 실제 API는 다시 안 두드리는데, 백필처럼 강제로 최신화가 필요하면
+  // ?force=1 로 쿨다운을 무시하고 강제 실행할 수 있다.
+  const forceCatalog = searchParams.get('force') === '1';
   // 반품이 실제로 API 응답에서 어떻게 표현되는지 확인하기 위한 임시 디버그
   const rawDebug = searchParams.get('rawdebug') === '1';
 
@@ -46,7 +50,11 @@ export async function GET(request: Request) {
   let catalogResult: any = {};
   if (!skipCatalog) {
     try {
-      catalogResult = await syncCoupangProductCatalog(supabase, 'auto-sync@hion');
+      catalogResult = await syncCoupangProductCatalog(
+        supabase,
+        'auto-sync@hion',
+        forceCatalog
+      );
     } catch (e: any) {
       catalogResult = { error: e?.message || String(e) };
     }
@@ -69,6 +77,8 @@ export async function GET(request: Request) {
     catalogCreated: catalogResult.createdProducts ?? 0,
     catalogMapped: catalogResult.mappedVendorItems ?? 0,
     catalogError: catalogResult.error,
+    catalogSkipped: catalogResult.skipped ?? false,
+    catalogSyncedAt: catalogResult.catalogSyncedAt,
     returnsLogged: returnResult.logged,
     returnsError: returnResult.error,
     returnsDebug: returnResult.debug,

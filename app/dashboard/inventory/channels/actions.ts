@@ -115,6 +115,7 @@ export async function syncCoupangInventory() {
     catalogCreated: catalogResult.createdProducts ?? 0,
     catalogMapped: catalogResult.mappedVendorItems ?? 0,
     catalogError: catalogResult.error,
+    catalogSkipped: catalogResult.skipped ?? false,
     returnsLogged: returnResult.logged,
     returnsError: returnResult.error,
   };

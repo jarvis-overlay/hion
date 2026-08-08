@@ -134,9 +134,16 @@ export async function runCoupangInventorySync(
 // 이름이 달라도 전부 같은 products 행 하나로 묶인다 (이름이 아니라
 // sellerProductId를 기준으로 병합하기 때문에 표기 이름이 달라도 안전함).
 // ============================================================
+// 상품 하나당 상세조회 1번 + 옵션 하나당 재고조회 1번씩 나가는 무거운
+// 전체 재스캔이라, 뭐가 얼마나 자주 이 함수를 부르든 상관없이 최소 이
+// 간격(분) 안에는 실제 API를 다시 두드리지 않는다. 프록시(Fixie) 요청
+// 할당량이 반복 호출로 순식간에 소진되는 걸 막기 위한 안전장치.
+const CATALOG_COOLDOWN_MINUTES = 60;
+
 export async function syncCoupangProductCatalog(
   supabase: any,
-  authorEmail: string
+  authorEmail: string,
+  force: boolean = false
 ) {
   const { data: cred } = await supabase
     .from('channel_credentials')
@@ -146,6 +153,24 @@ export async function syncCoupangProductCatalog(
 
   if (!cred || !cred.connected || !cred.vendor_id) {
     return { error: '쿠팡 연동이 안 되어있어요. 채널 연동에서 키를 먼저 저장해줘.' };
+  }
+
+  if (!force && cred.catalog_synced_at) {
+    const elapsedMs = Date.now() - new Date(cred.catalog_synced_at).getTime();
+    if (elapsedMs < CATALOG_COOLDOWN_MINUTES * 60 * 1000) {
+      return {
+        skipped: true,
+        reason: 'cooldown',
+        catalogSyncedAt: cred.catalog_synced_at,
+        scannedProducts: 0,
+        scannedItems: 0,
+        qualified: 0,
+        disqualified: 0,
+        createdProducts: 0,
+        mappedVendorItems: 0,
+        inventoryByVendorItem: {},
+      };
+    }
   }
 
   let scannedProducts = 0;
@@ -340,6 +365,13 @@ export async function syncCoupangProductCatalog(
   } catch (e: any) {
     lastError = e?.message || String(e);
   }
+
+  // 시도했다는 사실 자체를 기록 - 이번에 API 에러가 났어도 쿨다운은 갱신해서
+  // 잘못된 설정 등으로 계속 재시도하며 할당량을 태우는 걸 막는다.
+  await supabase
+    .from('channel_credentials')
+    .update({ catalog_synced_at: new Date().toISOString() })
+    .eq('channel', 'coupang');
 
   return {
     scannedProducts,
