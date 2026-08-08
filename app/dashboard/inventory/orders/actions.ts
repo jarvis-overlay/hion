@@ -3,6 +3,24 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
+// 위안(CNY) -> 원(KRW) 환율을 무료 공개 API로 조회. 실패하면 기본값(190)을
+// 그대로 쓰게 null을 돌려주고, 폼에서 기존 값을 유지한다.
+export async function fetchCnyToKrwRate(): Promise<{ rate: number | null; error?: string }> {
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/CNY', {
+      cache: 'no-store',
+    });
+    const json = await res.json();
+    const rate = json?.rates?.KRW;
+    if (typeof rate !== 'number') {
+      return { rate: null, error: '환율 정보를 못 가져왔어요.' };
+    }
+    return { rate };
+  } catch (e: any) {
+    return { rate: null, error: '환율 조회 중 오류가 발생했어요.' };
+  }
+}
+
 export async function addPurchaseOrder(formData: FormData) {
   const supabase = createClient();
   const {
