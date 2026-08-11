@@ -122,6 +122,102 @@ export async function runCoupangInventorySync(
 }
 
 // ============================================================
+// 하루 단위 재고 대사(반품 추정)
+// - 로켓그로스는 반품/취소를 조회할 수 있는 API가 없다는 게 실측으로
+//   확인됐다 (rg/orders, returnRequests, revenue-history 전부 빈 값).
+// - 대신 "그 사이 판매로 잡힌 수량"과 "실제 재고 감소량"을 하루 단위로만
+//   비교한다. 순간 재고를 자주 비교하면(수동 테스트 등) API 응답의
+//   일시적 흔들림을 반품으로 오판하는 문제가 있었어서, 이 함수는 하루에
+//   한 번 도는 전체 동기화(자정)에서만 호출해야 한다.
+// - 재고가 늘어난 날(대량 입고 등)은 비교 자체를 건너뛴다 - 판매량과
+//   재고감소량을 단순 비교하는 방식은 입고가 섞이면 의미가 없어진다.
+// ============================================================
+export async function runDailyReturnEstimate(supabase: any, authorEmail: string) {
+  const { data: products } = await supabase
+    .from('products')
+    .select('id, prev_stock_snapshot, prev_stock_snapshot_at');
+
+  const { data: stockRows } = await supabase
+    .from('warehouse_stock')
+    .select('product_id, quantity')
+    .eq('warehouse', 'coupang');
+  const currentQtyByProduct: Record<string, number> = {};
+  for (const row of stockRows || []) {
+    currentQtyByProduct[row.product_id] = Number(row.quantity) || 0;
+  }
+
+  let estimated = 0;
+  let checked = 0;
+  const now = new Date();
+
+  for (const p of products || []) {
+    const currentQty = currentQtyByProduct[p.id];
+    if (currentQty === undefined) continue; // 쿠팡 창고 재고 자체가 없는 상품
+
+    if (p.prev_stock_snapshot != null && p.prev_stock_snapshot_at) {
+      checked++;
+      const prevQty = Number(p.prev_stock_snapshot);
+      const actualDecrease = prevQty - currentQty; // 양수 = 실제로 재고가 줄었음
+
+      const { data: soldRows } = await supabase
+        .from('stock_movements')
+        .select('quantity')
+        .eq('product_id', p.id)
+        .eq('channel', 'coupang')
+        .eq('type', 'out')
+        .gte('occurred_at', p.prev_stock_snapshot_at);
+      const soldQty = (soldRows || []).reduce(
+        (sum: number, r: any) => sum + -Number(r.quantity),
+        0
+      );
+
+      // 재고가 그 사이 늘었으면(입고 섞임) 비교 무의미하니 건너뛴다.
+      if (actualDecrease >= 0) {
+        const gap = soldQty - actualDecrease;
+        if (gap > 0) {
+          const { data: lastSale } = await supabase
+            .from('stock_movements')
+            .select('quantity, amount')
+            .eq('product_id', p.id)
+            .eq('channel', 'coupang')
+            .eq('type', 'out')
+            .order('occurred_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const unitPrice =
+            lastSale && lastSale.quantity
+              ? Math.abs(Number(lastSale.amount) / Number(lastSale.quantity))
+              : 0;
+
+          await supabase.from('stock_movements').insert({
+            product_id: p.id,
+            warehouse: 'coupang',
+            type: 'in',
+            quantity: gap,
+            channel: 'coupang',
+            amount: -gap * unitPrice,
+            occurred_at: now.toISOString(),
+            note: `일일 재고 대사 - 반품 추정 (자동, 확인 필요) - 판매 ${soldQty}개인데 실제 재고는 ${actualDecrease}개만 줄어듦`,
+            author_email: authorEmail,
+          });
+          estimated++;
+        }
+      }
+    }
+
+    await supabase
+      .from('products')
+      .update({
+        prev_stock_snapshot: currentQty,
+        prev_stock_snapshot_at: now.toISOString(),
+      })
+      .eq('id', p.id);
+  }
+
+  return { checked, estimated };
+}
+
+// ============================================================
 // 쿠팡 상품 카탈로그 동기화
 // - "상품 목록 조회" API로 이 계정의 전체 등록상품(sellerProductId) 목록을 가져오고
 // - 각 상품마다 "상품 상세 조회" API로 옵션(vendorItemId)별 바코드를 확인하고

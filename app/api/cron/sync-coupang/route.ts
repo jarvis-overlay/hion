@@ -4,6 +4,7 @@ import {
   runCoupangInventorySync,
   runCoupangOrderSync,
   runCoupangReturnSync,
+  runDailyReturnEstimate,
   syncCoupangProductCatalog,
 } from '@/lib/coupangSync';
 
@@ -70,10 +71,20 @@ export async function GET(request: Request) {
     catalogResult.inventoryByVendorItem
   );
 
+  // 하루 단위 재고 대사(반품 추정)는 자정 전체 동기화(카탈로그 포함) 때만
+  // 돈다 - 순간 재고를 자주 비교하면 API 응답의 일시적 흔들림을 반품으로
+  // 오판했던 문제가 있어서, 절대 매번(수동 버튼 포함) 돌면 안 된다.
+  let dailyReturnResult: any = {};
+  if (!skipCatalog) {
+    dailyReturnResult = await runDailyReturnEstimate(supabase, 'auto-sync@hion');
+  }
+
   return NextResponse.json({
     ...stockResult,
     ...orderResult,
     daysBack,
+    dailyReturnChecked: dailyReturnResult.checked,
+    dailyReturnEstimated: dailyReturnResult.estimated,
     catalogCreated: catalogResult.createdProducts ?? 0,
     catalogMapped: catalogResult.mappedVendorItems ?? 0,
     catalogError: catalogResult.error,
