@@ -3,6 +3,12 @@ import { createClient } from '@/lib/supabase/server';
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString('ko-KR');
 
+// 마진 계산기(app/dashboard/margin)와 동일한 공식을 써야 마진율이 일치한다.
+// 판매가 - 매출부가세(10%) - 매입가 + 매입부가세(10%, 매입세액공제로 환급되니
+// 다시 더함) - 쿠팡수수료. 배송비/광고비는 판매 건별로 저장돼 있지 않아서
+// 여기서는 뺄 수 없다 (그만큼 실제 마진은 이 표보다 더 낮을 수 있음).
+const COUPANG_FEE_RATE = 10.8;
+
 const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 const TIME_BUCKETS = [
   { key: 0, label: '새벽 (0~5시)' },
@@ -88,8 +94,13 @@ export default async function AnalyticsPage() {
     const qty30d = sales?.qty || 0;
     const amount30d = sales?.amount || 0;
     const avgSalePrice = qty30d > 0 ? amount30d / qty30d : null;
-    const profitPerUnit =
-      avgCost !== null && avgSalePrice !== null ? avgSalePrice - avgCost : null;
+    let profitPerUnit: number | null = null;
+    if (avgCost !== null && avgSalePrice !== null) {
+      const outputVat = avgSalePrice * 0.1;
+      const importVat = avgCost * 0.1;
+      const fee = avgSalePrice * (COUPANG_FEE_RATE / 100);
+      profitPerUnit = avgSalePrice - outputVat - avgCost + importVat - fee;
+    }
     const marginPct =
       profitPerUnit !== null && avgSalePrice ? (profitPerUnit / avgSalePrice) * 100 : null;
     const totalProfit30d = profitPerUnit !== null ? profitPerUnit * qty30d : null;
@@ -129,9 +140,10 @@ export default async function AnalyticsPage() {
           상품별 마진 랭킹 (최근 30일)
         </h2>
         <p className="text-xs text-inkSoft mb-3">
-          발주 기록의 평균 매입단가와 실제 판매가를 비교해서, 진짜 이익을 많이
-          낸 상품 순으로 정렬했어요. 발주 기록이 없거나 최근 30일 판매가 없는
-          상품은 계산에서 빠져요.
+          마진 계산기와 같은 공식(매출/매입 부가세, 쿠팡수수료 {COUPANG_FEE_RATE}%
+          반영)으로 계산했어요. 배송비·광고비는 판매 건별로 기록되지 않아서 이
+          표에는 안 빠져있어요 — 실제 마진은 이보다 조금 더 낮을 수 있어요.
+          발주 기록이 없거나 최근 30일 판매가 없는 상품은 계산에서 빠져요.
         </p>
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
