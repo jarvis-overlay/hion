@@ -38,15 +38,6 @@ export async function deleteProduct(id: string) {
   revalidatePath('/dashboard/inventory/products');
 }
 
-export async function updateCoupangMapping(id: string, vendorItemId: string) {
-  const supabase = createClient();
-  await supabase
-    .from('products')
-    .update({ coupang_vendor_item_id: vendorItemId.trim() || null })
-    .eq('id', id);
-  revalidatePath('/dashboard/inventory/products');
-}
-
 export async function fetchImportableCoupangProducts() {
   const supabase = createClient();
   const { data: cred } = await supabase
