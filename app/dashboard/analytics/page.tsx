@@ -26,7 +26,7 @@ export default async function AnalyticsPage() {
 
   const { data: products } = await supabase
     .from('products')
-    .select('id, name')
+    .select('id, name, shipping_cost')
     .order('name');
 
   const { data: purchaseOrders } = await supabase
@@ -94,12 +94,14 @@ export default async function AnalyticsPage() {
     const qty30d = sales?.qty || 0;
     const amount30d = sales?.amount || 0;
     const avgSalePrice = qty30d > 0 ? amount30d / qty30d : null;
+    const shippingCost = Number(p.shipping_cost) || 0;
     let profitPerUnit: number | null = null;
     if (avgCost !== null && avgSalePrice !== null) {
       const outputVat = avgSalePrice * 0.1;
       const importVat = avgCost * 0.1;
       const fee = avgSalePrice * (COUPANG_FEE_RATE / 100);
-      profitPerUnit = avgSalePrice - outputVat - avgCost + importVat - fee;
+      profitPerUnit =
+        avgSalePrice - outputVat - avgCost + importVat - fee - shippingCost;
     }
     const marginPct =
       profitPerUnit !== null && avgSalePrice ? (profitPerUnit / avgSalePrice) * 100 : null;
@@ -140,9 +142,9 @@ export default async function AnalyticsPage() {
           상품별 마진 랭킹 (최근 30일)
         </h2>
         <p className="text-xs text-inkSoft mb-3">
-          마진 계산기와 같은 공식(매출/매입 부가세, 쿠팡수수료 {COUPANG_FEE_RATE}%
-          반영)으로 계산했어요. 배송비·광고비는 판매 건별로 기록되지 않아서 이
-          표에는 안 빠져있어요 — 실제 마진은 이보다 조금 더 낮을 수 있어요.
+          마진 계산기와 같은 공식(매출/매입 부가세, 쿠팡수수료 {COUPANG_FEE_RATE}%,
+          상품별 건당 배송비 반영)으로 계산했어요. 광고비는 판매 건별로 기록되지
+          않아서 반영이 안 됐어요 — 실제 마진은 이보다 조금 더 낮을 수 있어요.
           발주 기록이 없거나 최근 30일 판매가 없는 상품은 계산에서 빠져요.
         </p>
         <div className="card overflow-x-auto">

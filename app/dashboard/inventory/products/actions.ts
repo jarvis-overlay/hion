@@ -49,6 +49,17 @@ export async function updateCouponDiscount(id: string, discount: number) {
   revalidatePath('/dashboard/inventory/products');
 }
 
+// 상품별 고정 배송비 (원). 성과 분석의 마진 계산에 반영된다.
+export async function updateShippingCost(id: string, cost: number) {
+  const supabase = createClient();
+  await supabase
+    .from('products')
+    .update({ shipping_cost: cost })
+    .eq('id', id);
+  revalidatePath('/dashboard/inventory/products');
+  revalidatePath('/dashboard/analytics');
+}
+
 export async function fetchImportableCoupangProducts() {
   const supabase = createClient();
   const { data: cred } = await supabase
