@@ -21,14 +21,19 @@ export default async function ProductsPage() {
   // 동기화 로직 어디에서도 안 읽는다.
   const { data: vendorItemRows } = await supabase
     .from('product_vendor_items')
-    .select('product_id, vendor_item_id');
+    .select('product_id, vendor_item_id, is_return_grade');
   const vendorItemsByProduct: Record<string, string[]> = {};
+  const returnGradeByProduct: Record<string, boolean> = {};
   for (const row of vendorItemRows || []) {
     if (!vendorItemsByProduct[row.product_id]) {
       vendorItemsByProduct[row.product_id] = [];
     }
     vendorItemsByProduct[row.product_id].push(row.vendor_item_id);
+    if (row.is_return_grade) returnGradeByProduct[row.product_id] = true;
   }
+
+  const mainProducts = (products || []).filter((p) => !returnGradeByProduct[p.id]);
+  const returnGradeProducts = (products || []).filter((p) => returnGradeByProduct[p.id]);
 
   return (
     <div>
@@ -38,9 +43,11 @@ export default async function ProductsPage() {
       </p>
       {coupangConnected && <CoupangImportPicker />}
       <ProductForm />
-      <div className="grid gap-3 sm:grid-cols-2">
-        {products?.length ? (
-          products.map((p) => (
+
+      <h2 className="font-display text-lg font-bold mb-3">메인 상품</h2>
+      <div className="grid gap-3 sm:grid-cols-2 mb-8">
+        {mainProducts.length ? (
+          mainProducts.map((p) => (
             <ProductCard
               key={p.id}
               product={p}
@@ -53,6 +60,27 @@ export default async function ProductsPage() {
           </p>
         )}
       </div>
+
+      {returnGradeProducts.length > 0 && (
+        <>
+          <h2 className="font-display text-lg font-bold mb-1">
+            반품 재판매 상품
+          </h2>
+          <p className="text-xs text-inkSoft mb-3">
+            쿠팡이 반품받은 상품을 별도 등급(회수품)으로 재등록한 것들이에요.
+            쿠폰 할인이 적용 안 되고, 원가/마진도 메인 상품과 따로 관리돼요.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {returnGradeProducts.map((p) => (
+              <ProductCard
+                key={p.id}
+                product={p}
+                vendorItemIds={vendorItemsByProduct[p.id] || []}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

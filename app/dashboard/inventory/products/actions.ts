@@ -72,6 +72,21 @@ export async function updateManualCost(id: string, cost: number | null) {
   revalidatePath('/dashboard/analytics');
 }
 
+// 상품 카드에 마진 계산기 공식을 바로 보여주기 위한 판매가(쿠폰 적용 후
+// 실제 판매가)와 쿠팡수수료율.
+export async function updateMarginInputs(
+  id: string,
+  salePrice: number | null,
+  feeRate: number
+) {
+  const supabase = createClient();
+  await supabase
+    .from('products')
+    .update({ sale_price: salePrice, fee_rate: feeRate })
+    .eq('id', id);
+  revalidatePath('/dashboard/inventory/products');
+}
+
 export async function fetchImportableCoupangProducts() {
   const supabase = createClient();
   const { data: cred } = await supabase
