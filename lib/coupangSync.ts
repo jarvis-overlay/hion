@@ -386,7 +386,11 @@ export async function syncCoupangProductCatalog(
           const { error: mapErr } = await supabase
             .from('product_vendor_items')
             .upsert(
-              { product_id: productRowId, vendor_item_id: vendorItemId },
+              {
+                product_id: productRowId,
+                vendor_item_id: vendorItemId,
+                is_return_grade: false,
+              },
               { onConflict: 'vendor_item_id' }
             );
           if (!mapErr) mappedVendorItems++;
@@ -448,7 +452,11 @@ export async function syncCoupangProductCatalog(
       const { error: mapErr } = await supabase
         .from('product_vendor_items')
         .upsert(
-          { product_id: productRowId, vendor_item_id: pending.vendorItemId },
+          {
+            product_id: productRowId,
+            vendor_item_id: pending.vendorItemId,
+            is_return_grade: true,
+          },
           { onConflict: 'vendor_item_id' }
         );
       if (!mapErr) mappedVendorItems++;
@@ -517,11 +525,24 @@ export async function runCoupangOrderSync(
   // (주문 API에는 바코드/재고 정보가 없어서 이 시점에 자격을 판단할 수 없기 때문)
   const { data: mappings } = await supabase
     .from('product_vendor_items')
-    .select('product_id, vendor_item_id');
+    .select('product_id, vendor_item_id, is_return_grade');
 
   const mapByVendorItem: Record<string, string> = {};
+  const returnGradeByVendorItem: Record<string, boolean> = {};
   for (const m of mappings || []) {
     mapByVendorItem[String(m.vendor_item_id)] = m.product_id;
+    returnGradeByVendorItem[String(m.vendor_item_id)] = !!m.is_return_grade;
+  }
+
+  // 상품별 쿠폰 할인액 - 정상 재고 판매(반품등급 아님)에만 적용한다.
+  // 쿠팡 API가 쿠폰 할인 반영 전 정가(unitSalesPrice)만 줘서, 직접 뺀
+  // 값으로 매출을 계산해야 실제 판매가에 가깝다.
+  const { data: productsData } = await supabase
+    .from('products')
+    .select('id, coupon_discount');
+  const discountByProduct: Record<string, number> = {};
+  for (const p of productsData || []) {
+    discountByProduct[p.id] = Number(p.coupon_discount) || 0;
   }
 
   const fmt = (d: Date) =>
@@ -610,7 +631,13 @@ export async function runCoupangOrderSync(
             // 경우를 대비한 처리 - 무조건 버리지 않고 입고(반품)로 남긴다.
             const isReturn = salesQty < 0;
             const qty = Math.abs(salesQty);
-            const unitPrice = Number(item.unitSalesPrice || 0);
+            const rawUnitPrice = Number(item.unitSalesPrice || 0);
+            // 쿠팡 API가 쿠폰 할인 반영 전 정가만 줘서, 반품 재판매(회수품)가
+            // 아닌 정상 재고 판매에만 상품별 쿠폰 할인액을 직접 빼준다.
+            const isReturnGrade = returnGradeByVendorItem[vendorItemId] || false;
+            const unitPrice = isReturnGrade
+              ? rawUnitPrice
+              : Math.max(0, rawUnitPrice - (discountByProduct[productId] || 0));
 
             const { data: inserted, error } = await supabase
               .from('stock_movements')

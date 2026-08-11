@@ -14,7 +14,11 @@ export default function OrderRow({ order }: { order: any }) {
   const [coupangQty, setCoupangQty] = useState('');
   const [ownQty, setOwnQty] = useState('');
 
-  const totalKrw = order.quantity * order.unit_price_cny * order.exchange_rate;
+  const unitKrw =
+    order.unit_price_krw != null
+      ? Number(order.unit_price_krw)
+      : order.unit_price_cny * order.exchange_rate;
+  const totalKrw = order.quantity * unitKrw;
   const isReceived = order.status === 'received';
 
   function handleReceive() {
@@ -51,9 +55,11 @@ export default function OrderRow({ order }: { order: any }) {
             </span>
           </div>
           <div className="text-xs text-inkSoft font-mono mt-1">
-            {order.order_date} · 수량 {order.quantity} · 단가 ¥
-            {order.unit_price_cny} · 환율 {order.exchange_rate} · 약{' '}
-            {fmt(totalKrw)}원
+            {order.order_date} · 수량 {order.quantity} ·{' '}
+            {order.unit_price_krw != null
+              ? `개당 ${fmt(unitKrw)}원 (직접입력)`
+              : `단가 ¥${order.unit_price_cny} · 환율 ${order.exchange_rate}`}{' '}
+            · 총 {fmt(totalKrw)}원
           </div>
           {order.note && (
             <p className="text-xs text-ink mt-1">{order.note}</p>

@@ -14,7 +14,8 @@ function badgeClass(pct: number) {
 export default function MarginCalculator({ entries }: { entries: any[] }) {
   const [name, setName] = useState('');
   const [cost, setCost] = useState('');
-  const [price, setPrice] = useState('');
+  const [listPrice, setListPrice] = useState('');
+  const [coupon, setCoupon] = useState('');
   const [feeRate, setFeeRate] = useState('10.8');
   const [ship, setShip] = useState('');
   const [ad, setAd] = useState('');
@@ -22,17 +23,23 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
   const [isPending, startTransition] = useTransition();
 
   const result = useMemo(() => {
-    const p = parseFloat(price) || 0;
-    const c = parseFloat(cost) || 0;
+    const lp = parseFloat(listPrice) || 0;
+    const cp = parseFloat(coupon) || 0;
+    const p = Math.max(0, lp - cp); // 실제 판매가 (쿠폰 할인 적용 후) - 이 값 기준으로 계산해야 마진이 정확함
+    const c = parseFloat(cost) || 0; // 매입가 (부가세 제외)
     const fr = parseFloat(feeRate) || 0;
     const s = parseFloat(ship) || 0;
     const a = parseFloat(ad) || 0;
     const e = parseFloat(etc) || 0;
-    const fee = p * (fr / 100);
-    const profit = p - (c + s + a + e + fee);
+    const fee = p * (fr / 100); // 쿠팡수수료
+    // 판매가 - 매출부가세(판매가의 10%) - 매입가 + 매입부가세(매입가의 10%,
+    // 매입세액공제로 돌려받으니 다시 더함) - 쿠팡수수료 - 배송비 - (선택)광고비/기타
+    const outputVat = p * 0.1; // 매출부가세
+    const importVat = c * 0.1; // 매입부가세 (환급분)
+    const profit = p - outputVat - c + importVat - fee - s - a - e;
     const marginPct = p > 0 ? (profit / p) * 100 : 0;
-    return { p, c, fr, s, a, e, fee, profit, marginPct };
-  }, [name, cost, price, feeRate, ship, ad, etc]);
+    return { lp, cp, p, c, fr, s, a, e, fee, outputVat, importVat, profit, marginPct };
+  }, [name, cost, listPrice, coupon, feeRate, ship, ad, etc]);
 
   function handleSave() {
     startTransition(async () => {
@@ -49,7 +56,8 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
       });
       setName('');
       setCost('');
-      setPrice('');
+      setListPrice('');
+      setCoupon('');
       setShip('');
       setAd('');
       setEtc('');
@@ -75,7 +83,31 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
               placeholder="상품명"
               className="border border-paperLine bg-white px-3 py-2 text-sm"
             />
-            <label className="text-xs text-inkSoft -mb-2">원가 (사입가)</label>
+            <label className="text-xs text-inkSoft -mb-2">정가 (쿠폰 적용 전)</label>
+            <input
+              value={listPrice}
+              onChange={(e) => setListPrice(e.target.value)}
+              type="number"
+              placeholder="0"
+              className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+            />
+            <label className="text-xs text-inkSoft -mb-2">
+              쿠폰 할인액 (선택)
+            </label>
+            <input
+              value={coupon}
+              onChange={(e) => setCoupon(e.target.value)}
+              type="number"
+              placeholder="0"
+              className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+            />
+            <div className="text-xs text-inkSoft -mb-2 flex justify-between">
+              <span>→ 실제 판매가 (마진 계산 기준)</span>
+              <span className="font-mono font-semibold text-ink">{fmt(result.p)}</span>
+            </div>
+            <label className="text-xs text-inkSoft -mb-2">
+              매입가 (중국에서 가져온 총액, 부가세 제외)
+            </label>
             <input
               value={cost}
               onChange={(e) => setCost(e.target.value)}
@@ -83,16 +115,8 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
               placeholder="0"
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
             />
-            <label className="text-xs text-inkSoft -mb-2">판매가</label>
-            <input
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              type="number"
-              placeholder="0"
-              className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-            />
             <label className="text-xs text-inkSoft -mb-2">
-              플랫폼 수수료율 (%)
+              쿠팡수수료율 (%)
             </label>
             <input
               value={feeRate}
@@ -101,7 +125,7 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
               step="0.1"
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
             />
-            <label className="text-xs text-inkSoft -mb-2">택배비 + 포장비</label>
+            <label className="text-xs text-inkSoft -mb-2">배송비</label>
             <input
               value={ship}
               onChange={(e) => setShip(e.target.value)}
@@ -110,7 +134,7 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
             />
             <label className="text-xs text-inkSoft -mb-2">
-              광고비 (건당 평균)
+              광고비 (선택, 건당 평균)
             </label>
             <input
               value={ad}
@@ -119,7 +143,7 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
               placeholder="0"
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
             />
-            <label className="text-xs text-inkSoft -mb-2">기타 비용</label>
+            <label className="text-xs text-inkSoft -mb-2">기타 비용 (선택)</label>
             <input
               value={etc}
               onChange={(e) => setEtc(e.target.value)}
@@ -148,14 +172,22 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
           </div>
 
           <div className="text-sm grid gap-1.5">
-            <Line label="판매가" value={fmt(result.p)} />
-            <Line label="수수료" value={'-' + fmt(result.fee)} />
-            <Line label="원가" value={'-' + fmt(result.c)} />
-            <Line label="택배·포장" value={'-' + fmt(result.s)} />
-            <Line label="광고비" value={'-' + fmt(result.a)} />
-            <Line label="기타" value={'-' + fmt(result.e)} />
+            {result.cp > 0 && (
+              <>
+                <Line label="정가" value={fmt(result.lp)} />
+                <Line label="쿠폰 할인" value={'-' + fmt(result.cp)} />
+              </>
+            )}
+            <Line label="실제 판매가" value={fmt(result.p)} />
+            <Line label="매출부가세 (판매가의 10%)" value={'-' + fmt(result.outputVat)} />
+            <Line label="매입가" value={'-' + fmt(result.c)} />
+            <Line label="매입부가세 (매입가의 10%)" value={'+' + fmt(result.importVat)} />
+            <Line label="쿠팡수수료" value={'-' + fmt(result.fee)} />
+            <Line label="배송비" value={'-' + fmt(result.s)} />
+            {result.a > 0 && <Line label="광고비" value={'-' + fmt(result.a)} />}
+            {result.e > 0 && <Line label="기타" value={'-' + fmt(result.e)} />}
             <div className="flex justify-between pt-2 mt-1 border-t-2 border-ink font-bold">
-              <span>순이익</span>
+              <span>총마진</span>
               <span className={result.profit < 0 ? 'text-red-700' : 'text-profit'}>
                 {(result.profit < 0 ? '-' : '') + fmt(Math.abs(result.profit))}
               </span>

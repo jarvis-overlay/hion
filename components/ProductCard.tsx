@@ -1,7 +1,12 @@
 'use client';
 
-import { useTransition } from 'react';
-import { deleteProduct } from '@/app/dashboard/inventory/products/actions';
+import { useState, useTransition } from 'react';
+import {
+  deleteProduct,
+  updateCouponDiscount,
+} from '@/app/dashboard/inventory/products/actions';
+
+const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
 
 export default function ProductCard({
   product,
@@ -11,6 +16,15 @@ export default function ProductCard({
   vendorItemIds?: string[];
 }) {
   const [isPending, startTransition] = useTransition();
+  const [editingDiscount, setEditingDiscount] = useState(false);
+  const [discount, setDiscount] = useState(String(product.coupon_discount || 0));
+
+  function saveDiscount() {
+    startTransition(async () => {
+      await updateCouponDiscount(product.id, Number(discount) || 0);
+      setEditingDiscount(false);
+    });
+  }
 
   return (
     <div className="card p-4 flex flex-col gap-2">
@@ -47,6 +61,45 @@ export default function ProductCard({
             </span>
           )}
         </span>
+      </div>
+
+      <div className="pt-2 border-t border-paperLine">
+        {!editingDiscount ? (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-inkSoft">
+              쿠폰 할인액 (정상 재고 판매에만 적용):{' '}
+              <span className="font-mono text-ink">{fmt(product.coupon_discount || 0)}원</span>
+            </span>
+            <button
+              onClick={() => setEditingDiscount(true)}
+              className="text-xs text-inkSoft hover:text-ink underline"
+            >
+              수정
+            </button>
+          </div>
+        ) : (
+          <div>
+            <label className="text-xs text-inkSoft">
+              쿠폰 할인액 입력 (원, 정상 재고 판매에만 적용됨)
+            </label>
+            <div className="flex gap-2 mt-1">
+              <input
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+                type="number"
+                placeholder="0"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono flex-1"
+              />
+              <button
+                onClick={saveDiscount}
+                disabled={isPending}
+                className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end pt-1">

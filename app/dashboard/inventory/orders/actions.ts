@@ -3,6 +3,24 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
+// 위안(CNY) -> 원(KRW) 환율을 무료 공개 API로 조회. 실패하면 기본값(190)을
+// 그대로 쓰게 null을 돌려주고, 폼에서 기존 값을 유지한다.
+export async function fetchCnyToKrwRate(): Promise<{ rate: number | null; error?: string }> {
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/CNY', {
+      cache: 'no-store',
+    });
+    const json = await res.json();
+    const rate = json?.rates?.KRW;
+    if (typeof rate !== 'number') {
+      return { rate: null, error: '환율 정보를 못 가져왔어요.' };
+    }
+    return { rate };
+  } catch (e: any) {
+    return { rate: null, error: '환율 조회 중 오류가 발생했어요.' };
+  }
+}
+
 export async function addPurchaseOrder(formData: FormData) {
   const supabase = createClient();
   const {
@@ -15,6 +33,11 @@ export async function addPurchaseOrder(formData: FormData) {
   const quantity = Number(formData.get('quantity') || 0);
   const unit_price_cny = Number(formData.get('unit_price_cny') || 0);
   const exchange_rate = Number(formData.get('exchange_rate') || 190);
+  const unit_price_krw_raw = formData.get('unit_price_krw');
+  const unit_price_krw =
+    unit_price_krw_raw && String(unit_price_krw_raw).trim() !== ''
+      ? Number(unit_price_krw_raw)
+      : null;
   const note = String(formData.get('note') || '').trim();
 
   if (!product_id || !order_date || quantity <= 0) return;
@@ -25,6 +48,7 @@ export async function addPurchaseOrder(formData: FormData) {
     quantity,
     unit_price_cny,
     exchange_rate,
+    unit_price_krw,
     note: note || null,
     author_email: user.email,
   });
