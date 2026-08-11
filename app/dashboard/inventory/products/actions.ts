@@ -60,6 +60,18 @@ export async function updateShippingCost(id: string, cost: number) {
   revalidatePath('/dashboard/analytics');
 }
 
+// 발주 기록 없이 원가를 직접 입력 (반품등급 재판매처럼 "발주"가 안 맞는
+// 상품용). null(빈 값)로 저장하면 다시 발주 기록 기반 계산으로 돌아간다.
+export async function updateManualCost(id: string, cost: number | null) {
+  const supabase = createClient();
+  await supabase
+    .from('products')
+    .update({ manual_cost: cost })
+    .eq('id', id);
+  revalidatePath('/dashboard/inventory/products');
+  revalidatePath('/dashboard/analytics');
+}
+
 export async function fetchImportableCoupangProducts() {
   const supabase = createClient();
   const { data: cred } = await supabase

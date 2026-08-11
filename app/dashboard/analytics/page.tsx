@@ -26,7 +26,7 @@ export default async function AnalyticsPage() {
 
   const { data: products } = await supabase
     .from('products')
-    .select('id, name, shipping_cost')
+    .select('id, name, shipping_cost, manual_cost')
     .order('name');
 
   const { data: purchaseOrders } = await supabase
@@ -89,7 +89,14 @@ export default async function AnalyticsPage() {
 
   const rows = (products || []).map((p) => {
     const cost = costByProduct[p.id];
-    const avgCost = cost && cost.qtySum > 0 ? cost.costSum / cost.qtySum : null;
+    // 발주 기록 평균보다 직접 입력한 원가가 있으면 그걸 우선한다 (반품등급
+    // 재판매 상품처럼 "발주" 개념이 안 맞는 경우 이걸로 마진을 볼 수 있게).
+    const avgCost =
+      p.manual_cost != null
+        ? Number(p.manual_cost)
+        : cost && cost.qtySum > 0
+        ? cost.costSum / cost.qtySum
+        : null;
     const sales = salesByProduct[p.id];
     const qty30d = sales?.qty || 0;
     const amount30d = sales?.amount || 0;

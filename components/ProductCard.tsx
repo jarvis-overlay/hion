@@ -5,6 +5,7 @@ import {
   deleteProduct,
   updateCouponDiscount,
   updateShippingCost,
+  updateManualCost,
 } from '@/app/dashboard/inventory/products/actions';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
@@ -21,6 +22,10 @@ export default function ProductCard({
   const [discount, setDiscount] = useState(String(product.coupon_discount || 0));
   const [editingShipping, setEditingShipping] = useState(false);
   const [shipping, setShipping] = useState(String(product.shipping_cost || 0));
+  const [editingCost, setEditingCost] = useState(false);
+  const [manualCost, setManualCost] = useState(
+    product.manual_cost != null ? String(product.manual_cost) : ''
+  );
 
   function saveDiscount() {
     startTransition(async () => {
@@ -33,6 +38,14 @@ export default function ProductCard({
     startTransition(async () => {
       await updateShippingCost(product.id, Number(shipping) || 0);
       setEditingShipping(false);
+    });
+  }
+
+  function saveManualCost() {
+    startTransition(async () => {
+      const trimmed = manualCost.trim();
+      await updateManualCost(product.id, trimmed === '' ? null : Number(trimmed));
+      setEditingCost(false);
     });
   }
 
@@ -139,6 +152,47 @@ export default function ProductCard({
               />
               <button
                 onClick={saveShipping}
+                disabled={isPending}
+                className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="pt-2 border-t border-paperLine">
+        {!editingCost ? (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-inkSoft">
+              직접 입력 원가 (발주기록 없을 때 사용):{' '}
+              <span className="font-mono text-ink">
+                {product.manual_cost != null ? `${fmt(product.manual_cost)}원` : '미입력'}
+              </span>
+            </span>
+            <button
+              onClick={() => setEditingCost(true)}
+              className="text-xs text-inkSoft hover:text-ink underline"
+            >
+              수정
+            </button>
+          </div>
+        ) : (
+          <div>
+            <label className="text-xs text-inkSoft">
+              원가 직접 입력 (원, 비우면 발주 기록 평균으로 계산)
+            </label>
+            <div className="flex gap-2 mt-1">
+              <input
+                value={manualCost}
+                onChange={(e) => setManualCost(e.target.value)}
+                type="number"
+                placeholder="비우면 발주기록 사용"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono flex-1"
+              />
+              <button
+                onClick={saveManualCost}
                 disabled={isPending}
                 className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
               >

@@ -196,23 +196,6 @@ export async function syncCoupangProductCatalog(
   // 이 스캔 중 조회한 옵션별 재고값 (뒤이은 재고 동기화가 재조회 안 해도 되게)
   const inventoryByVendorItem: Record<string, number> = {};
 
-  // 로켓그로스 반품이 발생하면 원래 상품이 아니라 offerCondition이
-  // RETURN_GOOD/RETURN_NORMAL 등인 완전히 별도의 sellerProductId로 새로
-  // 등록된다 (실측 확인). displayProductName/barcode는 원본과 다르지만
-  // rocketGrowthItemData.skuInfo.inboundName(입고명)은 원본과 동일하게
-  // 유지되길래, 이걸로 "같은 물리적 상품"을 매칭해서 새 상품으로 쪼개지
-  // 않고 원본에 옵션ID만 추가 매핑한다. 정상(NEW) 상품을 먼저 전부 처리한
-  // 뒤에, 반품 등급 항목들은 나중에 한꺼번에 매칭 처리한다.
-  const inboundNameToProductId: Record<string, string> = {};
-  const pendingReturnItems: {
-    sellerProductId: string | number;
-    sellerProductName?: string;
-    vendorItemId: string;
-    inboundName?: string;
-  }[] = [];
-  let mergedReturnItems = 0;
-  let unmatchedReturnItems = 0;
-
   try {
     let nextToken: string | undefined = undefined;
     do {
@@ -330,28 +313,24 @@ export async function syncCoupangProductCatalog(
             continue;
           }
 
-          const inboundName = rgData.skuInfo?.inboundName?.trim();
-
-          // 반품 등급(offerCondition이 NEW가 아님) 옵션은 새 상품으로 바로
-          // 등록하지 않고, 정상 상품을 다 처리한 뒤 inboundName으로 원본을
-          // 찾아서 매핑한다.
-          if (item.offerCondition && item.offerCondition !== 'NEW') {
-            pendingReturnItems.push({
-              sellerProductId,
-              sellerProductName:
-                p.sellerProductName || detailData.sellerProductName,
-              vendorItemId,
-              inboundName,
-            });
-            continue;
-          }
+          // 반품 등급(offerCondition이 NEW가 아님) 옵션은 원본과 완전히 다른
+          // sellerProductId로 등록되므로(실측 확인), 그냥 이 sellerProductId
+          // 기준으로 별도 상품으로 등록한다 - 원가/마진을 원본과 따로
+          // 입력해야 하기 때문에 합치지 않는다. is_return_grade만 표시해서
+          // 판매 동기화 때 쿠폰 할인을 안 빼도록 구분한다.
+          const isReturnGrade = !!(
+            item.offerCondition && item.offerCondition !== 'NEW'
+          );
 
           // 기준 통과 - 이 sellerProductId에 해당하는 대표 상품 행을 찾거나 새로 만든다
           if (!productRowId) {
-            const displayName =
+            const baseName =
               p.sellerProductName ||
               detailData.sellerProductName ||
               `쿠팡 상품 (${sellerProductId})`;
+            const displayName = isReturnGrade
+              ? `${baseName} (반품등급)`
+              : baseName;
 
             const { data: existing } = await supabase
               .from('products')
@@ -368,8 +347,9 @@ export async function syncCoupangProductCatalog(
                   name: displayName,
                   coupang_seller_product_id: String(sellerProductId),
                   author_email: authorEmail,
-                  notes:
-                    '쿠팡 상품 카탈로그 동기화로 등록됨 (로켓그로스·재고있음·바코드확인)',
+                  notes: isReturnGrade
+                    ? '쿠팡 상품 카탈로그 동기화로 등록됨 (반품등급 재판매, 쿠폰 할인 미적용)'
+                    : '쿠팡 상품 카탈로그 동기화로 등록됨 (로켓그로스·재고있음·바코드확인)',
                 })
                 .select('id')
                 .single();
@@ -389,81 +369,17 @@ export async function syncCoupangProductCatalog(
               {
                 product_id: productRowId,
                 vendor_item_id: vendorItemId,
-                is_return_grade: false,
+                is_return_grade: isReturnGrade,
               },
               { onConflict: 'vendor_item_id' }
             );
           if (!mapErr) mappedVendorItems++;
           else lastError = mapErr.message;
 
-          if (inboundName && !inboundNameToProductId[inboundName]) {
-            inboundNameToProductId[inboundName] = productRowId!;
-          }
-
           qualified++;
         }
       }
     } while (nextToken);
-
-    // 반품 등급 옵션들을 원본 상품에 매핑 (inboundName 매칭). 매칭되는 원본이
-    // 없으면(원본이 이미 삭제됐거나 하는 예외) 예전처럼 별도 상품으로 등록.
-    for (const pending of pendingReturnItems) {
-      let productRowId = pending.inboundName
-        ? inboundNameToProductId[pending.inboundName]
-        : undefined;
-
-      if (productRowId) {
-        mergedReturnItems++;
-      } else {
-        unmatchedReturnItems++;
-        const displayName =
-          pending.sellerProductName || `쿠팡 상품 (${pending.sellerProductId})`;
-
-        const { data: existing } = await supabase
-          .from('products')
-          .select('id')
-          .eq('coupang_seller_product_id', String(pending.sellerProductId))
-          .maybeSingle();
-
-        if (existing) {
-          productRowId = existing.id;
-        } else {
-          const { data: created, error: createErr } = await supabase
-            .from('products')
-            .insert({
-              name: displayName,
-              coupang_seller_product_id: String(pending.sellerProductId),
-              author_email: authorEmail,
-              notes:
-                '쿠팡 상품 카탈로그 동기화로 등록됨 (반품등급, 원본 상품 매칭 실패)',
-            })
-            .select('id')
-            .single();
-
-          if (createErr) {
-            lastError = createErr.message;
-            continue;
-          }
-          productRowId = created.id;
-          createdProducts++;
-        }
-      }
-
-      const { error: mapErr } = await supabase
-        .from('product_vendor_items')
-        .upsert(
-          {
-            product_id: productRowId,
-            vendor_item_id: pending.vendorItemId,
-            is_return_grade: true,
-          },
-          { onConflict: 'vendor_item_id' }
-        );
-      if (!mapErr) mappedVendorItems++;
-      else lastError = mapErr.message;
-
-      qualified++;
-    }
   } catch (e: any) {
     lastError = e?.message || String(e);
   }
@@ -484,8 +400,6 @@ export async function syncCoupangProductCatalog(
     createdProducts,
     mappedVendorItems,
     inventoryByVendorItem,
-    mergedReturnItems,
-    unmatchedReturnItems,
     error: lastError,
     debug: {
       firstInventoryCheckError,
