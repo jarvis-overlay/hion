@@ -39,6 +39,37 @@ export async function deleteProduct(id: string) {
   revalidatePath('/dashboard/inventory/products');
 }
 
+// 창고별 재고 수량 직접 수정. 쿠팡 창고는 다음 동기화 때 실제 API 값으로
+// 덮어써지니 참고용/임시 정정용이고, 자사 물류창고는 동기화 대상이 아니라서
+// 여기서 고친 값이 그대로 유지된다.
+export async function updateWarehouseStock(
+  productId: string,
+  warehouse: 'coupang' | 'own',
+  quantity: number
+) {
+  const supabase = createClient();
+  const { data: existing } = await supabase
+    .from('warehouse_stock')
+    .select('id')
+    .eq('product_id', productId)
+    .eq('warehouse', warehouse)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase
+      .from('warehouse_stock')
+      .update({ quantity })
+      .eq('id', existing.id);
+  } else {
+    await supabase
+      .from('warehouse_stock')
+      .insert({ product_id: productId, warehouse, quantity });
+  }
+
+  revalidatePath('/dashboard/inventory/products');
+  revalidatePath('/dashboard/inventory/stock');
+}
+
 export async function updateProductName(id: string, name: string) {
   const supabase = createClient();
   const trimmed = name.trim();
