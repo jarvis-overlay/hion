@@ -218,6 +218,110 @@ export async function runDailyReturnEstimate(supabase: any, authorEmail: string)
 }
 
 // ============================================================
+// 과거 날짜용 반품 추정 백필
+// - runDailyReturnEstimate는 오늘부터 새로 시작하는 스냅샷이라 과거
+//   날짜엔 적용이 안 된다. 대신 그동안 재고 동기화가 남겨둔 로그
+//   (note가 "쿠팡 로켓창고 재고 동기화"인 stock_movements)를 하루 단위로
+//   집계해서, 그날의 실제 재고 순변화 vs 판매수량을 비교하는 방식으로
+//   과거에도 똑같이 계산한다.
+// - 재고가 늘어난 날(그날 순변화가 0 이상)은 대량 입고로 보고 건너뛴다.
+// - external_ref로 중복방지(upsert ignoreDuplicates)해서 여러 번 실행해도
+//   안전하다.
+// ============================================================
+export async function backfillDailyReturnEstimates(
+  supabase: any,
+  authorEmail: string,
+  daysBack: number = 14
+) {
+  const { data: products } = await supabase.from('products').select('id');
+
+  const kstOffsetMs = 9 * 60 * 60 * 1000;
+  let estimated = 0;
+  let checkedDays = 0;
+  const details: any[] = [];
+
+  for (const p of products || []) {
+    for (let d = 1; d <= daysBack; d++) {
+      // KST 기준 그날의 00:00 ~ 다음날 00:00 (UTC로 변환)
+      const kstNow = new Date(Date.now() + kstOffsetMs);
+      const kstDayStart = new Date(
+        Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate())
+      );
+      kstDayStart.setUTCDate(kstDayStart.getUTCDate() - d);
+      const dayStartUtc = new Date(kstDayStart.getTime() - kstOffsetMs);
+      const dayEndUtc = new Date(dayStartUtc.getTime() + 24 * 60 * 60 * 1000);
+      const dateStr = kstDayStart.toISOString().slice(0, 10);
+
+      const { data: invRows } = await supabase
+        .from('stock_movements')
+        .select('quantity')
+        .eq('product_id', p.id)
+        .like('note', '쿠팡 로켓창고 재고 동기화%')
+        .gte('occurred_at', dayStartUtc.toISOString())
+        .lt('occurred_at', dayEndUtc.toISOString());
+      const netInventoryChange = (invRows || []).reduce(
+        (sum: number, r: any) => sum + Number(r.quantity),
+        0
+      );
+
+      const { data: soldRows } = await supabase
+        .from('stock_movements')
+        .select('quantity, amount')
+        .eq('product_id', p.id)
+        .eq('channel', 'coupang')
+        .eq('type', 'out')
+        .gte('occurred_at', dayStartUtc.toISOString())
+        .lt('occurred_at', dayEndUtc.toISOString());
+      const soldQty = (soldRows || []).reduce(
+        (sum: number, r: any) => sum + -Number(r.quantity),
+        0
+      );
+      const soldAmount = (soldRows || []).reduce(
+        (sum: number, r: any) => sum + Number(r.amount || 0),
+        0
+      );
+
+      checkedDays++;
+      if (soldQty === 0 || netInventoryChange >= 0) continue; // 판매 없음 또는 입고(순증가)일
+
+      const actualDecrease = -netInventoryChange;
+      const gap = soldQty - actualDecrease;
+      if (gap <= 0) continue;
+
+      const unitPrice = soldQty > 0 ? Math.abs(soldAmount) / soldQty : 0;
+      const externalRef = `daily-return-backfill:${p.id}:${dateStr}`;
+      const occurredAt = new Date(dayStartUtc.getTime() + 12 * 60 * 60 * 1000); // 그날 정오(KST)
+
+      const { data: inserted } = await supabase
+        .from('stock_movements')
+        .upsert(
+          {
+            product_id: p.id,
+            warehouse: 'coupang',
+            type: 'in',
+            quantity: gap,
+            channel: 'coupang',
+            amount: -gap * unitPrice,
+            occurred_at: occurredAt.toISOString(),
+            external_ref: externalRef,
+            note: `일별 재고 대사 - 반품 추정 (백필, ${dateStr}) - 판매 ${soldQty}개인데 실제 재고는 ${actualDecrease}개만 줄어듦`,
+            author_email: authorEmail,
+          },
+          { onConflict: 'external_ref', ignoreDuplicates: true }
+        )
+        .select();
+
+      if (inserted && inserted.length > 0) {
+        estimated++;
+        details.push({ productId: p.id, date: dateStr, gap });
+      }
+    }
+  }
+
+  return { checkedDays, estimated, details };
+}
+
+// ============================================================
 // 쿠팡 상품 카탈로그 동기화
 // - "상품 목록 조회" API로 이 계정의 전체 등록상품(sellerProductId) 목록을 가져오고
 // - 각 상품마다 "상품 상세 조회" API로 옵션(vendorItemId)별 바코드를 확인하고

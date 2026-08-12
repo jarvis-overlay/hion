@@ -5,6 +5,7 @@ import {
   runCoupangOrderSync,
   runCoupangReturnSync,
   runDailyReturnEstimate,
+  backfillDailyReturnEstimates,
   syncCoupangProductCatalog,
 } from '@/lib/coupangSync';
 
@@ -47,6 +48,19 @@ export async function GET(request: Request) {
   const rawDebug = searchParams.get('rawdebug') === '1';
 
   const supabase = createAdminClient();
+
+  // 과거 날짜용 반품 추정 백필 - 이건 나머지 동기화와 무관하게 명시적으로
+  // 요청했을 때만 딱 한 번 돈다 (자동 스케줄에 안 끼워넣음).
+  const backfillReturnsParam = searchParams.get('backfillReturns');
+  if (backfillReturnsParam) {
+    const backfillDays = parseInt(backfillReturnsParam, 10) || 14;
+    const result = await backfillDailyReturnEstimates(
+      supabase,
+      'auto-sync@hion',
+      backfillDays
+    );
+    return NextResponse.json(result);
+  }
 
   let catalogResult: any = {};
   if (!skipCatalog) {
