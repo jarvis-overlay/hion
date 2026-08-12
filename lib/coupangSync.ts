@@ -664,24 +664,11 @@ export async function runCoupangOrderSync(
   // (주문 API에는 바코드/재고 정보가 없어서 이 시점에 자격을 판단할 수 없기 때문)
   const { data: mappings } = await supabase
     .from('product_vendor_items')
-    .select('product_id, vendor_item_id, is_return_grade');
+    .select('product_id, vendor_item_id');
 
   const mapByVendorItem: Record<string, string> = {};
-  const returnGradeByVendorItem: Record<string, boolean> = {};
   for (const m of mappings || []) {
     mapByVendorItem[String(m.vendor_item_id)] = m.product_id;
-    returnGradeByVendorItem[String(m.vendor_item_id)] = !!m.is_return_grade;
-  }
-
-  // 상품별 쿠폰 할인액 - 정상 재고 판매(반품등급 아님)에만 적용한다.
-  // 쿠팡 API가 쿠폰 할인 반영 전 정가(unitSalesPrice)만 줘서, 직접 뺀
-  // 값으로 매출을 계산해야 실제 판매가에 가깝다.
-  const { data: productsData } = await supabase
-    .from('products')
-    .select('id, coupon_discount');
-  const discountByProduct: Record<string, number> = {};
-  for (const p of productsData || []) {
-    discountByProduct[p.id] = Number(p.coupon_discount) || 0;
   }
 
   const fmt = (d: Date) =>
@@ -770,13 +757,11 @@ export async function runCoupangOrderSync(
             // 경우를 대비한 처리 - 무조건 버리지 않고 입고(반품)로 남긴다.
             const isReturn = salesQty < 0;
             const qty = Math.abs(salesQty);
-            const rawUnitPrice = Number(item.unitSalesPrice || 0);
-            // 쿠팡 API가 쿠폰 할인 반영 전 정가만 줘서, 반품 재판매(회수품)가
-            // 아닌 정상 재고 판매에만 상품별 쿠폰 할인액을 직접 빼준다.
-            const isReturnGrade = returnGradeByVendorItem[vendorItemId] || false;
-            const unitPrice = isReturnGrade
-              ? rawUnitPrice
-              : Math.max(0, rawUnitPrice - (discountByProduct[productId] || 0));
+            // 쿠팡 API가 주는 정가를 그대로 쓴다 - 쿠폰 할인을 빼면 오히려
+            // 쿠팡 판매자센터 자체 대시보드(그것도 정가 기준으로 표시함)와
+            // 안 맞게 된다는 게 실측으로 확인됐다. 할인 반영 마진은 별도
+            // (상품 카드 마진 계산, 성과 분석)에서만 다룬다.
+            const unitPrice = Number(item.unitSalesPrice || 0);
 
             const { data: inserted, error } = await supabase
               .from('stock_movements')
