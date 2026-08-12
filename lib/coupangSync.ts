@@ -194,7 +194,11 @@ export async function runDailyReturnEstimate(supabase: any, authorEmail: string)
           ))
         : actualDecrease;
 
-      {
+      // 소량 변화만 다시 계산해도 여전히 순증가(0 이상)면, 여러 번 나눠 입고된
+      // 걸로 보고 비교 자체를 건너뛴다 - 이걸 빠뜨려서 122개/36개짜리 거대한
+      // 오류 추정이 들어간 사고가 있었다 (백필 함수엔 이 방어가 있었는데
+      // 여기엔 누락돼 있었음).
+      if (adjustedDecrease > 0) {
         const gap = soldQty - adjustedDecrease;
         if (gap > 0) {
           const { data: lastSale } = await supabase
