@@ -31,6 +31,19 @@ export default async function ProductsPage() {
     vendorItemsByProduct[row.product_id].push(row.vendor_item_id);
   }
 
+  // 재고 현황 페이지와 동일한 데이터를 여기서도 보여주기 위해 같이 불러온다.
+  const { data: stockRows } = await supabase
+    .from('warehouse_stock')
+    .select('product_id, warehouse, quantity');
+  const stockByProduct: Record<string, { coupang: number; own: number }> = {};
+  for (const row of stockRows || []) {
+    if (!stockByProduct[row.product_id]) {
+      stockByProduct[row.product_id] = { coupang: 0, own: 0 };
+    }
+    if (row.warehouse === 'coupang') stockByProduct[row.product_id].coupang = row.quantity;
+    if (row.warehouse === 'own') stockByProduct[row.product_id].own = row.quantity;
+  }
+
   // "반품 재판매 상품" 구역 분류는 옵션ID 하나라도 반품등급이면 상품
   // 전체를 옮겨버리던 방식(옵션이 여러 개인 메인 상품이 옵션 하나 잘못된
   // 매핑 때문에 통째로 반품 구역으로 밀려나는 버그가 있었음) 대신,
@@ -60,6 +73,7 @@ export default async function ProductsPage() {
               key={p.id}
               product={p}
               vendorItemIds={vendorItemsByProduct[p.id] || []}
+              stock={stockByProduct[p.id]}
             />
           ))
         ) : (
@@ -84,6 +98,7 @@ export default async function ProductsPage() {
                 key={p.id}
                 product={p}
                 vendorItemIds={vendorItemsByProduct[p.id] || []}
+                stock={stockByProduct[p.id]}
                 isReturnGrade
               />
             ))}

@@ -20,12 +20,15 @@ export default function ProductCard({
   product,
   vendorItemIds = [],
   isReturnGrade = false,
+  stock,
 }: {
   product: any;
   vendorItemIds?: string[];
   isReturnGrade?: boolean;
+  stock?: { coupang: number; own: number };
 }) {
   const [isPending, startTransition] = useTransition();
+  const [expanded, setExpanded] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(product.name);
 
@@ -180,6 +183,32 @@ export default function ProductCard({
           </span>
         )}
       </div>
+
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center justify-between gap-3 text-left"
+      >
+        <span className="text-xs text-inkSoft flex gap-3">
+          <span>
+            쿠팡 재고{' '}
+            <span className="font-mono font-semibold text-ink">
+              {stock?.coupang ?? 0}
+            </span>
+          </span>
+          <span>
+            자사 재고{' '}
+            <span className="font-mono font-semibold text-ink">
+              {stock?.own ?? 0}
+            </span>
+          </span>
+        </span>
+        <span className="text-xs text-inkSoft underline">
+          {expanded ? '접기 ▲' : '자세히 ▼'}
+        </span>
+      </button>
+
+      {expanded && (
+        <>
       {product.china_link && (
         <a
           href={product.china_link}
@@ -488,6 +517,8 @@ export default function ProductCard({
           삭제
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }
