@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import ProductForm from '@/components/ProductForm';
 import ProductCard from '@/components/ProductCard';
 import CoupangImportPicker from '@/components/CoupangImportPicker';
+import ReturnGradeRegisterForm from '@/components/ReturnGradeRegisterForm';
 
 export default async function ProductsPage() {
   const supabase = createClient();
@@ -42,6 +43,7 @@ export default async function ProductsPage() {
         재고·발주 관리의 기준이 되는 상품을 먼저 등록해요
       </p>
       {coupangConnected && <CoupangImportPicker />}
+      {coupangConnected && <ReturnGradeRegisterForm />}
       <ProductForm />
 
       <h2 className="font-display text-lg font-bold mb-3">메인 상품</h2>
