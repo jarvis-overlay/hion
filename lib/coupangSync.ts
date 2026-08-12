@@ -125,119 +125,94 @@ export async function runCoupangInventorySync(
 // 하루 단위 재고 대사(반품 추정)
 // - 로켓그로스는 반품/취소를 조회할 수 있는 API가 없다는 게 실측으로
 //   확인됐다 (rg/orders, returnRequests, revenue-history 전부 빈 값).
-// - 대신 "그 사이 판매로 잡힌 수량"과 "실제 재고 감소량"을 하루 단위로만
-//   비교한다. 순간 재고를 자주 비교하면(수동 테스트 등) API 응답의
-//   일시적 흔들림을 반품으로 오판하는 문제가 있었어서, 이 함수는 하루에
-//   한 번 도는 전체 동기화(자정)에서만 호출해야 한다.
+// - "오늘 00시(KST)부터 지금까지" 판매수량과 재고감소량을 비교한다. 이전
+//   버전은 "마지막으로 확인한 시각"을 기준점으로 저장해뒀다가 다음 확인
+//   때까지의 구간만 보는 방식이었는데, 하루에 여러 번(수동 테스트 등)
+//   호출하면 그때마다 기준점이 앞으로 밀려서 그 사이에 있었던 반품을
+//   놓치는 문제가 있었다. 캘린더 날짜(오늘 00시~지금) 기준으로 매번
+//   다시 계산하면, 하루에 몇 번을 불러도 항상 같은 범위를 보게 되어
+//   안전하다 - external_ref로 upsert(덮어쓰기)해서 하루 안에서 여러 번
+//   불러도 그때그때 최신값으로 갱신될 뿐 중복되지 않는다.
 // - 그 사이 대량 입고(RESTOCK_THRESHOLD개 초과 증가)가 있었으면 그 입고분만
-//   빼고, 나머지 소량 변화만으로 실제 감소량을 계산한다 - 입고와 반품이
-//   같은 기간에 섞여도 비교가 무의미해지지 않게 하기 위함.
+//   빼고, 나머지 소량 변화만으로 실제 감소량을 계산한다.
 // ============================================================
 const RESTOCK_THRESHOLD = 5;
 
 export async function runDailyReturnEstimate(supabase: any, authorEmail: string) {
-  const { data: products } = await supabase
-    .from('products')
-    .select('id, prev_stock_snapshot, prev_stock_snapshot_at');
+  const { data: products } = await supabase.from('products').select('id');
 
-  const { data: stockRows } = await supabase
-    .from('warehouse_stock')
-    .select('product_id, quantity')
-    .eq('warehouse', 'coupang');
-  const currentQtyByProduct: Record<string, number> = {};
-  for (const row of stockRows || []) {
-    currentQtyByProduct[row.product_id] = Number(row.quantity) || 0;
-  }
+  const kstOffsetMs = 9 * 60 * 60 * 1000;
+  const kstNow = new Date(Date.now() + kstOffsetMs);
+  const dayStartUtc = new Date(
+    Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()) -
+      kstOffsetMs
+  );
+  const dateStr = kstNow.toISOString().slice(0, 10);
+  const now = new Date();
 
   let estimated = 0;
   let checked = 0;
-  const now = new Date();
 
   for (const p of products || []) {
-    const currentQty = currentQtyByProduct[p.id];
-    if (currentQty === undefined) continue; // 쿠팡 창고 재고 자체가 없는 상품
+    checked++;
 
-    if (p.prev_stock_snapshot != null && p.prev_stock_snapshot_at) {
-      checked++;
-      const prevQty = Number(p.prev_stock_snapshot);
-      const actualDecrease = prevQty - currentQty; // 양수 = 실제로 재고가 줄었음
+    const { data: invRows } = await supabase
+      .from('stock_movements')
+      .select('quantity')
+      .eq('product_id', p.id)
+      .like('note', '쿠팡 로켓창고 재고 동기화%')
+      .gte('occurred_at', dayStartUtc.toISOString());
+    // 대량 입고(RESTOCK_THRESHOLD 초과 증가) 건은 제외하고, 소량 변화만
+    // 합산해서 오늘의 "판매/반품으로 인한" 순변화를 따로 본다.
+    const netInventoryChange = (invRows || []).reduce(
+      (sum: number, r: any) =>
+        Number(r.quantity) > RESTOCK_THRESHOLD ? sum : sum + Number(r.quantity),
+      0
+    );
 
-      const { data: soldRows } = await supabase
-        .from('stock_movements')
-        .select('quantity')
-        .eq('product_id', p.id)
-        .eq('channel', 'coupang')
-        .eq('type', 'out')
-        .gte('occurred_at', p.prev_stock_snapshot_at);
-      const soldQty = (soldRows || []).reduce(
-        (sum: number, r: any) => sum + -Number(r.quantity),
-        0
-      );
+    const { data: soldRows } = await supabase
+      .from('stock_movements')
+      .select('quantity, amount')
+      .eq('product_id', p.id)
+      .eq('channel', 'coupang')
+      .eq('type', 'out')
+      .gte('occurred_at', dayStartUtc.toISOString());
+    const soldQty = (soldRows || []).reduce(
+      (sum: number, r: any) => sum + -Number(r.quantity),
+      0
+    );
+    const soldAmount = (soldRows || []).reduce(
+      (sum: number, r: any) => sum + Number(r.amount || 0),
+      0
+    );
 
-      // 그 사이 대량 입고(RESTOCK_THRESHOLD 초과 증가)가 있었으면, 그 입고분은
-      // 빼고 소량 변화만으로 실제 감소량을 다시 계산한다 - 입고랑 반품이
-      // 같은 기간에 섞여도 비교가 무의미해지지 않게 하기 위함.
-      const { data: invRows } = await supabase
-        .from('stock_movements')
-        .select('quantity')
-        .eq('product_id', p.id)
-        .like('note', '쿠팡 로켓창고 재고 동기화%')
-        .gte('occurred_at', p.prev_stock_snapshot_at);
-      const hasRestock = (invRows || []).some(
-        (r: any) => Number(r.quantity) > RESTOCK_THRESHOLD
-      );
-      const adjustedDecrease = hasRestock
-        ? -((invRows || []).reduce(
-            (sum: number, r: any) =>
-              Number(r.quantity) > RESTOCK_THRESHOLD ? sum : sum + Number(r.quantity),
-            0
-          ))
-        : actualDecrease;
+    // 오늘 판매가 없거나, 소량 변화만 다시 계산해도 여전히 순증가(0 이상)면
+    // (=여러 번 나눠 입고됐거나 아직 아무 변화 없음) 건너뛴다.
+    if (soldQty === 0 || netInventoryChange >= 0) continue;
 
-      // 소량 변화만 다시 계산해도 여전히 순증가(0 이상)면, 여러 번 나눠 입고된
-      // 걸로 보고 비교 자체를 건너뛴다 - 이걸 빠뜨려서 122개/36개짜리 거대한
-      // 오류 추정이 들어간 사고가 있었다 (백필 함수엔 이 방어가 있었는데
-      // 여기엔 누락돼 있었음).
-      if (adjustedDecrease > 0) {
-        const gap = soldQty - adjustedDecrease;
-        if (gap > 0) {
-          const { data: lastSale } = await supabase
-            .from('stock_movements')
-            .select('quantity, amount')
-            .eq('product_id', p.id)
-            .eq('channel', 'coupang')
-            .eq('type', 'out')
-            .order('occurred_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          const unitPrice =
-            lastSale && lastSale.quantity
-              ? Math.abs(Number(lastSale.amount) / Number(lastSale.quantity))
-              : 0;
+    const actualDecrease = -netInventoryChange;
+    const gap = soldQty - actualDecrease;
+    if (gap <= 0) continue;
 
-          await supabase.from('stock_movements').insert({
-            product_id: p.id,
-            warehouse: 'coupang',
-            type: 'in',
-            quantity: gap,
-            channel: 'coupang',
-            amount: -gap * unitPrice,
-            occurred_at: now.toISOString(),
-            note: `일일 재고 대사 - 반품 추정 (자동, 확인 필요) - 판매 ${soldQty}개인데 실제 재고는 ${adjustedDecrease}개만 줄어듦${hasRestock ? ' (그 사이 대량 입고 있었음, 제외하고 계산)' : ''}`,
-            author_email: authorEmail,
-          });
-          estimated++;
-        }
-      }
-    }
+    const unitPrice = soldQty > 0 ? Math.abs(soldAmount) / soldQty : 0;
+    const externalRef = `daily-return-live:${p.id}:${dateStr}`;
 
-    await supabase
-      .from('products')
-      .update({
-        prev_stock_snapshot: currentQty,
-        prev_stock_snapshot_at: now.toISOString(),
-      })
-      .eq('id', p.id);
+    const { error } = await supabase.from('stock_movements').upsert(
+      {
+        product_id: p.id,
+        warehouse: 'coupang',
+        type: 'in',
+        quantity: gap,
+        channel: 'coupang',
+        amount: -gap * unitPrice,
+        occurred_at: now.toISOString(),
+        external_ref: externalRef,
+        note: `일일 재고 대사 - 반품 추정 (자동, 확인 필요) - 오늘 판매 ${soldQty}개인데 실제 재고는 ${actualDecrease}개만 줄어듦`,
+        author_email: authorEmail,
+      },
+      { onConflict: 'external_ref' }
+    );
+    if (!error) estimated++;
   }
 
   return { checked, estimated };

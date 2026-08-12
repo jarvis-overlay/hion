@@ -96,13 +96,10 @@ export async function GET(request: Request) {
     catalogResult.inventoryByVendorItem
   );
 
-  // 하루 단위 재고 대사(반품 추정)는 자정 전체 동기화(카탈로그 포함) 때만
-  // 돈다 - 순간 재고를 자주 비교하면 API 응답의 일시적 흔들림을 반품으로
-  // 오판했던 문제가 있어서, 절대 매번(수동 버튼 포함) 돌면 안 된다.
-  let dailyReturnResult: any = {};
-  if (!skipCatalog) {
-    dailyReturnResult = await runDailyReturnEstimate(supabase, 'auto-sync@hion');
-  }
+  // 하루 단위 재고 대사(반품 추정) - "오늘 00시~지금"을 매번 다시 계산하는
+  // 방식으로 바뀌어서, 하루에 몇 번을 불러도(가벼운 동기화 포함) 안전하다.
+  // 그래서 자정까지 안 기다리고 하루 중에도 계속 최신 추정치로 갱신된다.
+  const dailyReturnResult = await runDailyReturnEstimate(supabase, 'auto-sync@hion');
 
   return NextResponse.json({
     ...stockResult,
