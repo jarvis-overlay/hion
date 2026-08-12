@@ -85,8 +85,8 @@ export default async function StockPage() {
   const { data: movements } = await supabase
     .from('stock_movements')
     .select('*, products(name)')
-    .order('created_at', { ascending: false })
-    .limit(50);
+    .order('occurred_at', { ascending: false })
+    .limit(500);
 
   // 채널별 판매 현황용 데이터 (전체 기간 누적 - occurred_at 포함해서
   // 클라이언트에서 오늘/7일/30일/전체 필터링에 사용)
@@ -187,7 +187,7 @@ export default async function StockPage() {
 
       <div>
         <h2 className="font-display text-lg font-bold mb-3">히스토리</h2>
-        <HistoryList movements={movements || []} />
+        <HistoryList movements={movements || []} products={products || []} />
       </div>
     </div>
   );
