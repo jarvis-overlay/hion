@@ -39,6 +39,14 @@ export async function deleteProduct(id: string) {
   revalidatePath('/dashboard/inventory/products');
 }
 
+export async function updateProductName(id: string, name: string) {
+  const supabase = createClient();
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  await supabase.from('products').update({ name: trimmed }).eq('id', id);
+  revalidatePath('/dashboard/inventory/products');
+}
+
 // 상품별 쿠팡 쿠폰 할인액. 매출 동기화 시 정상 재고 판매(반품 재판매 제외)의
 // 판매가에서 이 값을 빼서 실제 판매가에 가깝게 계산한다.
 export async function updateCouponDiscount(id: string, discount: number) {

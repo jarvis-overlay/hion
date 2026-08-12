@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import {
   deleteProduct,
+  updateProductName,
   updateCouponDiscount,
   updateShippingCost,
   updateManualCost,
@@ -24,6 +25,16 @@ export default function ProductCard({
   isReturnGrade?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
+  const [editingName, setEditingName] = useState(false);
+  const [name, setName] = useState(product.name);
+
+  function saveName() {
+    startTransition(async () => {
+      await updateProductName(product.id, name);
+      setEditingName(false);
+    });
+  }
+
   const [editingGrade, setEditingGrade] = useState(false);
   const [returnGrade, setReturnGrade] = useState(product.return_grade || '최상');
 
@@ -108,7 +119,40 @@ export default function ProductCard({
   return (
     <div className="card p-4 flex flex-col gap-2">
       <div className="flex items-start justify-between gap-2">
-        <h3 className="font-semibold text-sm">{product.name}</h3>
+        {!editingName ? (
+          <h3
+            className="font-semibold text-sm cursor-pointer hover:underline"
+            onClick={() => setEditingName(true)}
+            title="클릭해서 상품명 수정"
+          >
+            {product.name}
+          </h3>
+        ) : (
+          <div className="flex gap-2 flex-1">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+              className="border border-paperLine bg-white px-2 py-1 text-sm font-semibold flex-1"
+            />
+            <button
+              onClick={saveName}
+              disabled={isPending}
+              className="btn-primary px-2 py-1 text-xs disabled:opacity-50"
+            >
+              저장
+            </button>
+            <button
+              onClick={() => {
+                setName(product.name);
+                setEditingName(false);
+              }}
+              className="text-xs text-inkSoft px-1"
+            >
+              취소
+            </button>
+          </div>
+        )}
         {product.sku && (
           <span className="text-xs font-mono bg-paperLine px-2 py-0.5 rounded-full whitespace-nowrap">
             {product.sku}
