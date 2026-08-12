@@ -24,17 +24,23 @@ export default async function ProductsPage() {
     .from('product_vendor_items')
     .select('product_id, vendor_item_id, is_return_grade');
   const vendorItemsByProduct: Record<string, string[]> = {};
-  const returnGradeByProduct: Record<string, boolean> = {};
   for (const row of vendorItemRows || []) {
     if (!vendorItemsByProduct[row.product_id]) {
       vendorItemsByProduct[row.product_id] = [];
     }
     vendorItemsByProduct[row.product_id].push(row.vendor_item_id);
-    if (row.is_return_grade) returnGradeByProduct[row.product_id] = true;
   }
 
-  const mainProducts = (products || []).filter((p) => !returnGradeByProduct[p.id]);
-  const returnGradeProducts = (products || []).filter((p) => returnGradeByProduct[p.id]);
+  // "반품 재판매 상품" 구역 분류는 옵션ID 하나라도 반품등급이면 상품
+  // 전체를 옮겨버리던 방식(옵션이 여러 개인 메인 상품이 옵션 하나 잘못된
+  // 매핑 때문에 통째로 반품 구역으로 밀려나는 버그가 있었음) 대신,
+  // 반품등급 상품 등록 흐름에서만 붙는 표식(상품 자체에 등급이 있거나
+  // notes에 '반품등급'이 있음)으로 판단한다.
+  const isReturnGradeProduct = (p: any) =>
+    !!p.return_grade || (p.notes || '').includes('반품등급');
+
+  const mainProducts = (products || []).filter((p) => !isReturnGradeProduct(p));
+  const returnGradeProducts = (products || []).filter((p) => isReturnGradeProduct(p));
 
   return (
     <div>
