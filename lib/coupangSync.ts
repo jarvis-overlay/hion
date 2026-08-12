@@ -129,9 +129,12 @@ export async function runCoupangInventorySync(
 //   비교한다. 순간 재고를 자주 비교하면(수동 테스트 등) API 응답의
 //   일시적 흔들림을 반품으로 오판하는 문제가 있었어서, 이 함수는 하루에
 //   한 번 도는 전체 동기화(자정)에서만 호출해야 한다.
-// - 재고가 늘어난 날(대량 입고 등)은 비교 자체를 건너뛴다 - 판매량과
-//   재고감소량을 단순 비교하는 방식은 입고가 섞이면 의미가 없어진다.
+// - 그 사이 대량 입고(RESTOCK_THRESHOLD개 초과 증가)가 있었으면 그 입고분만
+//   빼고, 나머지 소량 변화만으로 실제 감소량을 계산한다 - 입고와 반품이
+//   같은 기간에 섞여도 비교가 무의미해지지 않게 하기 위함.
 // ============================================================
+const RESTOCK_THRESHOLD = 5;
+
 export async function runDailyReturnEstimate(supabase: any, authorEmail: string) {
   const { data: products } = await supabase
     .from('products')
@@ -171,9 +174,28 @@ export async function runDailyReturnEstimate(supabase: any, authorEmail: string)
         0
       );
 
-      // 재고가 그 사이 늘었으면(입고 섞임) 비교 무의미하니 건너뛴다.
-      if (actualDecrease >= 0) {
-        const gap = soldQty - actualDecrease;
+      // 그 사이 대량 입고(RESTOCK_THRESHOLD 초과 증가)가 있었으면, 그 입고분은
+      // 빼고 소량 변화만으로 실제 감소량을 다시 계산한다 - 입고랑 반품이
+      // 같은 기간에 섞여도 비교가 무의미해지지 않게 하기 위함.
+      const { data: invRows } = await supabase
+        .from('stock_movements')
+        .select('quantity')
+        .eq('product_id', p.id)
+        .like('note', '쿠팡 로켓창고 재고 동기화%')
+        .gte('occurred_at', p.prev_stock_snapshot_at);
+      const hasRestock = (invRows || []).some(
+        (r: any) => Number(r.quantity) > RESTOCK_THRESHOLD
+      );
+      const adjustedDecrease = hasRestock
+        ? -((invRows || []).reduce(
+            (sum: number, r: any) =>
+              Number(r.quantity) > RESTOCK_THRESHOLD ? sum : sum + Number(r.quantity),
+            0
+          ))
+        : actualDecrease;
+
+      {
+        const gap = soldQty - adjustedDecrease;
         if (gap > 0) {
           const { data: lastSale } = await supabase
             .from('stock_movements')
@@ -197,7 +219,7 @@ export async function runDailyReturnEstimate(supabase: any, authorEmail: string)
             channel: 'coupang',
             amount: -gap * unitPrice,
             occurred_at: now.toISOString(),
-            note: `일일 재고 대사 - 반품 추정 (자동, 확인 필요) - 판매 ${soldQty}개인데 실제 재고는 ${actualDecrease}개만 줄어듦`,
+            note: `일일 재고 대사 - 반품 추정 (자동, 확인 필요) - 판매 ${soldQty}개인데 실제 재고는 ${adjustedDecrease}개만 줄어듦${hasRestock ? ' (그 사이 대량 입고 있었음, 제외하고 계산)' : ''}`,
             author_email: authorEmail,
           });
           estimated++;
@@ -259,8 +281,11 @@ export async function backfillDailyReturnEstimates(
         .like('note', '쿠팡 로켓창고 재고 동기화%')
         .gte('occurred_at', dayStartUtc.toISOString())
         .lt('occurred_at', dayEndUtc.toISOString());
+      // 대량 입고(RESTOCK_THRESHOLD 초과 증가) 건은 제외하고, 소량 변화만
+      // 합산해서 그날의 "판매/반품으로 인한" 순변화를 따로 본다.
       const netInventoryChange = (invRows || []).reduce(
-        (sum: number, r: any) => sum + Number(r.quantity),
+        (sum: number, r: any) =>
+          Number(r.quantity) > RESTOCK_THRESHOLD ? sum : sum + Number(r.quantity),
         0
       );
 
