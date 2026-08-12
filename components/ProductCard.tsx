@@ -12,7 +12,7 @@ import {
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString('ko-KR');
-const GRADE_OPTIONS = ['최상', '상', '중', '하'];
+const GRADE_OPTIONS = ['최상', '상', '중', '하', '미개봉'];
 
 export default function ProductCard({
   product,
@@ -146,17 +146,18 @@ export default function ProductCard({
             </div>
           ) : (
             <div className="flex gap-2">
-              <select
+              <input
                 value={returnGrade}
                 onChange={(e) => setReturnGrade(e.target.value)}
+                list="grade-options"
+                placeholder="등급"
                 className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
-              >
+              />
+              <datalist id="grade-options">
                 {GRADE_OPTIONS.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
+                  <option key={g} value={g} />
                 ))}
-              </select>
+              </datalist>
               <button
                 onClick={saveGrade}
                 disabled={isPending}

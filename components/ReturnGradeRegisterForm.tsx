@@ -6,7 +6,7 @@ import {
   discoverUnmappedVendorItems,
 } from '@/app/dashboard/inventory/products/actions';
 
-const GRADE_OPTIONS = ['최상', '상', '중', '하'];
+const GRADE_OPTIONS = ['최상', '상', '중', '하', '미개봉'];
 
 export default function ReturnGradeRegisterForm() {
   const [sellerProductId, setSellerProductId] = useState('');
@@ -75,17 +75,18 @@ export default function ReturnGradeRegisterForm() {
           placeholder="sellerProductId (예: 16264575752)"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono flex-1"
         />
-        <select
+        <input
           value={returnGrade}
           onChange={(e) => setReturnGrade(e.target.value)}
-          className="border border-paperLine bg-white px-3 py-2 text-sm"
-        >
+          list="grade-options"
+          placeholder="등급"
+          className="border border-paperLine bg-white px-3 py-2 text-sm w-28"
+        />
+        <datalist id="grade-options">
           {GRADE_OPTIONS.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
+            <option key={g} value={g} />
           ))}
-        </select>
+        </datalist>
         <button
           type="submit"
           disabled={isPending || !sellerProductId.trim()}
