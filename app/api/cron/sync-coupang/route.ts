@@ -62,6 +62,17 @@ export async function GET(request: Request) {
     return NextResponse.json(result);
   }
 
+  // 카탈로그 스캔 디버그 전용 - 특정 상품이 왜 걸러지는지 확인할 때만
+  // 명시적으로 요청. 나머지 동기화(주문/재고/반품추정)는 안 건드린다.
+  if (searchParams.get('catalogDebug') === '1') {
+    const result = await syncCoupangProductCatalog(
+      supabase,
+      'auto-sync@hion',
+      forceCatalog
+    );
+    return NextResponse.json(result);
+  }
+
   let catalogResult: any = {};
   if (!skipCatalog) {
     try {
