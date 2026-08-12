@@ -45,7 +45,9 @@ export default function ProductCard({
   const [salePrice, setSalePrice] = useState(
     product.sale_price != null ? String(product.sale_price) : ''
   );
-  const [feeRate, setFeeRate] = useState(String(product.fee_rate ?? 10.8));
+  const [importVat, setImportVat] = useState(
+    product.import_vat != null ? String(product.import_vat) : ''
+  );
 
   function saveDiscount() {
     startTransition(async () => {
@@ -71,30 +73,33 @@ export default function ProductCard({
 
   function saveMargin() {
     startTransition(async () => {
-      const trimmed = salePrice.trim();
+      const trimmedPrice = salePrice.trim();
+      const trimmedVat = importVat.trim();
       await updateMarginInputs(
         product.id,
-        trimmed === '' ? null : Number(trimmed),
-        Number(feeRate) || 0
+        trimmedPrice === '' ? null : Number(trimmedPrice),
+        trimmedVat === '' ? null : Number(trimmedVat)
       );
       setEditingMargin(false);
     });
   }
 
-  // 마진 계산기(components/MarginCalculator.tsx)와 동일한 공식.
-  // 판매가는 쿠폰 할인이 이미 적용된 실제 판매가를 넣는 걸 전제로 한다.
+  // 판매가-매출부가세-매입가+매입부가세-쿠팡수수료-배송비 = 총마진.
+  // 매출부가세는 판매가(부가세 포함가)에서 부가세만 역산: 판매가/11.
+  // 매입부가세는 매입가의 10%로 자동계산하지 않고 직접 입력받는다.
+  // 쿠팡수수료는 8.6% 고정.
+  const COUPANG_FEE_RATE = 8.6;
   const margin = useMemo(() => {
     const p = product.sale_price != null ? Number(product.sale_price) : 0;
     const c = product.manual_cost != null ? Number(product.manual_cost) : 0;
-    const fr = Number(product.fee_rate ?? 10.8);
+    const iv = product.import_vat != null ? Number(product.import_vat) : 0;
     const s = Number(product.shipping_cost || 0);
-    const fee = p * (fr / 100);
-    const outputVat = p * 0.1;
-    const importVat = c * 0.1;
-    const profit = p - outputVat - c + importVat - fee - s;
+    const fee = p * (COUPANG_FEE_RATE / 100);
+    const outputVat = p / 11;
+    const profit = p - outputVat - c + iv - fee - s;
     const marginPct = p > 0 ? (profit / p) * 100 : 0;
-    return { p, c, fr, s, fee, outputVat, importVat, profit, marginPct };
-  }, [product.sale_price, product.manual_cost, product.fee_rate, product.shipping_cost]);
+    return { p, c, iv, s, fee, outputVat, profit, marginPct };
+  }, [product.sale_price, product.manual_cost, product.import_vat, product.shipping_cost]);
 
   const marginTone =
     margin.p <= 0
@@ -309,7 +314,7 @@ export default function ProductCard({
             onClick={() => setEditingMargin((v) => !v)}
             className="text-xs text-inkSoft hover:text-ink underline"
           >
-            {editingMargin ? '닫기' : '판매가·수수료율 수정'}
+            {editingMargin ? '닫기' : '판매가·매입부가세 수정'}
           </button>
         </div>
 
@@ -326,12 +331,12 @@ export default function ProductCard({
               />
             </div>
             <div>
-              <label className="text-xs text-inkSoft">쿠팡수수료율 (%)</label>
+              <label className="text-xs text-inkSoft">매입부가세 (원, 직접 입력)</label>
               <input
-                value={feeRate}
-                onChange={(e) => setFeeRate(e.target.value)}
+                value={importVat}
+                onChange={(e) => setImportVat(e.target.value)}
                 type="number"
-                step="0.1"
+                placeholder="0"
                 className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono w-full mt-1"
               />
             </div>
@@ -348,10 +353,10 @@ export default function ProductCard({
         {margin.p > 0 ? (
           <div className="text-xs grid gap-1 mt-2">
             <MarginLine label="판매가" value={fmt(margin.p)} />
-            <MarginLine label="매출부가세" value={'-' + fmt(margin.outputVat)} />
+            <MarginLine label="매출부가세 (판매가÷11)" value={'-' + fmt(margin.outputVat)} />
             <MarginLine label="매입가" value={'-' + fmt(margin.c)} />
-            <MarginLine label="매입부가세" value={'+' + fmt(margin.importVat)} />
-            <MarginLine label="쿠팡수수료" value={'-' + fmt(margin.fee)} />
+            <MarginLine label="매입부가세" value={'+' + fmt(margin.iv)} />
+            <MarginLine label={`쿠팡수수료 (${COUPANG_FEE_RATE}%)`} value={'-' + fmt(margin.fee)} />
             <MarginLine label="배송비" value={'-' + fmt(margin.s)} />
             <div className="flex justify-between pt-1 mt-1 border-t border-paperLine font-bold">
               <span>총마진</span>
