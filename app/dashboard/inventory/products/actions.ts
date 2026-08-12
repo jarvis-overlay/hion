@@ -239,6 +239,54 @@ export async function discoverUnmappedVendorItems() {
 }
 
 // 반품등급(최상/상/중 등) 표시 - 쿠팡에만 있는 개념이라 다른 채널과 무관.
+// 한 상품에 여러 옵션ID(색상 등)가 묶여있는데, 재고/가격이 옵션마다 달라서
+// 따로 관리해야 할 때 - 그 옵션ID 하나를 새 상품으로 분리하고, 과거 판매
+// 기록(stock_movements)도 그 옵션ID 기준으로 새 상품에 재배치한다.
+export async function splitVendorItemToNewProduct(
+  vendorItemId: string,
+  newProductName: string
+) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: '로그인이 필요해요.' };
+
+  const trimmed = newProductName.trim();
+  if (!trimmed) return { error: '새 상품명을 입력해줘.' };
+
+  const { data: created, error: createErr } = await supabase
+    .from('products')
+    .insert({
+      name: trimmed,
+      author_email: user.email,
+      notes: `옵션ID ${vendorItemId} 분리 등록됨`,
+    })
+    .select('id')
+    .single();
+  if (createErr) return { error: createErr.message };
+
+  const { error: mapErr } = await supabase
+    .from('product_vendor_items')
+    .update({ product_id: created.id, is_return_grade: false })
+    .eq('vendor_item_id', vendorItemId);
+  if (mapErr) return { error: mapErr.message };
+
+  // 과거 판매/반품 기록도 이 옵션ID 기준으로 새 상품에 재배치
+  // (external_ref는 'coupang-order:주문번호:옵션ID' 형태라 끝이 옵션ID로
+  // 정확히 끝나는 행만 골라낸다)
+  const { data: moved } = await supabase
+    .from('stock_movements')
+    .update({ product_id: created.id })
+    .like('external_ref', `%:${vendorItemId}`)
+    .select('id');
+
+  revalidatePath('/dashboard/inventory/products');
+  revalidatePath('/dashboard/inventory/stock');
+  revalidatePath('/dashboard/analytics');
+  return { newProductId: created.id, movedMovements: (moved || []).length };
+}
+
 export async function updateReturnGrade(id: string, grade: string) {
   const supabase = createClient();
   await supabase

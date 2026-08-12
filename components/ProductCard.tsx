@@ -9,6 +9,7 @@ import {
   updateManualCost,
   updateMarginInputs,
   updateReturnGrade,
+  splitVendorItemToNewProduct,
 } from '@/app/dashboard/inventory/products/actions';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
@@ -32,6 +33,26 @@ export default function ProductCard({
     startTransition(async () => {
       await updateProductName(product.id, name);
       setEditingName(false);
+    });
+  }
+
+  const [splittingId, setSplittingId] = useState<string | null>(null);
+  const [splitName, setSplitName] = useState('');
+  const [splitMessage, setSplitMessage] = useState<string | null>(null);
+
+  function saveSplit() {
+    if (!splittingId) return;
+    startTransition(async () => {
+      const result = await splitVendorItemToNewProduct(splittingId, splitName);
+      if (result.error) {
+        setSplitMessage(`⚠️ ${result.error}`);
+      } else {
+        setSplitMessage(
+          `✅ "${splitName}"(으)로 분리 완료 (과거 기록 ${result.movedMovements}건 이동됨)`
+        );
+        setSplittingId(null);
+        setSplitName('');
+      }
     });
   }
 
@@ -215,18 +236,65 @@ export default function ProductCard({
       )}
 
       <div className="pt-2 border-t border-paperLine">
-        <span className="text-xs text-inkSoft">
-          쿠팡 옵션ID:{' '}
-          {vendorItemIds.length > 0 ? (
-            <span className="font-mono text-ink">
-              {vendorItemIds.join(', ')}
-            </span>
-          ) : (
-            <span className="text-warn">
-              미매핑 (카탈로그 동기화가 아직 안 찾았거나 대상이 아님)
-            </span>
-          )}
-        </span>
+        <div className="text-xs text-inkSoft mb-1">쿠팡 옵션ID</div>
+        {vendorItemIds.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            {vendorItemIds.map((vid) => (
+              <div key={vid} className="flex items-center gap-2">
+                <span className="font-mono text-ink text-xs">{vid}</span>
+                {vendorItemIds.length > 1 && (
+                  <button
+                    onClick={() => {
+                      setSplittingId(vid);
+                      setSplitName('');
+                      setSplitMessage(null);
+                    }}
+                    className="text-xs text-inkSoft hover:text-ink underline"
+                  >
+                    별도 상품으로 분리
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-warn">
+            미매핑 (카탈로그 동기화가 아직 안 찾았거나 대상이 아님)
+          </span>
+        )}
+
+        {splittingId && (
+          <div className="mt-2 p-2 border border-paperLine rounded-lg">
+            <p className="text-xs text-inkSoft mb-1">
+              옵션ID {splittingId}를 새 상품으로 분리 (과거 판매 기록도 같이
+              옮겨져요)
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={splitName}
+                onChange={(e) => setSplitName(e.target.value)}
+                placeholder="새 상품명 (예: 베이비커넥트 핑크)"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
+              />
+              <button
+                onClick={saveSplit}
+                disabled={isPending || !splitName.trim()}
+                className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                분리
+              </button>
+              <button
+                onClick={() => setSplittingId(null)}
+                className="text-xs text-inkSoft px-1"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+        {splitMessage && (
+          <p className="text-xs mt-2 text-inkSoft">{splitMessage}</p>
+        )}
       </div>
 
       <div className="pt-2 border-t border-paperLine">
