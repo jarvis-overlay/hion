@@ -7,19 +7,32 @@ import {
   updateShippingCost,
   updateManualCost,
   updateMarginInputs,
+  updateReturnGrade,
 } from '@/app/dashboard/inventory/products/actions';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString('ko-KR');
+const GRADE_OPTIONS = ['최상', '상', '중', '하'];
 
 export default function ProductCard({
   product,
   vendorItemIds = [],
+  isReturnGrade = false,
 }: {
   product: any;
   vendorItemIds?: string[];
+  isReturnGrade?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
+  const [editingGrade, setEditingGrade] = useState(false);
+  const [returnGrade, setReturnGrade] = useState(product.return_grade || '최상');
+
+  function saveGrade() {
+    startTransition(async () => {
+      await updateReturnGrade(product.id, returnGrade);
+      setEditingGrade(false);
+    });
+  }
   const [editingDiscount, setEditingDiscount] = useState(false);
   const [discount, setDiscount] = useState(String(product.coupon_discount || 0));
   const [editingShipping, setEditingShipping] = useState(false);
@@ -113,6 +126,48 @@ export default function ProductCard({
         </a>
       )}
       {product.notes && <p className="text-xs text-ink">{product.notes}</p>}
+
+      {isReturnGrade && (
+        <div className="pt-2 border-t border-paperLine">
+          {!editingGrade ? (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-inkSoft">
+                반품등급 (쿠팡 전용):{' '}
+                <span className="font-mono text-ink">
+                  {product.return_grade || '미입력'}
+                </span>
+              </span>
+              <button
+                onClick={() => setEditingGrade(true)}
+                className="text-xs text-inkSoft hover:text-ink underline"
+              >
+                수정
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <select
+                value={returnGrade}
+                onChange={(e) => setReturnGrade(e.target.value)}
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
+              >
+                {GRADE_OPTIONS.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={saveGrade}
+                disabled={isPending}
+                className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                저장
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="pt-2 border-t border-paperLine">
         <span className="text-xs text-inkSoft">

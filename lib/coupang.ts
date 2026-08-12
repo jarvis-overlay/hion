@@ -307,6 +307,52 @@ export async function fetchCoupangInventoryForItem({
   };
 }
 
+// vendorItemId를 생략하면 이 계정이 보유한 모든 옵션ID의 재고 요약을
+// 돌려준다 - 상품 목록 조회 API가 반품등급(회수품) 옵션을 아예 안 주는
+// 문제를 우회해서, 존재하는 모든 옵션ID를 발견하는 용도로 쓴다. 다만
+// 상품명/sellerProductId/바코드는 안 준다 (vendorItemId/재고/최근30일
+// 판매량만 옴).
+export async function fetchAllCoupangInventorySummaries({
+  vendorId,
+  accessKey,
+  secretKey,
+}: {
+  vendorId: string;
+  accessKey: string;
+  secretKey: string;
+}): Promise<{ vendorItemId: string; totalOrderableQuantity: number }[]> {
+  const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/inventory/summaries`;
+  const query = '';
+  const authorization = buildAuthHeader(
+    'GET',
+    path,
+    query,
+    accessKey,
+    secretKey
+  );
+
+  const res = await proxiedFetch(`${HOST}${path}`, {
+    method: 'GET',
+    headers: {
+      Authorization: authorization,
+      'X-Requested-By': vendorId,
+      'Content-Type': 'application/json;charset=UTF-8',
+    },
+    cache: 'no-store',
+  });
+
+  const json = await res.json();
+
+  if (!res.ok || json.code !== 200) {
+    throw new Error(json?.message || `쿠팡 API 오류 (HTTP ${res.status})`);
+  }
+
+  return (json.data || []).map((entry: any) => ({
+    vendorItemId: String(entry.vendorItemId),
+    totalOrderableQuantity: entry.inventoryDetails?.totalOrderableQuantity ?? 0,
+  }));
+}
+
 export async function fetchCoupangReturnRequests({
   vendorId,
   accessKey,

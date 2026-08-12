@@ -78,6 +78,7 @@ export default async function ProductsPage() {
                 key={p.id}
                 product={p}
                 vendorItemIds={vendorItemsByProduct[p.id] || []}
+                isReturnGrade
               />
             ))}
           </div>
