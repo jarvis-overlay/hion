@@ -3,11 +3,14 @@
 import { useMemo, useState, useTransition } from 'react';
 import {
   deleteProduct,
+  updateProductName,
+  updateWarehouseStock,
   updateCouponDiscount,
   updateShippingCost,
   updateManualCost,
   updateMarginInputs,
   updateReturnGrade,
+  splitVendorItemToNewProduct,
 } from '@/app/dashboard/inventory/products/actions';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
@@ -18,12 +21,58 @@ export default function ProductCard({
   product,
   vendorItemIds = [],
   isReturnGrade = false,
+  stock,
 }: {
   product: any;
   vendorItemIds?: string[];
   isReturnGrade?: boolean;
+  stock?: { coupang: number; own: number };
 }) {
   const [isPending, startTransition] = useTransition();
+  const [expanded, setExpanded] = useState(false);
+  const [editingStock, setEditingStock] = useState(false);
+  const [coupangStock, setCoupangStock] = useState('0');
+  const [ownStock, setOwnStock] = useState('0');
+
+  function saveStock() {
+    startTransition(async () => {
+      await Promise.all([
+        updateWarehouseStock(product.id, 'coupang', Number(coupangStock) || 0),
+        updateWarehouseStock(product.id, 'own', Number(ownStock) || 0),
+      ]);
+      setEditingStock(false);
+    });
+  }
+  const [editingName, setEditingName] = useState(false);
+  const [name, setName] = useState(product.name);
+
+  function saveName() {
+    startTransition(async () => {
+      await updateProductName(product.id, name);
+      setEditingName(false);
+    });
+  }
+
+  const [splittingId, setSplittingId] = useState<string | null>(null);
+  const [splitName, setSplitName] = useState('');
+  const [splitMessage, setSplitMessage] = useState<string | null>(null);
+
+  function saveSplit() {
+    if (!splittingId) return;
+    startTransition(async () => {
+      const result = await splitVendorItemToNewProduct(splittingId, splitName);
+      if (result.error) {
+        setSplitMessage(`⚠️ ${result.error}`);
+      } else {
+        setSplitMessage(
+          `✅ "${splitName}"(으)로 분리 완료 (과거 기록 ${result.movedMovements}건 이동됨)`
+        );
+        setSplittingId(null);
+        setSplitName('');
+      }
+    });
+  }
+
   const [editingGrade, setEditingGrade] = useState(false);
   const [returnGrade, setReturnGrade] = useState(product.return_grade || '최상');
 
@@ -113,13 +162,114 @@ export default function ProductCard({
   return (
     <div className="card p-4 flex flex-col gap-2">
       <div className="flex items-start justify-between gap-2">
-        <h3 className="font-semibold text-sm">{product.name}</h3>
+        {!editingName ? (
+          <h3
+            className="font-semibold text-sm cursor-pointer hover:underline"
+            onClick={() => setEditingName(true)}
+            title="클릭해서 상품명 수정"
+          >
+            {product.name}
+          </h3>
+        ) : (
+          <div className="flex gap-2 flex-1">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+              className="border border-paperLine bg-white px-2 py-1 text-sm font-semibold flex-1"
+            />
+            <button
+              onClick={saveName}
+              disabled={isPending}
+              className="btn-primary px-2 py-1 text-xs disabled:opacity-50"
+            >
+              저장
+            </button>
+            <button
+              onClick={() => {
+                setName(product.name);
+                setEditingName(false);
+              }}
+              className="text-xs text-inkSoft px-1"
+            >
+              취소
+            </button>
+          </div>
+        )}
         {product.sku && (
           <span className="text-xs font-mono bg-paperLine px-2 py-0.5 rounded-full whitespace-nowrap">
             {product.sku}
           </span>
         )}
       </div>
+
+      <div className="flex items-center justify-between gap-3">
+        {!editingStock ? (
+          <div className="text-xs text-inkSoft flex gap-3">
+            <span>
+              쿠팡 재고{' '}
+              <span className="font-mono font-semibold text-ink">
+                {stock?.coupang ?? 0}
+              </span>
+            </span>
+            <span>
+              자사 재고{' '}
+              <span className="font-mono font-semibold text-ink">
+                {stock?.own ?? 0}
+              </span>
+            </span>
+            <button
+              onClick={() => {
+                setCoupangStock(String(stock?.coupang ?? 0));
+                setOwnStock(String(stock?.own ?? 0));
+                setEditingStock(true);
+              }}
+              className="text-inkSoft hover:text-ink underline"
+            >
+              수정
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs">
+            <label className="text-inkSoft">쿠팡</label>
+            <input
+              value={coupangStock}
+              onChange={(e) => setCoupangStock(e.target.value)}
+              type="number"
+              className="border border-paperLine bg-white px-2 py-1 text-xs font-mono w-16"
+            />
+            <label className="text-inkSoft">자사</label>
+            <input
+              value={ownStock}
+              onChange={(e) => setOwnStock(e.target.value)}
+              type="number"
+              className="border border-paperLine bg-white px-2 py-1 text-xs font-mono w-16"
+            />
+            <button
+              onClick={saveStock}
+              disabled={isPending}
+              className="btn-primary px-2 py-1 text-xs disabled:opacity-50"
+            >
+              저장
+            </button>
+            <button
+              onClick={() => setEditingStock(false)}
+              className="text-inkSoft px-1"
+            >
+              취소
+            </button>
+          </div>
+        )}
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="text-xs text-inkSoft underline whitespace-nowrap"
+        >
+          {expanded ? '접기 ▲' : '자세히 ▼'}
+        </button>
+      </div>
+
+      {expanded && (
+        <>
       {product.china_link && (
         <a
           href={product.china_link}
@@ -176,18 +326,65 @@ export default function ProductCard({
       )}
 
       <div className="pt-2 border-t border-paperLine">
-        <span className="text-xs text-inkSoft">
-          쿠팡 옵션ID:{' '}
-          {vendorItemIds.length > 0 ? (
-            <span className="font-mono text-ink">
-              {vendorItemIds.join(', ')}
-            </span>
-          ) : (
-            <span className="text-warn">
-              미매핑 (카탈로그 동기화가 아직 안 찾았거나 대상이 아님)
-            </span>
-          )}
-        </span>
+        <div className="text-xs text-inkSoft mb-1">쿠팡 옵션ID</div>
+        {vendorItemIds.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            {vendorItemIds.map((vid) => (
+              <div key={vid} className="flex items-center gap-2">
+                <span className="font-mono text-ink text-xs">{vid}</span>
+                {vendorItemIds.length > 1 && (
+                  <button
+                    onClick={() => {
+                      setSplittingId(vid);
+                      setSplitName('');
+                      setSplitMessage(null);
+                    }}
+                    className="text-xs text-inkSoft hover:text-ink underline"
+                  >
+                    별도 상품으로 분리
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-warn">
+            미매핑 (카탈로그 동기화가 아직 안 찾았거나 대상이 아님)
+          </span>
+        )}
+
+        {splittingId && (
+          <div className="mt-2 p-2 border border-paperLine rounded-lg">
+            <p className="text-xs text-inkSoft mb-1">
+              옵션ID {splittingId}를 새 상품으로 분리 (과거 판매 기록도 같이
+              옮겨져요)
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={splitName}
+                onChange={(e) => setSplitName(e.target.value)}
+                placeholder="새 상품명 (예: 베이비커넥트 핑크)"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
+              />
+              <button
+                onClick={saveSplit}
+                disabled={isPending || !splitName.trim()}
+                className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                분리
+              </button>
+              <button
+                onClick={() => setSplittingId(null)}
+                className="text-xs text-inkSoft px-1"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+        {splitMessage && (
+          <p className="text-xs mt-2 text-inkSoft">{splitMessage}</p>
+        )}
       </div>
 
       <div className="pt-2 border-t border-paperLine">
@@ -381,6 +578,8 @@ export default function ProductCard({
           삭제
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
 import SaleForm from '@/components/SaleForm';
-import StockTable from '@/components/StockTable';
 import ChannelSalesTable from '@/components/ChannelSalesTable';
 import DailySalesHistory from '@/components/DailySalesHistory';
 import HistoryList from '@/components/HistoryList';
@@ -85,8 +84,8 @@ export default async function StockPage() {
   const { data: movements } = await supabase
     .from('stock_movements')
     .select('*, products(name)')
-    .order('created_at', { ascending: false })
-    .limit(50);
+    .order('occurred_at', { ascending: false })
+    .limit(500);
 
   // 채널별 판매 현황용 데이터 (전체 기간 누적 - occurred_at 포함해서
   // 클라이언트에서 오늘/7일/30일/전체 필터링에 사용)
@@ -109,12 +108,12 @@ export default async function StockPage() {
         {coupangConnected && <CoupangSyncButton compact />}
       </div>
       <p className="text-sm text-inkSoft mb-5">
-        쿠팡 창고 / 자사 물류창고 재고와 전체 입출고 히스토리
+        채널별 판매 현황과 전체 입출고 히스토리 (재고 수량은{' '}
+        <a href="/dashboard/inventory/products" className="underline">
+          상품 관리
+        </a>{' '}
+        페이지에서 확인·수정하세요)
       </p>
-
-      <div className="mb-6">
-        <StockTable products={products || []} stockRows={stockRows || []} />
-      </div>
 
       <div className="mb-6">
         <h2 className="font-display text-lg font-bold mb-3">
@@ -187,7 +186,7 @@ export default async function StockPage() {
 
       <div>
         <h2 className="font-display text-lg font-bold mb-3">히스토리</h2>
-        <HistoryList movements={movements || []} />
+        <HistoryList movements={movements || []} products={products || []} />
       </div>
     </div>
   );

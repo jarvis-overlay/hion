@@ -39,6 +39,45 @@ export async function deleteProduct(id: string) {
   revalidatePath('/dashboard/inventory/products');
 }
 
+// 창고별 재고 수량 직접 수정. 쿠팡 창고는 다음 동기화 때 실제 API 값으로
+// 덮어써지니 참고용/임시 정정용이고, 자사 물류창고는 동기화 대상이 아니라서
+// 여기서 고친 값이 그대로 유지된다.
+export async function updateWarehouseStock(
+  productId: string,
+  warehouse: 'coupang' | 'own',
+  quantity: number
+) {
+  const supabase = createClient();
+  const { data: existing } = await supabase
+    .from('warehouse_stock')
+    .select('id')
+    .eq('product_id', productId)
+    .eq('warehouse', warehouse)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase
+      .from('warehouse_stock')
+      .update({ quantity })
+      .eq('id', existing.id);
+  } else {
+    await supabase
+      .from('warehouse_stock')
+      .insert({ product_id: productId, warehouse, quantity });
+  }
+
+  revalidatePath('/dashboard/inventory/products');
+  revalidatePath('/dashboard/inventory/stock');
+}
+
+export async function updateProductName(id: string, name: string) {
+  const supabase = createClient();
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  await supabase.from('products').update({ name: trimmed }).eq('id', id);
+  revalidatePath('/dashboard/inventory/products');
+}
+
 // 상품별 쿠팡 쿠폰 할인액. 매출 동기화 시 정상 재고 판매(반품 재판매 제외)의
 // 판매가에서 이 값을 빼서 실제 판매가에 가깝게 계산한다.
 export async function updateCouponDiscount(id: string, discount: number) {
@@ -231,6 +270,54 @@ export async function discoverUnmappedVendorItems() {
 }
 
 // 반품등급(최상/상/중 등) 표시 - 쿠팡에만 있는 개념이라 다른 채널과 무관.
+// 한 상품에 여러 옵션ID(색상 등)가 묶여있는데, 재고/가격이 옵션마다 달라서
+// 따로 관리해야 할 때 - 그 옵션ID 하나를 새 상품으로 분리하고, 과거 판매
+// 기록(stock_movements)도 그 옵션ID 기준으로 새 상품에 재배치한다.
+export async function splitVendorItemToNewProduct(
+  vendorItemId: string,
+  newProductName: string
+) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: '로그인이 필요해요.' };
+
+  const trimmed = newProductName.trim();
+  if (!trimmed) return { error: '새 상품명을 입력해줘.' };
+
+  const { data: created, error: createErr } = await supabase
+    .from('products')
+    .insert({
+      name: trimmed,
+      author_email: user.email,
+      notes: `옵션ID ${vendorItemId} 분리 등록됨`,
+    })
+    .select('id')
+    .single();
+  if (createErr) return { error: createErr.message };
+
+  const { error: mapErr } = await supabase
+    .from('product_vendor_items')
+    .update({ product_id: created.id, is_return_grade: false })
+    .eq('vendor_item_id', vendorItemId);
+  if (mapErr) return { error: mapErr.message };
+
+  // 과거 판매/반품 기록도 이 옵션ID 기준으로 새 상품에 재배치
+  // (external_ref는 'coupang-order:주문번호:옵션ID' 형태라 끝이 옵션ID로
+  // 정확히 끝나는 행만 골라낸다)
+  const { data: moved } = await supabase
+    .from('stock_movements')
+    .update({ product_id: created.id })
+    .like('external_ref', `%:${vendorItemId}`)
+    .select('id');
+
+  revalidatePath('/dashboard/inventory/products');
+  revalidatePath('/dashboard/inventory/stock');
+  revalidatePath('/dashboard/analytics');
+  return { newProductId: created.id, movedMovements: (moved || []).length };
+}
+
 export async function updateReturnGrade(id: string, grade: string) {
   const supabase = createClient();
   await supabase
