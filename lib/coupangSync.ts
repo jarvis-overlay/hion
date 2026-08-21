@@ -1,5 +1,6 @@
 import {
   fetchCoupangInventoryForItem,
+  fetchAllCoupangInventorySummaries,
   fetchCoupangRGOrders,
   fetchCoupangProductDetail,
   fetchCoupangProductList,
@@ -49,6 +50,29 @@ export async function runCoupangInventorySync(
     vendorItemsByProduct[m.product_id].push(m.vendor_item_id);
   }
 
+  // 옵션ID 하나하나마다 재고를 개별 조회하면 상품 수만큼 API 호출이
+  // 나가서 Fixie 프록시 요청을 순식간에 소진한다. 재고 요약 API는
+  // vendorItemId를 생략하면 이 계정의 전체 옵션ID 재고를 "한 번의 호출"로
+  // 다 준다는 걸 이용해서, override가 없을 때도 개별 호출 대신 이걸
+  // 한 번만 불러서 맵으로 만들어 쓴다.
+  let effectiveOverride = inventoryOverride;
+  if (!effectiveOverride) {
+    try {
+      const all = await fetchAllCoupangInventorySummaries({
+        vendorId: cred.vendor_id,
+        accessKey: cred.access_key,
+        secretKey: cred.secret_key,
+      });
+      effectiveOverride = {};
+      for (const item of all) {
+        effectiveOverride[item.vendorItemId] = item.totalOrderableQuantity;
+      }
+    } catch {
+      // 벌크 조회 실패하면 아래에서 옵션별로 개별 재조회하도록 override 없이 진행
+      effectiveOverride = undefined;
+    }
+  }
+
   let updated = 0;
   let unchanged = 0;
   let failed = 0;
@@ -60,8 +84,8 @@ export async function runCoupangInventorySync(
       let totalQty = 0;
       for (const vendorItemId of vendorItemIds) {
         const key = String(vendorItemId);
-        if (inventoryOverride && key in inventoryOverride) {
-          totalQty += inventoryOverride[key];
+        if (effectiveOverride && key in effectiveOverride) {
+          totalQty += effectiveOverride[key];
           continue;
         }
         const result = await fetchCoupangInventoryForItem({
@@ -402,6 +426,26 @@ export async function syncCoupangProductCatalog(
   // 이 스캔 중 조회한 옵션별 재고값 (뒤이은 재고 동기화가 재조회 안 해도 되게)
   const inventoryByVendorItem: Record<string, number> = {};
 
+  // 상품마다/옵션마다 재고를 개별 조회하면 카탈로그 전체 스캔 한 번에
+  // 수백 건씩 API를 호출하게 돼서 Fixie 프록시 요청을 순식간에 태운다.
+  // vendorItemId를 생략하면 이 계정의 전체 옵션ID 재고를 한 번에 다 주는
+  // API를 이용해서, 아래 옵션별 재고 확인을 이 맵 조회로 대체한다.
+  let bulkInventory: Record<string, number> | undefined;
+  try {
+    const all = await fetchAllCoupangInventorySummaries({
+      vendorId: cred.vendor_id,
+      accessKey: cred.access_key,
+      secretKey: cred.secret_key,
+    });
+    bulkInventory = {};
+    for (const item of all) {
+      bulkInventory[item.vendorItemId] = item.totalOrderableQuantity;
+    }
+  } catch (e: any) {
+    firstInventoryCheckError = e?.message || String(e);
+    bulkInventory = undefined;
+  }
+
   try {
     let nextToken: string | undefined = undefined;
     do {
@@ -496,18 +540,23 @@ export async function syncCoupangProductCatalog(
           }
 
           let stockQty = 0;
-          try {
-            const inv = await fetchCoupangInventoryForItem({
-              vendorId: cred.vendor_id,
-              accessKey: cred.access_key,
-              secretKey: cred.secret_key,
-              vendorItemId,
-            });
-            stockQty = inv?.totalOrderableQuantity ?? 0;
-          } catch (e: any) {
-            stockQty = 0;
-            if (!firstInventoryCheckError) {
-              firstInventoryCheckError = e?.message || String(e);
+          if (bulkInventory && vendorItemId in bulkInventory) {
+            stockQty = bulkInventory[vendorItemId];
+          } else {
+            // 벌크 조회에 없거나 실패했을 때만 개별 조회로 폴백
+            try {
+              const inv = await fetchCoupangInventoryForItem({
+                vendorId: cred.vendor_id,
+                accessKey: cred.access_key,
+                secretKey: cred.secret_key,
+                vendorItemId,
+              });
+              stockQty = inv?.totalOrderableQuantity ?? 0;
+            } catch (e: any) {
+              stockQty = 0;
+              if (!firstInventoryCheckError) {
+                firstInventoryCheckError = e?.message || String(e);
+              }
             }
           }
           inventoryByVendorItem[vendorItemId] = stockQty;
