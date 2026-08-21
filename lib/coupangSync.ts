@@ -5,6 +5,7 @@ import {
   fetchCoupangProductList,
   fetchCoupangReturnRequests,
 } from '@/lib/coupang';
+import { notifyAllRecipients } from '@/lib/kakao';
 
 export async function runCoupangInventorySync(
   supabase: any,
@@ -692,6 +693,9 @@ export async function runCoupangOrderSync(
   const unmappedVendorItemIds = new Set<string>();
   const unmappedNames: Record<string, string> = {};
   const rawOrdersSample: any[] = [];
+  // 새로 기록된 판매 건 요약 - 카카오톡 알림용 (이미 있던 건 upsert가
+  // ignoreDuplicates로 걸러줘서 skipped로 빠지니, 여기 쌓이는 건 진짜 신규뿐)
+  const newSales: { productName: string; qty: number; amount: number }[] = [];
 
   try {
     for (const range of ranges) {
@@ -770,6 +774,13 @@ export async function runCoupangOrderSync(
 
             if (inserted && inserted.length > 0) {
               logged++;
+              if (!isReturn) {
+                newSales.push({
+                  productName,
+                  qty,
+                  amount: qty * unitPrice,
+                });
+              }
             } else {
               skipped++;
             }
@@ -780,6 +791,24 @@ export async function runCoupangOrderSync(
   } catch (e: any) {
     lastError = e?.message || String(e);
     console.error('runCoupangOrderSync error:', e);
+  }
+
+  // 새로 잡힌 판매가 있으면 등록된 사람들 카카오톡으로 알림. 실패해도
+  // 동기화 자체 결과에는 영향 안 주게 별도로 감싼다.
+  if (newSales.length > 0) {
+    try {
+      const totalQty = newSales.reduce((s, n) => s + n.qty, 0);
+      const totalAmount = newSales.reduce((s, n) => s + n.amount, 0);
+      const lines = newSales
+        .slice(0, 10)
+        .map((n) => `- ${n.productName} ${n.qty}개 (${n.amount.toLocaleString('ko-KR')}원)`)
+        .join('\n');
+      const more = newSales.length > 10 ? `\n...외 ${newSales.length - 10}건` : '';
+      const message = `🛒 새 주문 ${newSales.length}건 (${totalQty}개, ${totalAmount.toLocaleString('ko-KR')}원)\n${lines}${more}`;
+      await notifyAllRecipients(supabase, message);
+    } catch (e) {
+      console.error('카카오 주문 알림 전송 실패:', e);
+    }
   }
 
   return {

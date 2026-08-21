@@ -29,6 +29,10 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
     ],
   },
   {
+    label: null,
+    items: [{ href: '/dashboard/notifications', label: '알림 설정' }],
+  },
+  {
     label: '개발자',
     items: [{ href: '/dashboard/api-test', label: 'API 테스트' }],
   },
