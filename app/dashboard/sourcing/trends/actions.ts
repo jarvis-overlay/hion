@@ -8,12 +8,67 @@ import {
   type TimeUnit,
 } from '@/lib/naver';
 import { recommendSourcingItems, type SourcingRecommendation } from '@/lib/claude';
+import { createClient } from '@/lib/supabase/server';
+
+// 우리 쿠팡 판매 데이터(최근 60일 판매출고 기록)로 지금 잘 팔리는/뜨고 있는
+// 상품을 요약한다. 네이버 데이터랩이 막혀있어도 이건 우리 DB만 보면 되니까
+// 항상 동작한다.
+async function fetchOwnSalesSummary(): Promise<string | null> {
+  const supabase = createClient();
+  const since = new Date();
+  since.setDate(since.getDate() - 60);
+
+  const { data: movements } = await supabase
+    .from('stock_movements')
+    .select('product_id, quantity, created_at, products(name)')
+    .eq('type', 'out')
+    .eq('channel', 'coupang')
+    .gte('created_at', since.toISOString());
+
+  if (!movements || movements.length === 0) return null;
+
+  const midpoint = new Date();
+  midpoint.setDate(midpoint.getDate() - 30);
+
+  const byProduct = new Map<
+    string,
+    { name: string; recentQty: number; priorQty: number }
+  >();
+
+  for (const m of movements as any[]) {
+    const name = m.products?.name || '이름 없음';
+    const key = m.product_id;
+    const entry = byProduct.get(key) || { name, recentQty: 0, priorQty: 0 };
+    const qty = Math.abs(m.quantity);
+    if (new Date(m.created_at) >= midpoint) entry.recentQty += qty;
+    else entry.priorQty += qty;
+    byProduct.set(key, entry);
+  }
+
+  const rows = Array.from(byProduct.values())
+    .sort((a, b) => b.recentQty + b.priorQty - (a.recentQty + a.priorQty))
+    .slice(0, 15);
+
+  if (rows.length === 0) return null;
+
+  return rows
+    .map((r) => {
+      const change =
+        r.priorQty === 0
+          ? r.recentQty > 0
+            ? '신규/급증'
+            : '변화없음'
+          : `${(((r.recentQty - r.priorQty) / r.priorQty) * 100).toFixed(0)}%`;
+      return `- ${r.name}: 최근 30일 ${r.recentQty}개 판매 (이전 30일 대비 ${change})`;
+    })
+    .join('\n');
+}
 
 // 카테고리 10개 전체의 최근 트렌드를 자동으로 긁어서 Claude에게 해석시키고
 // 구체적인 소싱 아이템을 추천받는다. 사용자가 키워드/카테고리를 직접 고를
 // 필요 없는 원클릭 플로우.
 export async function runAiRecommendation(): Promise<
-  { recommendations: SourcingRecommendation[] } | { error: string }
+  { recommendations: SourcingRecommendation[]; usedTrendData: boolean } | { error: string }
 > {
   const timeUnit: TimeUnit = 'week';
   const end = new Date();
@@ -27,6 +82,8 @@ export async function runAiRecommendation(): Promise<
     chunks.push(SHOPPING_CATEGORIES.slice(i, i + 3));
   }
 
+  // 네이버 데이터랩 연동이 계정 이슈로 막혀있을 수 있어서, 트렌드 데이터
+  // 수집에 실패해도 전체를 에러로 막지 않고 Claude 자체 지식으로 폴백한다.
   const summaries: string[] = [];
   try {
     for (const chunk of chunks) {
@@ -54,20 +111,27 @@ export async function runAiRecommendation(): Promise<
         );
       }
     }
-  } catch (e: any) {
-    return { error: e?.message || String(e) };
+  } catch {
+    // 네이버 데이터랩 연동 실패 - 아래에서 트렌드 데이터 없이 진행
   }
 
-  if (summaries.length === 0) {
-    return { error: '트렌드 데이터를 가져오지 못했어요.' };
-  }
-
+  const usedTrendData = summaries.length > 0;
   const today = new Date().toISOString().slice(0, 10);
-  const summaryText = `오늘 날짜: ${today}\n\n${summaries.join('\n')}`;
+  const ownSales = await fetchOwnSalesSummary().catch(() => null);
+
+  const parts: string[] = [`오늘 날짜: ${today}`];
+  if (usedTrendData) {
+    parts.push(`[네이버 쇼핑인사이트 카테고리별 트렌드]\n${summaries.join('\n')}`);
+  }
+  if (ownSales) {
+    parts.push(`[우리 쿠팡 스토어 최근 60일 실제 판매 데이터]\n${ownSales}`);
+  }
+
+  const summaryText = usedTrendData || ownSales ? parts.join('\n\n') : null;
 
   try {
     const recommendations = await recommendSourcingItems(summaryText);
-    return { recommendations };
+    return { recommendations, usedTrendData: usedTrendData || !!ownSales };
   } catch (e: any) {
     return { error: e?.message || String(e) };
   }

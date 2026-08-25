@@ -8,6 +8,7 @@ export default function AiRecommendation() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<SourcingRecommendation[] | null>(null);
+  const [usedTrendData, setUsedTrendData] = useState(false);
 
   async function handleClick() {
     setLoading(true);
@@ -19,6 +20,7 @@ export default function AiRecommendation() {
       return;
     }
     setItems(res.recommendations);
+    setUsedTrendData(res.usedTrendData);
   }
 
   return (
@@ -49,6 +51,13 @@ export default function AiRecommendation() {
       {loading && (
         <p className="mt-6 text-sm text-inkSoft">
           최근 카테고리별 트렌드를 모으고 Claude에게 물어보는 중이에요...
+        </p>
+      )}
+
+      {items && items.length > 0 && !usedTrendData && (
+        <p className="mt-6 text-xs text-inkSoft bg-accentBg rounded-md px-4 py-3">
+          네이버 트렌드/자체 판매 데이터 없이 Claude의 일반 지식(계절성 등)만으로
+          추천된 결과예요. 참고용으로만 봐주세요.
         </p>
       )}
 
