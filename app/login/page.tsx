@@ -15,14 +15,14 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 bg-[#F7F8FA]">
-      <div className="card w-full max-w-sm p-8 text-center">
+    <main className="flex min-h-screen items-center justify-center px-4 bg-ink">
+      <div className="card w-full max-w-sm p-10 text-center border-t-2 border-t-accent">
         <img
           src="/logo.png"
           alt="HION HUB"
           className="h-16 w-auto object-contain mx-auto mb-6"
         />
-        <p className="text-sm text-inkSoft mb-8">
+        <p className="font-display text-sm text-inkSoft mb-8 tracking-wide">
           마진 계산 · 소싱 · 재고 관리
         </p>
         <button
