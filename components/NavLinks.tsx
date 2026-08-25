@@ -17,6 +17,7 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
     items: [
       { href: '/dashboard/sourcing/info', label: '소싱 정보' },
       { href: '/dashboard/sourcing/list', label: '소싱 리스트' },
+      { href: '/dashboard/sourcing/trends', label: '트렌드 발굴' },
     ],
   },
   {
