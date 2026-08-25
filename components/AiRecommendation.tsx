@@ -1,111 +1,203 @@
 'use client';
 
 import { useState } from 'react';
-import { runAiRecommendation } from '@/app/dashboard/sourcing/trends/actions';
-import type { SourcingRecommendation } from '@/lib/ai';
+import {
+  runCategoryRecommendation,
+  runProductRecommendation,
+  type ProductRecommendation,
+} from '@/app/dashboard/sourcing/trends/actions';
+import type { CategoryRecommendation, Season } from '@/lib/ai';
+
+const SEASON_OPTIONS: { value: Season; label: string }[] = [
+  { value: 'summer', label: '여름 시즌' },
+  { value: 'winter', label: '겨울 시즌' },
+  { value: 'all', label: '사계절' },
+];
 
 export default function AiRecommendation() {
-  const [loading, setLoading] = useState(false);
+  const [season, setSeason] = useState<Season>('summer');
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [categories, setCategories] = useState<CategoryRecommendation[] | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [products, setProducts] = useState<ProductRecommendation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<SourcingRecommendation[] | null>(null);
-  const [usedTrendData, setUsedTrendData] = useState(false);
 
-  async function handleClick() {
-    setLoading(true);
+  async function handleCategoryClick() {
+    setLoadingCategories(true);
     setError(null);
+    setCategories(null);
+    setProducts(null);
+    setSelectedCategory(null);
     try {
-      const res = await runAiRecommendation();
-      if ('error' in res) {
-        setError(res.error);
-      } else {
-        setItems(res.recommendations);
-        setUsedTrendData(res.usedTrendData);
-      }
+      const res = await runCategoryRecommendation(season);
+      if ('error' in res) setError(res.error);
+      else setCategories(res.categories);
     } catch (e: any) {
-      setError(e?.message || '요청 중 오류가 발생했어요. 다시 시도해주세요.');
+      setError(e?.message || '오류가 발생했어요. 다시 시도해주세요.');
     } finally {
-      setLoading(false);
+      setLoadingCategories(false);
+    }
+  }
+
+  async function handlePickCategory(category: string) {
+    setSelectedCategory(category);
+    setLoadingProducts(true);
+    setError(null);
+    setProducts(null);
+    try {
+      const res = await runProductRecommendation(category, season);
+      if ('error' in res) setError(res.error);
+      else setProducts(res.recommendations);
+    } catch (e: any) {
+      setError(e?.message || '오류가 발생했어요. 다시 시도해주세요.');
+    } finally {
+      setLoadingProducts(false);
     }
   }
 
   return (
     <div className="card p-6 sm:p-8">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="text-lg font-bold mb-1">AI 소싱 추천</h2>
-          <p className="text-sm text-inkSoft">
-            우리 쿠팡 판매 데이터와 트렌드를 자동으로 읽고, AI가 지금 소싱하기
-            좋은 구체적인 아이템을 근거와 함께 골라줘요.
-          </p>
-        </div>
+      <h2 className="text-lg font-bold mb-1">AI 소싱 추천</h2>
+      <p className="text-sm text-inkSoft mb-5">
+        쿠팡 전체 판매 랭킹(실시간 조회) + 우리 판매 데이터를 근거로 카테고리
+        → 구체 상품 → 알리바바 소싱 후보까지 순서대로 추천해줘요.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2 mb-5">
+        {SEASON_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setSeason(opt.value)}
+            className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
+              season === opt.value
+                ? 'bg-ink text-white border-ink'
+                : 'border-paperLine text-inkSoft hover:border-ink'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
         <button
-          onClick={handleClick}
-          disabled={loading}
-          className="btn-primary px-6 py-2.5 text-sm font-semibold whitespace-nowrap disabled:opacity-50"
+          onClick={handleCategoryClick}
+          disabled={loadingCategories}
+          className="btn-primary px-5 py-2 text-sm font-semibold sm:ml-auto disabled:opacity-50"
         >
-          {loading ? '분석 중...' : items ? '다시 추천받기' : 'AI 추천 받기'}
+          {loadingCategories ? '분석 중...' : '카테고리 추천받기'}
         </button>
       </div>
 
       {error && (
-        <p className="mt-6 text-sm text-warn bg-warnBg rounded-md px-4 py-3">
-          {error}
+        <p className="text-sm text-warn bg-warnBg rounded-md px-4 py-3 mb-4">{error}</p>
+      )}
+
+      {categories && categories.length > 0 && (
+        <div className="mb-6">
+          <p className="text-xs font-semibold text-inkSoft mb-2">
+            카테고리를 선택하면 구체 상품을 추천해드려요
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {categories.map((c, i) => (
+              <button
+                key={i}
+                onClick={() => handlePickCategory(c.category)}
+                title={c.reason}
+                className={`px-4 py-2 rounded-lg text-sm border transition-colors ${
+                  selectedCategory === c.category
+                    ? 'bg-accentBg border-accent text-accent font-semibold'
+                    : 'border-paperLine hover:border-ink'
+                }`}
+              >
+                {c.category}
+              </button>
+            ))}
+          </div>
+          {selectedCategory && (
+            <p className="text-xs text-inkSoft mt-2">
+              {categories.find((c) => c.category === selectedCategory)?.reason}
+            </p>
+          )}
+        </div>
+      )}
+
+      {loadingProducts && (
+        <p className="text-sm text-inkSoft">
+          쿠팡 판매 랭킹과 알리바바 소싱 후보를 실시간으로 조회하는 중이에요
+          (수십 초 걸릴 수 있어요)...
         </p>
       )}
 
-      {loading && (
-        <p className="mt-6 text-sm text-inkSoft">
-          우리 판매 데이터와 트렌드를 모으고 AI에게 물어보는 중이에요...
-        </p>
+      {products && products.length === 0 && !loadingProducts && (
+        <p className="text-sm text-inkSoft">추천할 만한 결과를 찾지 못했어요. 다른 카테고리로 시도해보세요.</p>
       )}
 
-      {items && items.length > 0 && !usedTrendData && (
-        <p className="mt-6 text-xs text-inkSoft bg-accentBg rounded-md px-4 py-3">
-          네이버 트렌드/자체 판매 데이터 없이 AI의 일반 지식(계절성 등)만으로
-          추천된 결과예요. 참고용으로만 봐주세요.
-        </p>
-      )}
-
-      {items && items.length > 0 && (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          {items.map((rec, i) => (
+      {products && products.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {products.map((p, i) => (
             <div key={i} className="rounded-lg border border-paperLine p-5">
-              <span className="text-xs font-semibold text-accent bg-accentBg rounded px-2 py-0.5">
-                {rec.category}
-              </span>
-              <h3 className="text-base font-bold mt-2 mb-1.5">{rec.item}</h3>
-              <p className="text-sm text-ink mb-3">{rec.reason}</p>
+              <h3 className="text-base font-bold mb-1.5">{p.item}</h3>
+              <p className="text-sm text-ink mb-3">{p.reason}</p>
 
               <dl className="space-y-1.5 text-xs mb-3">
                 <div className="flex gap-1.5">
-                  <dt className="shrink-0 font-semibold text-inkSoft">
-                    📈 트렌드/판매
-                  </dt>
-                  <dd className="text-inkSoft">{rec.criteria?.trend}</dd>
+                  <dt className="shrink-0 font-semibold text-inkSoft">📊 수요 근거</dt>
+                  <dd className="text-inkSoft">{p.criteria.demand}</dd>
                 </div>
                 <div className="flex gap-1.5">
-                  <dt className="shrink-0 font-semibold text-inkSoft">
-                    🗓️ 시기
-                  </dt>
-                  <dd className="text-inkSoft">{rec.criteria?.seasonality}</dd>
+                  <dt className="shrink-0 font-semibold text-inkSoft">🗓️ 시기</dt>
+                  <dd className="text-inkSoft">{p.criteria.seasonality}</dd>
                 </div>
               </dl>
 
-              {rec.referenceExamples && rec.referenceExamples.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {rec.referenceExamples.map((ex, j) => (
-                    <span
-                      key={j}
-                      className="text-xs bg-[#F5F5F5] text-inkSoft rounded px-2 py-1"
-                    >
-                      예시: {ex}
-                    </span>
-                  ))}
+              {p.coupangReferences.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs font-semibold text-inkSoft mb-1">
+                    쿠팡 판매중 (참고)
+                  </p>
+                  <ul className="space-y-1">
+                    {p.coupangReferences.map((r, j) => (
+                      <li key={j}>
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-accent hover:underline"
+                        >
+                          {r.name}
+                          {r.price ? ` · ${r.price}원` : ''}
+                          {r.reviewCount ? ` · 리뷰 ${r.reviewCount}개` : ''}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {p.sourcingLinks.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs font-semibold text-inkSoft mb-1">
+                    알리바바 소싱 후보
+                  </p>
+                  <ul className="space-y-1">
+                    {p.sourcingLinks.map((s, j) => (
+                      <li key={j}>
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-accent hover:underline"
+                        >
+                          {s.name}
+                          {s.price ? ` · ${s.price}` : ''}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
               <p className="text-xs text-warn border-t border-paperLine pt-3">
-                ⚠️ {rec.caution}
+                ⚠️ {p.caution}
               </p>
             </div>
           ))}

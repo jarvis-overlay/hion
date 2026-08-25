@@ -1,6 +1,5 @@
-// Gemini API로 트렌드/판매 데이터를 해석해서 소싱 아이템을 자동 추천받기
-// 위한 클라이언트. Google AI Studio 무료 등급 키를 쓴다 - 사용자가 버튼
-// 누를 때만 호출되는 저빈도 작업이라 무료 등급으로 충분하다.
+// Gemini API로 트렌드/판매 데이터를 해석해서 소싱 카테고리/아이템을
+// 추천받기 위한 클라이언트. Google AI Studio 무료 등급 키를 쓴다.
 
 const MODEL = 'gemini-3.6-flash';
 
@@ -10,55 +9,8 @@ function requireEnv(name: string): string {
   return v;
 }
 
-export interface SourcingRecommendation {
-  item: string;
-  category: string;
-  reason: string;
-  criteria: {
-    trend: string; // 트렌드/우리 판매 데이터 근거 - 데이터가 없으면 "실시간 데이터 없음"이라고 명시
-    seasonality: string; // 지금 시기/계절성 근거
-  };
-  referenceExamples: string[]; // 시장에 이미 있는 비슷한 상품 예시 2~3개 (참고용, 실시간 검색 아님)
-  caution: string;
-}
-
-export async function recommendSourcingItems(
-  categoryTrendSummary: string | null
-): Promise<SourcingRecommendation[]> {
+async function callGemini(prompt: string): Promise<string> {
   const apiKey = requireEnv('GEMINI_API_KEY');
-
-  const dataSection = categoryTrendSummary
-    ? `아래는 참고할 실데이터입니다 (네이버 쇼핑인사이트 카테고리 트렌드는 0~100 상대값 기준이고, 우리 쿠팡 스토어 판매 데이터는 실제 판매 개수입니다):\n\n${categoryTrendSummary}`
-    : `(현재 실시간 트렌드/판매 데이터는 연동되지 않은 상태입니다.)`;
-
-  const prompt = `당신은 1인 이커머스 셀러(쿠팡 로켓그로스 위주, 중국 알리/타오바오에서 소싱)의 소싱 컨설턴트입니다.
-
-${dataSection}
-
-이 데이터(있다면)와 지금 시기(계절성, 월, 다가오는 이벤트/시즌)를 근거로, 지금 소싱하면 좋을 만한 **구체적인 상품 아이템** 5개를 추천해주세요.
-
-규칙:
-- 카테고리명 자체가 아니라 실제로 검색해서 소싱할 수 있는 구체적인 상품명이어야 합니다 (예: "디지털/가전" (X) -> "목걸이 선풍기" (O))
-- 우리 쿠팡 판매 데이터가 주어졌다면, 지금 잘 팔리는 상품과 연관되거나 함께 팔기 좋은(끼워팔기, 다음 시즌 아이템 등) 것도 적극 고려하세요
-- criteria.trend에는 반드시 주어진 데이터에서 뽑은 구체적인 수치/근거를 쓰세요. 데이터가 전혀 없으면 정직하게 "실시간 데이터 없음 - 일반 지식 기반"이라고 쓰세요. 데이터 없이 지어내지 마세요
-- criteria.seasonality에는 지금 시기(월, 계절, 다가오는 명절/이벤트)와 이 상품이 왜 지금인지를 구체적으로 쓰세요
-- referenceExamples에는 실제로 시장에 존재할 법한 비슷한 상품/브랜드 예시를 2~3개 적어주세요 (당신이 아는 일반 지식 기준이며, 실시간 검색 결과가 아님을 감안해서 판단)
-
-반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 설명 텍스트는 붙이지 마세요:
-[
-  {
-    "item": "구체적인 상품명",
-    "category": "관련 네이버쇼핑 카테고리",
-    "reason": "왜 지금 이 아이템을 추천하는지 (2문장 이내)",
-    "criteria": {
-      "trend": "트렌드/판매 데이터 근거 (구체적 수치 포함, 없으면 명시)",
-      "seasonality": "계절성/시기 근거"
-    },
-    "referenceExamples": ["참고 상품/브랜드 예시1", "참고 상품/브랜드 예시2"],
-    "caution": "소싱/판매 시 주의할 점 (경쟁 심함, 인증 필요 등, 1문장)"
-  }
-]`;
-
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
     {
@@ -70,15 +22,155 @@ ${dataSection}
       }),
     }
   );
-
   const json = await res.json();
   if (!res.ok) {
     throw new Error(json?.error?.message || `Gemini API 오류 (HTTP ${res.status})`);
   }
-
   const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const cleaned = text.replace(/```json\s*|```\s*/g, '').trim();
+  return text.replace(/```json\s*|```\s*/g, '').trim();
+}
 
+export type Season = 'summer' | 'winter' | 'all';
+
+const SEASON_LABEL: Record<Season, string> = {
+  summer: '여름 시즌 상품',
+  winter: '겨울 시즌 상품',
+  all: '사계절 상품 (계절 안 타는 상품)',
+};
+
+export interface CategoryRecommendation {
+  category: string;
+  reason: string;
+}
+
+// 1단계: 시즌 + 우리 판매 데이터/네이버 트렌드(있으면)를 근거로 소싱하기
+// 좋은 카테고리 몇 개를 추천한다. 가벼운 호출 (스크래핑 없음).
+export async function recommendCategories(input: {
+  season: Season;
+  contextSummary: string | null;
+}): Promise<CategoryRecommendation[]> {
+  const { season, contextSummary } = input;
+
+  const dataSection = contextSummary
+    ? `아래는 참고할 실데이터입니다:\n\n${contextSummary}`
+    : '(현재 연동된 실시간 데이터는 없습니다. 일반 지식으로 판단해주세요.)';
+
+  const prompt = `당신은 1인 이커머스 셀러(쿠팡 로켓그로스, 중국 알리바바/1688에서 소싱)의 소싱 컨설턴트입니다.
+
+사용자는 지금 **"${SEASON_LABEL[season]}"** 을 집중적으로 소싱하고 싶어합니다.
+
+${dataSection}
+
+이 조건에 맞는, 지금 소싱하기 좋은 **카테고리(상품군)** 4~6개를 추천해주세요. "패션의류" 같은 너무 넓은 대분류 말고, "여름 휴대용 냉방 소품" "캠핑 조명용품" 처럼 실제로 무엇을 찾아야 할지 감이 오는 수준의 구체성으로 적어주세요.
+
+반드시 아래 JSON 배열 형식으로만 응답하세요:
+[
+  { "category": "카테고리명", "reason": "왜 지금 이 카테고리가 유망한지 (1~2문장, 데이터가 있으면 근거로 인용)" }
+]`;
+
+  const cleaned = await callGemini(prompt);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
+  }
+}
+
+export interface CandidateKeyword {
+  ko: string; // 쿠팡 검색용 한글 키워드
+  en: string; // 알리바바 검색용 영문 키워드
+}
+
+// 2단계 - 1차: 선택된 카테고리 안에서 실제로 검색해볼 만한 구체적인
+// 상품 키워드 후보를 뽑는다 (이후 이 키워드로 쿠팡/알리바바를 실제 조회).
+// 쿠팡은 한글, 알리바바는 영문 검색이 필요해서 둘 다 받는다.
+export async function suggestCandidateKeywords(input: {
+  category: string;
+  season: Season;
+}): Promise<CandidateKeyword[]> {
+  const prompt = `당신은 1인 이커머스 셀러의 소싱 컨설턴트입니다.
+
+카테고리: "${input.category}"
+시즌 조건: "${SEASON_LABEL[input.season]}"
+
+이 카테고리 안에서, 실제로 검색해볼 만한 **구체적인 상품** 4개를 뽑아주세요. 브랜드명은 빼고 일반명사로 적어주세요.
+
+각 상품마다 두 가지 키워드가 필요합니다:
+- ko: 쿠팡/네이버쇼핑에 실제로 검색할 한글 키워드 (예: "목걸이선풍기", "캠핑 랜턴")
+- en: 같은 상품을 alibaba.com에서 검색할 영문 키워드 (예: "neck fan", "camping lantern")
+
+반드시 아래 JSON 배열 형식으로만 응답하세요:
+[{ "ko": "한글키워드", "en": "english keyword" }]`;
+
+  const cleaned = await callGemini(prompt);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
+  }
+}
+
+export interface KeywordFinding {
+  keyword: string;
+  coupangSummary: string; // "리뷰 5,047개, 순위 1위, 50,050원" 같은 요약
+  hasAlibaba: boolean;
+}
+
+export interface ProductRecommendationDraft {
+  keyword: string; // keywordFindings 중 하나의 keyword와 정확히 일치해야 함
+  displayName: string;
+  reason: string;
+  criteria: {
+    demand: string; // 쿠팡 실데이터 근거 (리뷰수/순위 등 구체적으로)
+    seasonality: string;
+  };
+  caution: string;
+}
+
+// 2단계 - 2차: 실제 쿠팡/알리바바 조회 결과를 근거로 최종 추천을 확정한다.
+// 링크/가격 같은 사실 데이터는 AI가 아니라 실제 스크래핑 결과에서 그대로
+// 가져다 붙이므로(코드에서 매칭), AI는 keyword를 후보 중에서 정확히
+// 골라서 반환하기만 하면 된다 - 링크 환각을 원천 차단.
+export async function finalizeProductRecommendations(input: {
+  category: string;
+  season: Season;
+  ownSalesSummary: string | null;
+  findings: KeywordFinding[];
+}): Promise<ProductRecommendationDraft[]> {
+  const { category, season, ownSalesSummary, findings } = input;
+
+  const findingsText = findings
+    .map((f) => `- "${f.keyword}": ${f.coupangSummary}`)
+    .join('\n');
+
+  const salesSection = ownSalesSummary
+    ? `\n\n[우리 쿠팡 스토어 최근 60일 판매 데이터]\n${ownSalesSummary}`
+    : '';
+
+  const prompt = `당신은 1인 이커머스 셀러의 소싱 컨설턴트입니다.
+
+카테고리: "${category}" / 시즌 조건: "${SEASON_LABEL[season]}"
+
+아래는 후보 키워드별로 쿠팡에서 실제 판매량순 검색을 해본 결과입니다 (다른 셀러 포함 시장 전체 데이터):
+${findingsText}${salesSection}
+
+이 실데이터를 근거로, 후보 중에서 소싱할 가치가 있는 것 **3~4개**를 골라주세요. keyword는 반드시 위 후보 목록에 있는 문자열과 정확히 동일해야 합니다 (지어내지 마세요).
+
+반드시 아래 JSON 배열 형식으로만 응답하세요:
+[
+  {
+    "keyword": "후보 목록의 키워드 그대로",
+    "displayName": "고객에게 보여줄 상품명 (키워드보다 자연스럽게)",
+    "reason": "왜 이걸 추천하는지 (2문장 이내, 위 실데이터 인용)",
+    "criteria": {
+      "demand": "쿠팡 실데이터 근거 (리뷰수/가격대 등 구체적 수치 인용)",
+      "seasonality": "지금 시기/계절성 근거"
+    },
+    "caution": "소싱/판매 시 주의할 점 (1문장)"
+  }
+]`;
+
+  const cleaned = await callGemini(prompt);
   try {
     return JSON.parse(cleaned);
   } catch {

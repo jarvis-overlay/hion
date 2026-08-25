@@ -7,7 +7,15 @@ import {
   SHOPPING_CATEGORIES,
   type TimeUnit,
 } from '@/lib/naver';
-import { recommendSourcingItems, type SourcingRecommendation } from '@/lib/ai';
+import {
+  recommendCategories,
+  suggestCandidateKeywords,
+  finalizeProductRecommendations,
+  type Season,
+  type CategoryRecommendation,
+  type KeywordFinding,
+} from '@/lib/ai';
+import { fetchCoupangBestsellers, fetchAlibabaProducts } from '@/lib/brightdata';
 import { createClient } from '@/lib/supabase/server';
 
 // 우리 쿠팡 판매 데이터(최근 60일 판매출고 기록)로 지금 잘 팔리는/뜨고 있는
@@ -64,12 +72,7 @@ async function fetchOwnSalesSummary(): Promise<string | null> {
     .join('\n');
 }
 
-// 카테고리 10개 전체의 최근 트렌드를 자동으로 긁어서 Claude에게 해석시키고
-// 구체적인 소싱 아이템을 추천받는다. 사용자가 키워드/카테고리를 직접 고를
-// 필요 없는 원클릭 플로우.
-export async function runAiRecommendation(): Promise<
-  { recommendations: SourcingRecommendation[]; usedTrendData: boolean } | { error: string }
-> {
+async function fetchNaverTrendSummary(): Promise<string | null> {
   const timeUnit: TimeUnit = 'week';
   const end = new Date();
   const start = new Date();
@@ -82,8 +85,6 @@ export async function runAiRecommendation(): Promise<
     chunks.push(SHOPPING_CATEGORIES.slice(i, i + 3));
   }
 
-  // 네이버 데이터랩 연동이 계정 이슈로 막혀있을 수 있어서, 트렌드 데이터
-  // 수집에 실패해도 전체를 에러로 막지 않고 Claude 자체 지식으로 폴백한다.
   const summaries: string[] = [];
   try {
     for (const chunk of chunks) {
@@ -112,29 +113,125 @@ export async function runAiRecommendation(): Promise<
       }
     }
   } catch {
-    // 네이버 데이터랩 연동 실패 - 아래에서 트렌드 데이터 없이 진행
+    return null; // 네이버 데이터랩 연동 실패 - 계정 이슈로 막혀있을 수 있음
   }
+  return summaries.length > 0 ? summaries.join('\n') : null;
+}
 
-  const usedTrendData = summaries.length > 0;
-  const today = new Date().toISOString().slice(0, 10);
-  const ownSales = await fetchOwnSalesSummary().catch(() => null);
+// 1단계: 시즌 선택 + 우리 판매 데이터/네이버 트렌드(되면)를 근거로
+// 소싱 카테고리를 추천한다.
+export async function runCategoryRecommendation(
+  season: Season
+): Promise<{ categories: CategoryRecommendation[] } | { error: string }> {
+  const [naverSummary, ownSales] = await Promise.all([
+    fetchNaverTrendSummary(),
+    fetchOwnSalesSummary().catch(() => null),
+  ]);
 
-  const parts: string[] = [`오늘 날짜: ${today}`];
-  if (usedTrendData) {
-    parts.push(`[네이버 쇼핑인사이트 카테고리별 트렌드]\n${summaries.join('\n')}`);
-  }
-  if (ownSales) {
-    parts.push(`[우리 쿠팡 스토어 최근 60일 실제 판매 데이터]\n${ownSales}`);
-  }
-
-  const summaryText = usedTrendData || ownSales ? parts.join('\n\n') : null;
+  const parts: string[] = [];
+  if (naverSummary) parts.push(`[네이버 쇼핑인사이트 카테고리별 트렌드]\n${naverSummary}`);
+  if (ownSales) parts.push(`[우리 쿠팡 스토어 최근 60일 실제 판매 데이터]\n${ownSales}`);
+  const contextSummary = parts.length > 0 ? parts.join('\n\n') : null;
 
   try {
-    const recommendations = await recommendSourcingItems(summaryText);
-    return { recommendations, usedTrendData: usedTrendData || !!ownSales };
+    const categories = await recommendCategories({ season, contextSummary });
+    return { categories };
   } catch (e: any) {
     return { error: e?.message || String(e) };
   }
+}
+
+export interface ProductRecommendation {
+  item: string;
+  reason: string;
+  criteria: { demand: string; seasonality: string };
+  coupangReferences: {
+    name: string;
+    price: string | null;
+    reviewCount: string | null;
+    url: string;
+  }[];
+  sourcingLinks: { name: string; price: string | null; url: string }[];
+  caution: string;
+}
+
+// 2단계: 카테고리 안에서 실제 쿠팡 판매 랭킹(시장 전체) + 알리바바 소싱
+// 후보를 실시간으로 조회하고, 그 실데이터를 근거로 최종 상품을 추천한다.
+export async function runProductRecommendation(
+  category: string,
+  season: Season
+): Promise<{ recommendations: ProductRecommendation[] } | { error: string }> {
+  let keywords: { ko: string; en: string }[];
+  try {
+    keywords = (await suggestCandidateKeywords({ category, season })).slice(0, 4);
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
+
+  if (keywords.length === 0) {
+    return { error: '후보 키워드를 생성하지 못했어요.' };
+  }
+
+  const scraped = await Promise.all(
+    keywords.map(async ({ ko, en }) => {
+      const [coupang, alibaba] = await Promise.all([
+        fetchCoupangBestsellers(ko, 5).catch(() => []),
+        fetchAlibabaProducts(en, 3).catch(() => []),
+      ]);
+      return { keyword: ko, coupang, alibaba };
+    })
+  );
+
+  const findings: KeywordFinding[] = scraped.map(({ keyword, coupang }) => {
+    if (coupang.length === 0) {
+      return { keyword, coupangSummary: '쿠팡 조회 실패/데이터 없음', hasAlibaba: false };
+    }
+    const top = coupang[0];
+    const summary = `1위 "${top.name}" (리뷰 ${top.reviewCount ?? '?'}개, ${
+      top.price ?? '?'
+    }원), 총 ${coupang.length}개 상품 확인됨`;
+    return { keyword, coupangSummary: summary, hasAlibaba: true };
+  });
+
+  const ownSales = await fetchOwnSalesSummary().catch(() => null);
+
+  let drafts;
+  try {
+    drafts = await finalizeProductRecommendations({
+      category,
+      season,
+      ownSalesSummary: ownSales,
+      findings,
+    });
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
+
+  const recommendations: ProductRecommendation[] = drafts
+    .map((d) => {
+      const match = scraped.find((s) => s.keyword === d.keyword);
+      if (!match) return null;
+      return {
+        item: d.displayName,
+        reason: d.reason,
+        criteria: d.criteria,
+        coupangReferences: match.coupang.slice(0, 3).map((c) => ({
+          name: c.name,
+          price: c.price,
+          reviewCount: c.reviewCount,
+          url: c.url,
+        })),
+        sourcingLinks: match.alibaba.map((a) => ({
+          name: a.name,
+          price: a.price,
+          url: a.url,
+        })),
+        caution: d.caution,
+      };
+    })
+    .filter((r): r is ProductRecommendation => r !== null);
+
+  return { recommendations };
 }
 
 export async function runKeywordTrend(
