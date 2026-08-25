@@ -31,7 +31,8 @@ export default function AiRecommendation() {
     setSelectedCategory(null);
     try {
       const res = await runCategoryRecommendation(season);
-      if ('error' in res) setError(res.error);
+      if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
+      else if ('error' in res) setError(res.error);
       else setCategories(res.categories);
     } catch (e: any) {
       setError(e?.message || '오류가 발생했어요. 다시 시도해주세요.');
@@ -47,7 +48,8 @@ export default function AiRecommendation() {
     setProducts(null);
     try {
       const res = await runProductRecommendation(category, season);
-      if ('error' in res) setError(res.error);
+      if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
+      else if ('error' in res) setError(res.error);
       else setProducts(res.recommendations);
     } catch (e: any) {
       setError(e?.message || '오류가 발생했어요. 다시 시도해주세요.');

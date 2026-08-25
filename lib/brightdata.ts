@@ -8,38 +8,53 @@ function requireEnv(name: string): string {
   return v;
 }
 
+// 서버리스 함수 전체 타임아웃(120초) 안에서 여러 키워드를 병렬 조회해야
+// 하므로, 개별 요청 하나가 무한정 오래 걸려서 전체를 물고 가지 않도록
+// 요청당 타임아웃을 짧게 건다.
 async function unlockerMarkdown(
   url: string,
-  options: { country?: string; retries?: number } = {}
+  options: { country?: string; retries?: number; timeoutMs?: number } = {}
 ): Promise<string> {
   const apiKey = requireEnv('BRIGHTDATA_API_KEY');
   const zone = requireEnv('BRIGHTDATA_UNLOCKER_ZONE');
-  const retries = options.retries ?? 1;
+  const retries = options.retries ?? 0;
+  const timeoutMs = options.timeoutMs ?? 20000;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const res = await fetch('https://api.brightdata.com/request', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url,
-        zone,
-        format: 'raw',
-        data_format: 'markdown',
-        ...(options.country ? { country: options.country } : {}),
-      }),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch('https://api.brightdata.com/request', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url,
+          zone,
+          format: 'raw',
+          data_format: 'markdown',
+          ...(options.country ? { country: options.country } : {}),
+        }),
+        signal: controller.signal,
+      });
 
-    if (res.ok) {
-      const text = await res.text();
-      if (!/captcha|protection page/i.test(text.slice(0, 200))) {
-        return text;
+      if (res.ok) {
+        const text = await res.text();
+        if (!/captcha|protection page/i.test(text.slice(0, 200))) {
+          return text;
+        }
       }
-    }
-    if (attempt === retries) {
-      throw new Error(`Bright Data 요청 실패 (HTTP ${res.status})`);
+      if (attempt === retries) {
+        throw new Error(`Bright Data 요청 실패 (HTTP ${res.status})`);
+      }
+    } catch (e: any) {
+      if (attempt === retries) {
+        throw e?.name === 'AbortError' ? new Error('Bright Data 요청 시간 초과') : e;
+      }
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw new Error('Bright Data 요청 실패');
