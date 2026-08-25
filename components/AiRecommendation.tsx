@@ -60,8 +60,8 @@ export default function AiRecommendation() {
     <div className="card p-6 sm:p-8">
       <h2 className="text-lg font-bold mb-1">AI 소싱 추천</h2>
       <p className="text-sm text-inkSoft mb-5">
-        쿠팡 전체 판매 랭킹(실시간 조회) + 우리 판매 데이터를 근거로 카테고리
-        → 구체 상품 → 알리바바 소싱 후보까지 순서대로 추천해줘요.
+        쿠팡 전체 판매 랭킹(다른 셀러 포함, 실시간 조회)을 근거로 카테고리 →
+        구체 상품 → 알리바바 소싱 후보까지 순서대로 추천해줘요.
       </p>
 
       <div className="flex flex-wrap items-center gap-2 mb-5">

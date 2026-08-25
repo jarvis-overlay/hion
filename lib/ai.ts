@@ -134,25 +134,20 @@ export interface ProductRecommendationDraft {
 export async function finalizeProductRecommendations(input: {
   category: string;
   season: Season;
-  ownSalesSummary: string | null;
   findings: KeywordFinding[];
 }): Promise<ProductRecommendationDraft[]> {
-  const { category, season, ownSalesSummary, findings } = input;
+  const { category, season, findings } = input;
 
   const findingsText = findings
     .map((f) => `- "${f.keyword}": ${f.coupangSummary}`)
     .join('\n');
-
-  const salesSection = ownSalesSummary
-    ? `\n\n[우리 쿠팡 스토어 최근 60일 판매 데이터]\n${ownSalesSummary}`
-    : '';
 
   const prompt = `당신은 1인 이커머스 셀러의 소싱 컨설턴트입니다.
 
 카테고리: "${category}" / 시즌 조건: "${SEASON_LABEL[season]}"
 
 아래는 후보 키워드별로 쿠팡에서 실제 판매량순 검색을 해본 결과입니다 (다른 셀러 포함 시장 전체 데이터):
-${findingsText}${salesSection}
+${findingsText}
 
 이 실데이터를 근거로, 후보 중에서 소싱할 가치가 있는 것 **3~4개**를 골라주세요. keyword는 반드시 위 후보 목록에 있는 문자열과 정확히 동일해야 합니다 (지어내지 마세요).
 

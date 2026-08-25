@@ -16,61 +16,6 @@ import {
   type KeywordFinding,
 } from '@/lib/ai';
 import { fetchCoupangBestsellers, fetchAlibabaProducts } from '@/lib/brightdata';
-import { createClient } from '@/lib/supabase/server';
-
-// 우리 쿠팡 판매 데이터(최근 60일 판매출고 기록)로 지금 잘 팔리는/뜨고 있는
-// 상품을 요약한다. 네이버 데이터랩이 막혀있어도 이건 우리 DB만 보면 되니까
-// 항상 동작한다.
-async function fetchOwnSalesSummary(): Promise<string | null> {
-  const supabase = createClient();
-  const since = new Date();
-  since.setDate(since.getDate() - 60);
-
-  const { data: movements } = await supabase
-    .from('stock_movements')
-    .select('product_id, quantity, created_at, products(name)')
-    .eq('type', 'out')
-    .eq('channel', 'coupang')
-    .gte('created_at', since.toISOString());
-
-  if (!movements || movements.length === 0) return null;
-
-  const midpoint = new Date();
-  midpoint.setDate(midpoint.getDate() - 30);
-
-  const byProduct = new Map<
-    string,
-    { name: string; recentQty: number; priorQty: number }
-  >();
-
-  for (const m of movements as any[]) {
-    const name = m.products?.name || '이름 없음';
-    const key = m.product_id;
-    const entry = byProduct.get(key) || { name, recentQty: 0, priorQty: 0 };
-    const qty = Math.abs(m.quantity);
-    if (new Date(m.created_at) >= midpoint) entry.recentQty += qty;
-    else entry.priorQty += qty;
-    byProduct.set(key, entry);
-  }
-
-  const rows = Array.from(byProduct.values())
-    .sort((a, b) => b.recentQty + b.priorQty - (a.recentQty + a.priorQty))
-    .slice(0, 15);
-
-  if (rows.length === 0) return null;
-
-  return rows
-    .map((r) => {
-      const change =
-        r.priorQty === 0
-          ? r.recentQty > 0
-            ? '신규/급증'
-            : '변화없음'
-          : `${(((r.recentQty - r.priorQty) / r.priorQty) * 100).toFixed(0)}%`;
-      return `- ${r.name}: 최근 30일 ${r.recentQty}개 판매 (이전 30일 대비 ${change})`;
-    })
-    .join('\n');
-}
 
 async function fetchNaverTrendSummary(): Promise<string | null> {
   const timeUnit: TimeUnit = 'week';
@@ -118,20 +63,16 @@ async function fetchNaverTrendSummary(): Promise<string | null> {
   return summaries.length > 0 ? summaries.join('\n') : null;
 }
 
-// 1단계: 시즌 선택 + 우리 판매 데이터/네이버 트렌드(되면)를 근거로
-// 소싱 카테고리를 추천한다.
+// 1단계: 시즌 선택 + 네이버 트렌드(되면)를 근거로 소싱 카테고리를 추천한다.
+// 우리 스토어의 과거 판매 데이터는 일부러 근거로 안 쓴다 - 이미 팔던 걸
+// 근거 삼으면 새로운 소싱 기회를 찾는다는 목적과 순환논리가 되기 때문.
 export async function runCategoryRecommendation(
   season: Season
 ): Promise<{ categories: CategoryRecommendation[] } | { error: string }> {
-  const [naverSummary, ownSales] = await Promise.all([
-    fetchNaverTrendSummary(),
-    fetchOwnSalesSummary().catch(() => null),
-  ]);
-
-  const parts: string[] = [];
-  if (naverSummary) parts.push(`[네이버 쇼핑인사이트 카테고리별 트렌드]\n${naverSummary}`);
-  if (ownSales) parts.push(`[우리 쿠팡 스토어 최근 60일 실제 판매 데이터]\n${ownSales}`);
-  const contextSummary = parts.length > 0 ? parts.join('\n\n') : null;
+  const naverSummary = await fetchNaverTrendSummary();
+  const contextSummary = naverSummary
+    ? `[네이버 쇼핑인사이트 카테고리별 트렌드]\n${naverSummary}`
+    : null;
 
   try {
     const categories = await recommendCategories({ season, contextSummary });
@@ -193,14 +134,11 @@ export async function runProductRecommendation(
     return { keyword, coupangSummary: summary, hasAlibaba: true };
   });
 
-  const ownSales = await fetchOwnSalesSummary().catch(() => null);
-
   let drafts;
   try {
     drafts = await finalizeProductRecommendations({
       category,
       season,
-      ownSalesSummary: ownSales,
       findings,
     });
   } catch (e: any) {
