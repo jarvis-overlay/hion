@@ -7,25 +7,25 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // 한남동 유엔빌리지풍 - 웜 아이보리 바탕 + 브론즈/골드 포인트
-        paper: '#FBF9F5',
-        paperLine: '#E4DECE',
-        ink: '#211D17',
-        inkSoft: '#8A8071',
-        accent: '#9C7A3C',
-        accentBg: '#F1E9D6',
-        profit: '#516B52',
-        profitBg: '#E7ECE3',
-        warn: '#A15A2C',
-        warnBg: '#F3E7D8',
+        // 무신사풍 - 화이트 바탕 + 블랙 텍스트 + 블루 포인트 (클린한 미니멀)
+        paper: '#FFFFFF',
+        paperLine: '#E5E5E5',
+        ink: '#111111',
+        inkSoft: '#767676',
+        accent: '#1B5FFF',
+        accentBg: '#EEF3FF',
+        profit: '#1AA260',
+        profitBg: '#EAFBF1',
+        warn: '#E02020',
+        warnBg: '#FDEDED',
       },
       fontFamily: {
-        display: ['"Noto Serif KR"', 'serif'],
+        display: ['"Noto Sans KR"', 'sans-serif'],
         body: ['"Noto Sans KR"', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
       },
       boxShadow: {
-        card: '0 1px 2px rgba(33, 29, 23, 0.04), 0 8px 24px -12px rgba(33, 29, 23, 0.12)',
+        card: '0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 12px -6px rgba(0, 0, 0, 0.06)',
       },
     },
   },

@@ -14,7 +14,7 @@ export default function SignOutButton() {
   }
 
   return (
-    <button onClick={signOut} className="underline text-[#8A8071] hover:text-[#D4B876]">
+    <button onClick={signOut} className="underline text-inkSoft hover:text-accent">
       로그아웃
     </button>
   );

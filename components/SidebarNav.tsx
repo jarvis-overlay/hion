@@ -11,14 +11,14 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
   return (
     <>
       {/* 모바일 상단바 - md 이상에서는 숨김 */}
-      <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-black/20 bg-ink sticky top-0 z-40">
+      <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-paperLine bg-white sticky top-0 z-40">
         <Link href="/dashboard" onClick={() => setOpen(false)}>
           <img src="/logo.png" alt="HION HUB" className="h-9 w-auto object-contain" />
         </Link>
         <button
           onClick={() => setOpen(true)}
           aria-label="메뉴 열기"
-          className="p-2 -mr-2 text-[#D4B876]"
+          className="p-2 -mr-2 text-ink"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="3" y1="6" x2="21" y2="6" />
@@ -37,7 +37,7 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
       )}
 
       <aside
-        className={`w-64 shrink-0 h-screen fixed md:sticky top-0 left-0 z-50 flex flex-col bg-ink transition-transform duration-200 md:translate-x-0 ${
+        className={`w-64 shrink-0 h-screen fixed md:sticky top-0 left-0 z-50 flex flex-col bg-white border-r border-paperLine transition-transform duration-200 md:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -48,7 +48,7 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
           <button
             onClick={() => setOpen(false)}
             aria-label="메뉴 닫기"
-            className="md:hidden p-1 text-[#B6AC96] text-xl leading-none"
+            className="md:hidden p-1 text-inkSoft text-xl leading-none"
           >
             ✕
           </button>
@@ -58,8 +58,8 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
           <NavLinks />
         </div>
 
-        <div className="px-5 py-4 border-t border-white/10">
-          <div className="text-xs text-[#8A8071] truncate mb-1">{userEmail}</div>
+        <div className="px-5 py-4 border-t border-paperLine">
+          <div className="text-xs text-inkSoft truncate mb-1">{userEmail}</div>
           <SignOutButton />
         </div>
       </aside>
