@@ -7,7 +7,7 @@ import {
   SHOPPING_CATEGORIES,
   type TimeUnit,
 } from '@/lib/naver';
-import { recommendSourcingItems, type SourcingRecommendation } from '@/lib/claude';
+import { recommendSourcingItems, type SourcingRecommendation } from '@/lib/ai';
 import { createClient } from '@/lib/supabase/server';
 
 // 우리 쿠팡 판매 데이터(최근 60일 판매출고 기록)로 지금 잘 팔리는/뜨고 있는

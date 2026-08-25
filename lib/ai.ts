@@ -1,9 +1,8 @@
-// Claude API로 네이버 데이터랩 트렌드 데이터를 해석해서 소싱 아이템을
-// 자동 추천받기 위한 클라이언트. 비용을 낮게 유지하려고 빠르고 저렴한
-// 모델(Haiku)을 쓴다 - 사용자가 버튼 누를 때만 호출되는 저빈도 작업이라
-// 굳이 비싼 모델이 필요 없다.
+// Gemini API로 트렌드/판매 데이터를 해석해서 소싱 아이템을 자동 추천받기
+// 위한 클라이언트. Google AI Studio 무료 등급 키를 쓴다 - 사용자가 버튼
+// 누를 때만 호출되는 저빈도 작업이라 무료 등급으로 충분하다.
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'gemini-3.6-flash';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -22,7 +21,7 @@ export interface SourcingRecommendation {
 export async function recommendSourcingItems(
   categoryTrendSummary: string | null
 ): Promise<SourcingRecommendation[]> {
-  const apiKey = requireEnv('ANTHROPIC_API_KEY');
+  const apiKey = requireEnv('GEMINI_API_KEY');
 
   const dataSection = categoryTrendSummary
     ? `아래는 참고할 데이터입니다 (네이버 쇼핑인사이트 카테고리 트렌드는 0~100 상대값 기준이고, 우리 쿠팡 스토어 판매 데이터는 실제 판매 개수입니다):\n\n${categoryTrendSummary}\n\n이 데이터와 지금 시기(계절성 포함)를 참고해서,`
@@ -43,27 +42,24 @@ ${dataSection} 지금 소싱하면 좋을 만한 **구체적인 상품 아이템
   }
 ]`;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+    }
+  );
 
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(json?.error?.message || `Claude API 오류 (HTTP ${res.status})`);
+    throw new Error(json?.error?.message || `Gemini API 오류 (HTTP ${res.status})`);
   }
 
-  const text = json.content?.[0]?.text || '';
-  // 혹시 모델이 코드블록(```json ... ```)으로 감싸서 응답해도 파싱되게 방어
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const cleaned = text.replace(/```json\s*|```\s*/g, '').trim();
 
   try {

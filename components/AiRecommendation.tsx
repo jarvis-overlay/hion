@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { runAiRecommendation } from '@/app/dashboard/sourcing/trends/actions';
-import type { SourcingRecommendation } from '@/lib/claude';
+import type { SourcingRecommendation } from '@/lib/ai';
 
 export default function AiRecommendation() {
   const [loading, setLoading] = useState(false);
