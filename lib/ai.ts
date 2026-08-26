@@ -276,6 +276,34 @@ keyword는 반드시 위 후보 목록에 있는 문자열과 정확히 동일�
   }
 }
 
+// 2단계 - 3차: 최종 확정된 상품의 "실제 쿠팡 1위 상품명"을 보고 알리바바
+// 검색어를 다시 만든다. 카테고리 단계에서 미리 만든 일반적인 영어
+// 키워드로는 실제로 잘 팔리는 상품의 구체적인 소재/디자인/기능이 반영이
+// 안 되므로, 진짜 쿠팡에서 팔리는 상품과 연관도 높은 알리바바 후보를
+// 찾기 위해 이 단계를 추가함.
+export async function refineAlibabaSearchTerms(
+  items: { keyword: string; topCoupangProductName: string }[]
+): Promise<Record<string, string>> {
+  if (items.length === 0) return {};
+
+  const prompt = `당신은 소싱 컨설턴트입니다. 아래는 쿠팡에서 실제로 잘 팔리고 있는 상품명들입니다. 각각에 대해, 이 상품과 최대한 비슷한 소재/디자인/기능을 가진 제품을 alibaba.com에서 찾기 위한 **영문 검색어**를 만들어주세요.
+
+브랜드명/한글 표기는 빼고, 상품의 핵심 특징(소재, 형태, 기능, 단수/다단 등)을 반영한 3~6단어 영문 검색어로 만드세요. 너무 일반적인 검색어(예: "shelf")가 아니라, 실제 이 상품과 매칭될 만한 구체성을 가져야 합니다.
+
+${items.map((it, i) => `${i + 1}. 키워드: "${it.keyword}" / 쿠팡 실제 상품명: "${it.topCoupangProductName}"`).join('\n')}
+
+반드시 아래 JSON 배열 형식으로만 응답하세요 (원문 순서 유지, 총 ${items.length}개):
+[{ "keyword": "위 키워드 그대로", "searchTerm": "영문 검색어" }]`;
+
+  const cleaned = await callClaude(prompt);
+  try {
+    const parsed = parseJsonArray(cleaned) as { keyword: string; searchTerm: string }[];
+    return Object.fromEntries(parsed.map((p) => [p.keyword, p.searchTerm]));
+  } catch {
+    return {}; // 실패하면 호출부에서 기존 영문 키워드로 폴백
+  }
+}
+
 // 알리바바 상품명은 영문(가끔 다른 언어)이라 원문과 함께 한글 번역을
 // 보여주기 위해 씀. 여러 개를 한 번에 배치 번역해서 호출을 아낀다.
 export async function translateProductNames(names: string[]): Promise<string[]> {

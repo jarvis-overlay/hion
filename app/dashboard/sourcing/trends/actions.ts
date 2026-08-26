@@ -11,6 +11,7 @@ import {
   recommendCategories,
   suggestCandidateKeywords,
   finalizeProductRecommendations,
+  refineAlibabaSearchTerms,
   translateProductNames,
   type Season,
   type CategoryRecommendation,
@@ -222,12 +223,30 @@ export async function runProductRecommendation(
     return { error: e?.message || String(e) };
   }
 
-  // 최종 확정된 키워드만 알리바바 소싱 후보를 조회 (느려서 최소화)
+  // 최종 확정된 키워드만 알리바바 소싱 후보를 조회 (느려서 최소화).
+  // 카테고리 단계에서 미리 만든 일반적인 영어 키워드 대신, 실제 쿠팡에서
+  // 잘 팔리는 상품명을 보고 검색어를 다시 만들어서 연관도를 높인다.
   const enMap = new Map(keywords.map((k) => [k.ko, k.en]));
+  const topProductByKeyword = new Map(
+    coupangResults.map(({ keyword, coupang }) => {
+      const reviewCounts = coupang.map(
+        (c) => Number((c.reviewCount || '0').replace(/,/g, '')) || 0
+      );
+      const top = coupang[reviewCounts.indexOf(Math.max(...reviewCounts, 0))];
+      return [keyword, top?.name] as const;
+    })
+  );
+
+  const refinedTerms = await refineAlibabaSearchTerms(
+    drafts
+      .map((d) => ({ keyword: d.keyword, topCoupangProductName: topProductByKeyword.get(d.keyword) }))
+      .filter((d): d is { keyword: string; topCoupangProductName: string } => !!d.topCoupangProductName)
+  ).catch((): Record<string, string> => ({}));
+
   const alibabaByKeyword = new Map(
     await Promise.all(
       drafts.map(async (d) => {
-        const en = enMap.get(d.keyword);
+        const en = refinedTerms[d.keyword] || enMap.get(d.keyword);
         const alibaba = en ? await fetchAlibabaProducts(en, 5).catch(() => []) : [];
         return [d.keyword, alibaba] as const;
       })
