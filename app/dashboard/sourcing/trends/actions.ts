@@ -149,23 +149,29 @@ export async function runProductRecommendation(
     if (coupang.length === 0) {
       return { keyword, coupangSummary: '쿠팡 조회 실패/데이터 없음', hasAlibaba: false };
     }
-    const top = coupang[0];
-    const topReviews = Number((top.reviewCount || '0').replace(/,/g, '')) || 0;
+    const reviewCounts = coupang.map(
+      (c) => Number((c.reviewCount || '0').replace(/,/g, '')) || 0
+    );
+    // 쿠팡 "판매량순" 정렬은 최근 판매 속도 기준이라, 1위 상품이 꼭 리뷰가
+    // 가장 많은 상품은 아니다 (예: 신상품이 급상승해서 1위여도 리뷰는
+    // 적을 수 있음). 시장 "규모"를 판단할 땐 목록 전체에서 리뷰가 가장
+    // 많은 상품 기준으로 봐야 왜곡이 없다.
+    const maxReviews = Math.max(...reviewCounts);
+    const totalReviews = reviewCounts.reduce((a, b) => a + b, 0);
+    const topByReviews = coupang[reviewCounts.indexOf(maxReviews)];
 
-    // 1위 리뷰수는 "1위니까 잘 팔린다"가 아니라 절대적인 규모로 판단해야
-    // 한다 - 리뷰 100개 미만이면 검색 결과 1위라도 시장 자체가 작은 거다.
     const [marketScaleLabel, marketScaleTier, scaleDesc]: [
       string,
       MarketScaleTier,
       string
     ] =
-      topReviews >= 3000
+      maxReviews >= 3000
         ? ['매우 큼', 'very-high', '매우 큰 시장 (검증된 강한 수요)']
-        : topReviews >= 1000
+        : maxReviews >= 1000
         ? ['큼', 'high', '큰 시장 (수요 확실)']
-        : topReviews >= 300
+        : maxReviews >= 300
         ? ['중간', 'mid', '중간 규모 시장']
-        : topReviews >= 50
+        : maxReviews >= 50
         ? ['작음', 'low', '작은 시장 (니치, 신중 필요)']
         : ['매우 작음', 'very-low', '매우 작은 시장 (수요 거의 없음 - 비추천 가능성 높음)'];
 
@@ -189,16 +195,17 @@ export async function runProductRecommendation(
     badgesByKeyword.set(keyword, {
       marketScaleLabel,
       marketScaleTier,
-      topReviewCount: topReviews,
+      topReviewCount: maxReviews,
       competitionLabel,
       competitionTier,
       productCount: coupang.length,
       priceRange: priceRangeNum,
     });
 
-    const summary = `1위 "${top.name}" (리뷰 ${
+    const top = coupang[0];
+    const summary = `판매량 1위 "${top.name}" (리뷰 ${
       top.reviewCount ?? '0'
-    }개, ${top.price ?? '?'}원) - 시장 규모 판정: ${scaleDesc}. 총 ${
+    }개, ${top.price ?? '?'}원). 목록 내 리뷰 최다 상품은 "${topByReviews.name}" (리뷰 ${maxReviews.toLocaleString()}개) - 시장 규모는 이 최댓값 기준으로 판정: ${scaleDesc}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 총 ${
       coupang.length
     }개 상품 확인됨, 가격 분포 ${priceRangeNum}`;
     return { keyword, coupangSummary: summary, hasAlibaba: true };
