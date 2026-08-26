@@ -135,9 +135,10 @@ export async function fetchAlibabaProducts(
   limit = 3
 ): Promise<AlibabaProduct[]> {
   // 알리바바는 봇 차단이 강해서 정상 응답도 60초 가까이 걸릴 수 있다.
+  // 실패율이 꽤 있어서(캡차/타임아웃) 재시도를 1회 건다.
   const md = await unlockerMarkdown(
     `https://www.alibaba.com/trade/search?SearchText=${encodeURIComponent(keyword)}`,
-    { country: 'us', timeoutMs: 90000 }
+    { country: 'us', timeoutMs: 75000, retries: 1 }
   );
 
   const headingRe = /^## \[(.+?)\]\((\/\/www\.alibaba\.com\/product-detail\/[^)]+)\)/gm;
