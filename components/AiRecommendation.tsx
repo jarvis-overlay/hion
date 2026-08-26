@@ -74,7 +74,7 @@ export default function AiRecommendation() {
             className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
               season === opt.value
                 ? 'bg-ink text-white border-ink'
-                : 'border-paperLine text-inkSoft hover:border-ink'
+                : 'bg-[#F5F4F1] border-transparent text-ink hover:bg-[#EEECE8]'
             }`}
           >
             {opt.label}
@@ -107,7 +107,7 @@ export default function AiRecommendation() {
                 className={`px-4 py-2 rounded-lg text-sm border transition-colors ${
                   selectedCategory === c.category
                     ? 'bg-accentBg border-accent text-accent font-semibold'
-                    : 'border-paperLine hover:border-ink'
+                    : 'bg-[#F5F4F1] border-transparent text-ink hover:bg-[#EEECE8]'
                 }`}
               >
                 {c.category}
@@ -144,15 +144,15 @@ export default function AiRecommendation() {
               <p className="text-sm text-ink leading-relaxed mb-4">{p.reason}</p>
 
               <dl className="grid gap-2 text-xs mb-4 sm:grid-cols-3">
-                <div className="bg-[#F7F7F7] rounded-md px-3 py-2">
+                <div className="bg-[#F5F4F1] rounded-md px-3 py-2">
                   <dt className="font-semibold text-inkSoft mb-0.5">📊 수요 근거</dt>
                   <dd className="text-ink leading-relaxed">{p.criteria.demand}</dd>
                 </div>
-                <div className="bg-[#F7F7F7] rounded-md px-3 py-2">
+                <div className="bg-[#F5F4F1] rounded-md px-3 py-2">
                   <dt className="font-semibold text-inkSoft mb-0.5">⚔️ 경쟁/전략</dt>
                   <dd className="text-ink leading-relaxed">{p.criteria.competition}</dd>
                 </div>
-                <div className="bg-[#F7F7F7] rounded-md px-3 py-2">
+                <div className="bg-[#F5F4F1] rounded-md px-3 py-2">
                   <dt className="font-semibold text-inkSoft mb-0.5">🗓️ 시기 근거</dt>
                   <dd className="text-ink leading-relaxed">{p.criteria.seasonality}</dd>
                 </div>
@@ -177,10 +177,10 @@ export default function AiRecommendation() {
                           <img
                             src={r.imageUrl}
                             alt={r.name}
-                            className="w-14 h-14 rounded object-cover shrink-0 bg-[#F0F0F0]"
+                            className="w-14 h-14 rounded object-cover shrink-0 bg-[#EEECE8]"
                           />
                         ) : (
-                          <div className="w-14 h-14 rounded shrink-0 bg-[#F0F0F0]" />
+                          <div className="w-14 h-14 rounded shrink-0 bg-[#EEECE8]" />
                         )}
                         <div className="min-w-0">
                           <p className="text-xs text-ink line-clamp-2 leading-snug mb-1">
@@ -216,10 +216,10 @@ export default function AiRecommendation() {
                           <img
                             src={s.imageUrl}
                             alt={s.nameKo}
-                            className="w-14 h-14 rounded object-cover shrink-0 bg-[#F0F0F0]"
+                            className="w-14 h-14 rounded object-cover shrink-0 bg-[#EEECE8]"
                           />
                         ) : (
-                          <div className="w-14 h-14 rounded shrink-0 bg-[#F0F0F0]" />
+                          <div className="w-14 h-14 rounded shrink-0 bg-[#EEECE8]" />
                         )}
                         <div className="min-w-0">
                           <p className="text-xs text-ink line-clamp-2 leading-snug mb-0.5">

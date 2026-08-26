@@ -7,25 +7,38 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // 무신사풍 - 화이트 바탕 + 블랙 텍스트 + 블루 포인트 (클린한 미니멀)
-        paper: '#FFFFFF',
-        paperLine: '#E5E5E5',
-        ink: '#111111',
-        inkSoft: '#767676',
-        accent: '#1B5FFF',
-        accentBg: '#EEF3FF',
-        profit: '#1AA260',
-        profitBg: '#EAFBF1',
-        warn: '#E02020',
-        warnBg: '#FDEDED',
+        // 미니멀 + 자연스러운 톤 - 순백/순검정 대신 부드러운 오프화이트/
+        // 웜그레이, 채도 낮춘 인디고 포인트
+        paper: '#FAFAF9',
+        paperLine: '#E7E5E2',
+        ink: '#20201E',
+        inkSoft: '#75726C',
+        accent: '#4759A8',
+        accentBg: '#EEF0FA',
+        profit: '#3A8B5E',
+        profitBg: '#EAF5EE',
+        warn: '#C15B3D',
+        warnBg: '#FBEEE8',
       },
       fontFamily: {
-        display: ['"Noto Sans KR"', 'sans-serif'],
-        body: ['"Noto Sans KR"', 'sans-serif'],
+        display: [
+          'Pretendard',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          '"Apple SD Gothic Neo"',
+          'sans-serif',
+        ],
+        body: [
+          'Pretendard',
+          '-apple-system',
+          'BlinkMacSystemFont',
+          '"Apple SD Gothic Neo"',
+          'sans-serif',
+        ],
         mono: ['"JetBrains Mono"', 'monospace'],
       },
       boxShadow: {
-        card: '0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 12px -6px rgba(0, 0, 0, 0.06)',
+        card: '0 1px 2px rgba(32, 32, 30, 0.03), 0 4px 14px -6px rgba(32, 32, 30, 0.07)',
       },
     },
   },

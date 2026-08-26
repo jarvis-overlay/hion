@@ -156,7 +156,7 @@ export default function TrendForm() {
               className={`px-3 py-1.5 text-xs rounded-full border ${
                 months === p.months
                   ? 'bg-ink text-white border-ink'
-                  : 'border-paperLine text-inkSoft'
+                  : 'bg-[#F5F4F1] border-transparent text-ink hover:bg-[#EEECE8]'
               }`}
             >
               {p.label}
@@ -215,7 +215,7 @@ export default function TrendForm() {
                 className={`px-3 py-1.5 text-xs rounded-full border ${
                   categoryCodes.includes(c.code)
                     ? 'bg-ink text-white border-ink'
-                    : 'border-paperLine text-inkSoft'
+                    : 'bg-[#F5F4F1] border-transparent text-ink hover:bg-[#EEECE8]'
                 }`}
               >
                 {c.name}
@@ -328,10 +328,10 @@ export default function TrendForm() {
                                 <img
                                   src={c.imageUrl}
                                   alt={c.name}
-                                  className="w-10 h-10 rounded object-cover shrink-0 bg-[#F0F0F0]"
+                                  className="w-10 h-10 rounded object-cover shrink-0 bg-[#EEECE8]"
                                 />
                               ) : (
-                                <div className="w-10 h-10 rounded shrink-0 bg-[#F0F0F0]" />
+                                <div className="w-10 h-10 rounded shrink-0 bg-[#EEECE8]" />
                               )}
                               <div className="min-w-0">
                                 <p className="text-[11px] text-ink line-clamp-2 leading-snug">
