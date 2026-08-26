@@ -143,10 +143,14 @@ export default function AiRecommendation() {
               <h3 className="text-lg font-bold mb-1.5">{p.item}</h3>
               <p className="text-sm text-ink leading-relaxed mb-4">{p.reason}</p>
 
-              <dl className="grid gap-2 text-xs mb-4 sm:grid-cols-2">
+              <dl className="grid gap-2 text-xs mb-4 sm:grid-cols-3">
                 <div className="bg-[#F7F7F7] rounded-md px-3 py-2">
                   <dt className="font-semibold text-inkSoft mb-0.5">📊 수요 근거</dt>
                   <dd className="text-ink leading-relaxed">{p.criteria.demand}</dd>
+                </div>
+                <div className="bg-[#F7F7F7] rounded-md px-3 py-2">
+                  <dt className="font-semibold text-inkSoft mb-0.5">⚔️ 경쟁/전략</dt>
+                  <dd className="text-ink leading-relaxed">{p.criteria.competition}</dd>
                 </div>
                 <div className="bg-[#F7F7F7] rounded-md px-3 py-2">
                   <dt className="font-semibold text-inkSoft mb-0.5">🗓️ 시기 근거</dt>

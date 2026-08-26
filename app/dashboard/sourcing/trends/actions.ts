@@ -86,7 +86,7 @@ export async function runCategoryRecommendation(
 export interface ProductRecommendation {
   item: string;
   reason: string;
-  criteria: { demand: string; seasonality: string };
+  criteria: { demand: string; competition: string; seasonality: string };
   coupangReferences: {
     name: string;
     price: string | null;
@@ -115,7 +115,7 @@ export async function runProductRecommendation(
 ): Promise<{ recommendations: ProductRecommendation[] } | { error: string }> {
   let keywords: { ko: string; en: string }[];
   try {
-    keywords = (await suggestCandidateKeywords({ category, season })).slice(0, 4);
+    keywords = (await suggestCandidateKeywords({ category, season })).slice(0, 6);
   } catch (e: any) {
     return { error: e?.message || String(e) };
   }
@@ -151,9 +151,21 @@ export async function runProductRecommendation(
         ? '작은 시장 (니치, 신중 필요)'
         : '매우 작은 시장 (수요 거의 없음 - 비추천 가능성 높음)';
 
+    const prices = coupang
+      .map((c) => Number((c.price || '').replace(/,/g, '')))
+      .filter((p) => p > 0);
+    const priceRange =
+      prices.length > 0
+        ? `가격 분포 ${Math.min(...prices).toLocaleString()}~${Math.max(
+            ...prices
+          ).toLocaleString()}원`
+        : '가격 정보 없음';
+
     const summary = `1위 "${top.name}" (리뷰 ${
       top.reviewCount ?? '0'
-    }개, ${top.price ?? '?'}원) - 시장 규모 판정: ${scale}. 총 ${coupang.length}개 상품 확인됨`;
+    }개, ${top.price ?? '?'}원) - 시장 규모 판정: ${scale}. 총 ${
+      coupang.length
+    }개 상품 확인됨, ${priceRange}`;
     return { keyword, coupangSummary: summary, hasAlibaba: true };
   });
 
@@ -174,7 +186,7 @@ export async function runProductRecommendation(
     await Promise.all(
       drafts.map(async (d) => {
         const en = enMap.get(d.keyword);
-        const alibaba = en ? await fetchAlibabaProducts(en, 3).catch(() => []) : [];
+        const alibaba = en ? await fetchAlibabaProducts(en, 5).catch(() => []) : [];
         return [d.keyword, alibaba] as const;
       })
     )
@@ -195,7 +207,7 @@ export async function runProductRecommendation(
         item: d.displayName,
         reason: d.reason,
         criteria: d.criteria,
-        coupangReferences: match.coupang.slice(0, 3).map((c) => ({
+        coupangReferences: match.coupang.slice(0, 5).map((c) => ({
           name: c.name,
           price: c.price,
           reviewCount: c.reviewCount,
