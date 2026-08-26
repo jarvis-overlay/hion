@@ -29,7 +29,15 @@ async function callClaude(prompt: string): Promise<string> {
   if (!res.ok) {
     throw new Error(json?.error?.message || `Claude API 오류 (HTTP ${res.status})`);
   }
-  const text = json.content?.[0]?.text || '';
+  // content 블록이 여러 개일 수 있어서(예: thinking 블록) 전부 합친다 -
+  // content[0]만 보면 텍스트가 아예 비어있는 경우가 생길 수 있음
+  const text = (json.content || [])
+    .filter((b: any) => b.type === 'text')
+    .map((b: any) => b.text)
+    .join('');
+  if (json.stop_reason === 'max_tokens') {
+    console.error('[ai] Claude 응답이 max_tokens에서 잘림. 길이:', text.length);
+  }
   return extractJson(text);
 }
 
@@ -77,6 +85,7 @@ function parseJsonArray(text: string): any[] {
     }
   }
   if (items.length > 0) return items;
+  console.error('[ai] JSON 파싱 완전 실패. 원문:', text.slice(0, 1000));
   throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
 }
 
