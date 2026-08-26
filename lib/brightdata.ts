@@ -66,6 +66,7 @@ export interface CoupangBestseller {
   price: string | null;
   reviewCount: string | null;
   url: string;
+  imageUrl: string | null;
 }
 
 // 쿠팡 검색 결과를 판매량순으로 정렬해서 가져온다 - 우리 판매 데이터가
@@ -80,7 +81,7 @@ export async function fetchCoupangBestsellers(
   );
 
   const blockRe =
-    /\*\s+\[\s*\n\s*!\[([^\]]*)\]\([^)]*\)\s*\n\s*\1\s*\n([\s\S]*?)\]\((\/vp\/products\/[^)]+)\)/g;
+    /\*\s+\[\s*\n\s*!\[([^\]]*)\]\(([^)]*)\)\s*\n\s*\1\s*\n([\s\S]*?)\]\((\/vp\/products\/[^)]+)\)/g;
 
   const results: CoupangBestseller[] = [];
   let m: RegExpExecArray | null;
@@ -88,8 +89,9 @@ export async function fetchCoupangBestsellers(
   while ((m = blockRe.exec(md)) && results.length < limit) {
     rank++;
     const name = m[1].trim();
-    const body = m[2];
-    const relUrl = m[3];
+    const imageUrl = m[2].trim() || null;
+    const body = m[3];
+    const relUrl = m[4];
 
     const priceLines = [...body.matchAll(/\n\s*([\d,]+)원\s*\n/g)].map((x) => x[1]);
     const discountMatch = body.match(/할인([\d,]+)원/);
@@ -109,6 +111,7 @@ export async function fetchCoupangBestsellers(
       price,
       reviewCount,
       url: `https://www.coupang.com${relUrl}`,
+      imageUrl,
     });
   }
   return results;
@@ -118,6 +121,7 @@ export interface AlibabaProduct {
   name: string;
   price: string | null;
   url: string;
+  imageUrl: string | null;
 }
 
 // 알리바바(alibaba.com)에서 소싱 후보 상품을 검색한다 - 1688은 중국 국내용
@@ -152,7 +156,15 @@ export async function fetchAlibabaProducts(
         ? `$${priceMatch[1]}-${priceMatch[2]}`
         : `$${priceMatch[1]}`
       : null;
-    results.push({ name, price, url });
+
+    // 상품 썸네일은 보통 헤딩 바로 앞쪽에 같은 상품 링크로 감싸여 등장한다
+    const before = md.slice(Math.max(0, start - 1500), start);
+    const imageMatches = [
+      ...before.matchAll(/!\[[^\]]*\]\((https:[^)]+\.(?:jpg|jpeg|png|webp)[^)]*)\)/g),
+    ];
+    const imageUrl = imageMatches.length > 0 ? imageMatches[imageMatches.length - 1][1] : null;
+
+    results.push({ name, price, url, imageUrl });
   }
   return results;
 }

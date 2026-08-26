@@ -131,71 +131,104 @@ export default function AiRecommendation() {
       )}
 
       {products && products.length === 0 && !loadingProducts && (
-        <p className="text-sm text-inkSoft">추천할 만한 결과를 찾지 못했어요. 다른 카테고리로 시도해보세요.</p>
+        <p className="text-sm text-inkSoft">
+          추천할 만한 결과를 찾지 못했어요. 다른 카테고리로 시도해보세요.
+        </p>
       )}
 
       {products && products.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-5">
           {products.map((p, i) => (
-            <div key={i} className="rounded-lg border border-paperLine p-5">
-              <h3 className="text-base font-bold mb-1.5">{p.item}</h3>
-              <p className="text-sm text-ink mb-3">{p.reason}</p>
+            <div key={i} className="rounded-xl border border-paperLine p-5 sm:p-6">
+              <h3 className="text-lg font-bold mb-1.5">{p.item}</h3>
+              <p className="text-sm text-ink leading-relaxed mb-4">{p.reason}</p>
 
-              <dl className="space-y-1.5 text-xs mb-3">
-                <div className="flex gap-1.5">
-                  <dt className="shrink-0 font-semibold text-inkSoft">📊 수요 근거</dt>
-                  <dd className="text-inkSoft">{p.criteria.demand}</dd>
+              <dl className="grid gap-2 text-xs mb-4 sm:grid-cols-2">
+                <div className="bg-[#F7F7F7] rounded-md px-3 py-2">
+                  <dt className="font-semibold text-inkSoft mb-0.5">📊 수요 근거</dt>
+                  <dd className="text-ink leading-relaxed">{p.criteria.demand}</dd>
                 </div>
-                <div className="flex gap-1.5">
-                  <dt className="shrink-0 font-semibold text-inkSoft">🗓️ 시기</dt>
-                  <dd className="text-inkSoft">{p.criteria.seasonality}</dd>
+                <div className="bg-[#F7F7F7] rounded-md px-3 py-2">
+                  <dt className="font-semibold text-inkSoft mb-0.5">🗓️ 시기 근거</dt>
+                  <dd className="text-ink leading-relaxed">{p.criteria.seasonality}</dd>
                 </div>
               </dl>
 
               {p.coupangReferences.length > 0 && (
-                <div className="mb-3">
-                  <p className="text-xs font-semibold text-inkSoft mb-1">
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-inkSoft mb-2">
                     쿠팡 판매중 (참고)
                   </p>
-                  <ul className="space-y-1">
+                  <div className="grid gap-2 sm:grid-cols-3">
                     {p.coupangReferences.map((r, j) => (
-                      <li key={j}>
-                        <a
-                          href={r.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-accent hover:underline"
-                        >
-                          {r.name}
-                          {r.price ? ` · ${r.price}원` : ''}
-                          {r.reviewCount ? ` · 리뷰 ${r.reviewCount}개` : ''}
-                        </a>
-                      </li>
+                      <a
+                        key={j}
+                        href={r.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex gap-2 border border-paperLine rounded-lg p-2 hover:border-accent transition-colors"
+                      >
+                        {r.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={r.imageUrl}
+                            alt={r.name}
+                            className="w-14 h-14 rounded object-cover shrink-0 bg-[#F0F0F0]"
+                          />
+                        ) : (
+                          <div className="w-14 h-14 rounded shrink-0 bg-[#F0F0F0]" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-xs text-ink line-clamp-2 leading-snug mb-1">
+                            {r.name}
+                          </p>
+                          <p className="text-xs text-inkSoft">
+                            {r.price ? `${r.price}원` : ''}
+                            {r.reviewCount ? ` · 리뷰 ${r.reviewCount}개` : ''}
+                          </p>
+                        </div>
+                      </a>
                     ))}
-                  </ul>
+                  </div>
                 </div>
               )}
 
               {p.sourcingLinks.length > 0 && (
-                <div className="mb-3">
-                  <p className="text-xs font-semibold text-inkSoft mb-1">
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-inkSoft mb-2">
                     알리바바 소싱 후보
                   </p>
-                  <ul className="space-y-1">
+                  <div className="grid gap-2 sm:grid-cols-3">
                     {p.sourcingLinks.map((s, j) => (
-                      <li key={j}>
-                        <a
-                          href={s.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-accent hover:underline"
-                        >
-                          {s.name}
-                          {s.price ? ` · ${s.price}` : ''}
-                        </a>
-                      </li>
+                      <a
+                        key={j}
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex gap-2 border border-paperLine rounded-lg p-2 hover:border-accent transition-colors"
+                      >
+                        {s.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={s.imageUrl}
+                            alt={s.nameKo}
+                            className="w-14 h-14 rounded object-cover shrink-0 bg-[#F0F0F0]"
+                          />
+                        ) : (
+                          <div className="w-14 h-14 rounded shrink-0 bg-[#F0F0F0]" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-xs text-ink line-clamp-2 leading-snug mb-0.5">
+                            {s.nameKo}
+                          </p>
+                          <p className="text-[11px] text-inkSoft line-clamp-1 mb-1">
+                            {s.name}
+                          </p>
+                          <p className="text-xs text-accent font-medium">{s.price}</p>
+                        </div>
+                      </a>
                     ))}
-                  </ul>
+                  </div>
                 </div>
               )}
 

@@ -175,3 +175,24 @@ ${findingsText}
     throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
   }
 }
+
+// 알리바바 상품명은 영문(가끔 다른 언어)이라 원문과 함께 한글 번역을
+// 보여주기 위해 씀. 여러 개를 한 번에 배치 번역해서 호출을 아낀다.
+export async function translateProductNames(names: string[]): Promise<string[]> {
+  if (names.length === 0) return [];
+
+  const prompt = `아래 상품명들을 자연스러운 한국어로 번역해주세요. 원문 순서를 그대로 유지하고, 각 항목은 배열의 같은 인덱스에 대응해야 합니다.
+
+${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}
+
+반드시 아래 JSON 배열 형식으로만 응답하세요 (번역문 문자열만, 총 ${names.length}개): ["번역1", "번역2", ...]`;
+
+  const cleaned = await callClaude(prompt);
+  try {
+    const result = JSON.parse(cleaned);
+    if (Array.isArray(result) && result.length === names.length) return result;
+    return names; // 개수가 안 맞으면 원문 그대로 폴백
+  } catch {
+    return names;
+  }
+}

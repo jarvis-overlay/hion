@@ -11,6 +11,7 @@ import {
   recommendCategories,
   suggestCandidateKeywords,
   finalizeProductRecommendations,
+  translateProductNames,
   type Season,
   type CategoryRecommendation,
   type KeywordFinding,
@@ -91,8 +92,15 @@ export interface ProductRecommendation {
     price: string | null;
     reviewCount: string | null;
     url: string;
+    imageUrl: string | null;
   }[];
-  sourcingLinks: { name: string; price: string | null; url: string }[];
+  sourcingLinks: {
+    name: string;
+    nameKo: string;
+    price: string | null;
+    url: string;
+    imageUrl: string | null;
+  }[];
   caution: string;
 }
 
@@ -157,6 +165,13 @@ export async function runProductRecommendation(
     )
   );
 
+  // 알리바바 상품명은 영문이라 한글 번역을 같이 붙여준다 (한 번에 배치 번역)
+  const allAlibabaNames = [...alibabaByKeyword.values()].flat().map((a) => a.name);
+  const translations = await translateProductNames(allAlibabaNames).catch(
+    () => allAlibabaNames
+  );
+  const translationMap = new Map(allAlibabaNames.map((name, i) => [name, translations[i]]));
+
   const recommendations: ProductRecommendation[] = drafts
     .map((d) => {
       const match = coupangResults.find((s) => s.keyword === d.keyword);
@@ -170,11 +185,14 @@ export async function runProductRecommendation(
           price: c.price,
           reviewCount: c.reviewCount,
           url: c.url,
+          imageUrl: c.imageUrl,
         })),
         sourcingLinks: (alibabaByKeyword.get(d.keyword) || []).map((a) => ({
           name: a.name,
+          nameKo: translationMap.get(a.name) || a.name,
           price: a.price,
           url: a.url,
+          imageUrl: a.imageUrl,
         })),
         caution: d.caution,
       };

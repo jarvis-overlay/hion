@@ -22,11 +22,31 @@ export default function TrendsPage() {
           직접 키워드/카테고리 비교하기
         </summary>
         <div className="mt-4">
-          <p className="text-sm text-inkSoft mb-5">
-            네이버 데이터랩으로 후보 아이템/카테고리의 검색·쇼핑 클릭 추이를
-            직접 비교해볼 수도 있어요. 절대적인 판매량이 아니라 기간 내
-            상대적인 관심도(0~100)예요.
-          </p>
+          <div className="text-sm text-inkSoft mb-5 space-y-2">
+            <p>
+              이 도구는 <strong className="text-ink">네이버 데이터랩만</strong> 봐요
+              (쿠팡 데이터는 안 봐요 — 쿠팡 전체 판매 랭킹은 위쪽 "AI 소싱
+              추천"에서만 써요). 절대적인 판매량이 아니라 기간 내 상대적인
+              관심도(0~100)예요. 탭 세 개는 이런 차이가 있어요:
+            </p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>
+                <strong className="text-ink">키워드 비교(통합검색)</strong>: 네이버
+                통합검색에서 여러 키워드의 검색량 추이를 비교해요 (예: "선풍기" vs
+                "에어컨")
+              </li>
+              <li>
+                <strong className="text-ink">쇼핑 카테고리 비교</strong>: 네이버쇼핑
+                대분류 카테고리끼리 클릭 추이를 비교해요 (예: "패션의류" vs
+                "디지털/가전")
+              </li>
+              <li>
+                <strong className="text-ink">카테고리 내 키워드 비교</strong>: 카테고리
+                하나를 고른 다음, 그 안에서 여러 키워드끼리 비교해요 (예:
+                "디지털/가전" 안에서 "선풍기" vs "에어컨")
+              </li>
+            </ul>
+          </div>
           <TrendForm />
         </div>
       </details>
