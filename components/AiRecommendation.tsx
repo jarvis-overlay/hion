@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   runCategoryRecommendation,
   runProductRecommendation,
@@ -13,6 +13,40 @@ const SEASON_OPTIONS: { value: Season; label: string }[] = [
   { value: 'winter', label: '겨울 시즌' },
   { value: 'all', label: '사계절' },
 ];
+
+// 시장규모/경쟁강도 뱃지 색상 (RP-AI StatusBadge 패턴 참고 - dot + ring-inset pill)
+type BadgeTier = 'good' | 'ok' | 'bad' | 'neutral';
+
+const MARKET_TIER_COLOR: Record<ProductRecommendation['badges']['marketScaleTier'], BadgeTier> = {
+  'very-high': 'good',
+  high: 'good',
+  mid: 'ok',
+  low: 'bad',
+  'very-low': 'bad',
+};
+
+const COMPETITION_TIER_COLOR: Record<ProductRecommendation['badges']['competitionTier'], BadgeTier> = {
+  low: 'good',
+  mid: 'ok',
+  high: 'bad',
+};
+
+const BADGE_STYLE: Record<BadgeTier, string> = {
+  good: 'bg-profitBg text-profit ring-1 ring-inset ring-profit/20',
+  ok: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
+  bad: 'bg-warnBg text-warn ring-1 ring-inset ring-warn/20',
+  neutral: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
+};
+
+function Badge({ tier, children }: { tier: BadgeTier; children: ReactNode }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap ${BADGE_STYLE[tier]}`}
+    >
+      {children}
+    </span>
+  );
+}
 
 export default function AiRecommendation() {
   const [season, setSeason] = useState<Season>('summer');
@@ -140,7 +174,18 @@ export default function AiRecommendation() {
         <div className="space-y-5">
           {products.map((p, i) => (
             <div key={i} className="rounded-2xl ring-1 ring-paperLine p-5 sm:p-6">
-              <h3 className="text-lg font-bold mb-1.5">{p.item}</h3>
+              <h3 className="text-lg font-bold mb-2">{p.item}</h3>
+
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                <Badge tier={MARKET_TIER_COLOR[p.badges.marketScaleTier]}>
+                  🔥 시장규모 {p.badges.marketScaleLabel} (리뷰 {p.badges.topReviewCount.toLocaleString()}개)
+                </Badge>
+                <Badge tier={COMPETITION_TIER_COLOR[p.badges.competitionTier]}>
+                  ⚔️ 경쟁강도 {p.badges.competitionLabel} (상품 {p.badges.productCount}개)
+                </Badge>
+                <Badge tier="neutral">💰 {p.badges.priceRange}</Badge>
+              </div>
+
               <p className="text-sm text-ink leading-relaxed mb-4">{p.reason}</p>
 
               <dl className="grid gap-2 text-xs mb-4 sm:grid-cols-3">

@@ -83,10 +83,22 @@ export async function runCategoryRecommendation(
   }
 }
 
+export type MarketScaleTier = 'very-high' | 'high' | 'mid' | 'low' | 'very-low';
+export type CompetitionTier = 'low' | 'mid' | 'high';
+
 export interface ProductRecommendation {
   item: string;
   reason: string;
   criteria: { demand: string; competition: string; seasonality: string };
+  badges: {
+    marketScaleLabel: string; // "매우 큼" / "큼" / "중간" / "작음" / "매우 작음"
+    marketScaleTier: MarketScaleTier;
+    topReviewCount: number;
+    competitionLabel: string; // "낮음" / "보통" / "높음"
+    competitionTier: CompetitionTier;
+    productCount: number;
+    priceRange: string;
+  };
   coupangReferences: {
     name: string;
     price: string | null;
@@ -131,6 +143,8 @@ export async function runProductRecommendation(
     }))
   );
 
+  const badgesByKeyword = new Map<string, ProductRecommendation['badges']>();
+
   const findings: KeywordFinding[] = coupangResults.map(({ keyword, coupang }) => {
     if (coupang.length === 0) {
       return { keyword, coupangSummary: '쿠팡 조회 실패/데이터 없음', hasAlibaba: false };
@@ -140,32 +154,53 @@ export async function runProductRecommendation(
 
     // 1위 리뷰수는 "1위니까 잘 팔린다"가 아니라 절대적인 규모로 판단해야
     // 한다 - 리뷰 100개 미만이면 검색 결과 1위라도 시장 자체가 작은 거다.
-    const scale =
+    const [marketScaleLabel, marketScaleTier, scaleDesc]: [
+      string,
+      MarketScaleTier,
+      string
+    ] =
       topReviews >= 3000
-        ? '매우 큰 시장 (검증된 강한 수요)'
+        ? ['매우 큼', 'very-high', '매우 큰 시장 (검증된 강한 수요)']
         : topReviews >= 1000
-        ? '큰 시장 (수요 확실)'
+        ? ['큼', 'high', '큰 시장 (수요 확실)']
         : topReviews >= 300
-        ? '중간 규모 시장'
+        ? ['중간', 'mid', '중간 규모 시장']
         : topReviews >= 50
-        ? '작은 시장 (니치, 신중 필요)'
-        : '매우 작은 시장 (수요 거의 없음 - 비추천 가능성 높음)';
+        ? ['작음', 'low', '작은 시장 (니치, 신중 필요)']
+        : ['매우 작음', 'very-low', '매우 작은 시장 (수요 거의 없음 - 비추천 가능성 높음)'];
+
+    // 검색 결과 상품 개수가 많을수록 이미 셀러가 많이 들어와 있다는 뜻 -
+    // 경쟁 강도의 단순 근사치로 사용
+    const [competitionLabel, competitionTier]: [string, CompetitionTier] =
+      coupang.length >= 5
+        ? ['높음', 'high']
+        : coupang.length >= 3
+        ? ['보통', 'mid']
+        : ['낮음', 'low'];
 
     const prices = coupang
       .map((c) => Number((c.price || '').replace(/,/g, '')))
       .filter((p) => p > 0);
-    const priceRange =
+    const priceRangeNum =
       prices.length > 0
-        ? `가격 분포 ${Math.min(...prices).toLocaleString()}~${Math.max(
-            ...prices
-          ).toLocaleString()}원`
+        ? `${Math.min(...prices).toLocaleString()}~${Math.max(...prices).toLocaleString()}원`
         : '가격 정보 없음';
+
+    badgesByKeyword.set(keyword, {
+      marketScaleLabel,
+      marketScaleTier,
+      topReviewCount: topReviews,
+      competitionLabel,
+      competitionTier,
+      productCount: coupang.length,
+      priceRange: priceRangeNum,
+    });
 
     const summary = `1위 "${top.name}" (리뷰 ${
       top.reviewCount ?? '0'
-    }개, ${top.price ?? '?'}원) - 시장 규모 판정: ${scale}. 총 ${
+    }개, ${top.price ?? '?'}원) - 시장 규모 판정: ${scaleDesc}. 총 ${
       coupang.length
-    }개 상품 확인됨, ${priceRange}`;
+    }개 상품 확인됨, 가격 분포 ${priceRangeNum}`;
     return { keyword, coupangSummary: summary, hasAlibaba: true };
   });
 
@@ -202,11 +237,13 @@ export async function runProductRecommendation(
   const recommendations: ProductRecommendation[] = drafts
     .map((d) => {
       const match = coupangResults.find((s) => s.keyword === d.keyword);
-      if (!match) return null;
+      const badges = badgesByKeyword.get(d.keyword);
+      if (!match || !badges) return null;
       return {
         item: d.displayName,
         reason: d.reason,
         criteria: d.criteria,
+        badges,
         coupangReferences: match.coupang.slice(0, 5).map((c) => ({
           name: c.name,
           price: c.price,
