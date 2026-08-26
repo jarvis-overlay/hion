@@ -1,7 +1,8 @@
-// Gemini API로 트렌드/판매 데이터를 해석해서 소싱 카테고리/아이템을
-// 추천받기 위한 클라이언트. Google AI Studio 무료 등급 키를 쓴다.
-
-const MODEL = 'gemini-3.6-flash';
+// Claude API(Haiku 4.5)로 트렌드/판매 데이터를 해석해서 소싱 카테고리/
+// 아이템을 추천받기 위한 클라이언트. 구조화된 JSON 응답 신뢰도가 중요한
+// 작업이라(키워드를 정확히 그대로 반환해야 링크 매칭이 됨) 지시사항
+// 준수력이 좋은 Claude를 쓴다. 저빈도 호출이라 Haiku로도 비용이 매우 낮다.
+const MODEL = 'claude-haiku-4-5-20251001';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -9,24 +10,26 @@ function requireEnv(name: string): string {
   return v;
 }
 
-async function callGemini(prompt: string): Promise<string> {
-  const apiKey = requireEnv('GEMINI_API_KEY');
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json' },
-      }),
-    }
-  );
+async function callClaude(prompt: string): Promise<string> {
+  const apiKey = requireEnv('ANTHROPIC_API_KEY');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(json?.error?.message || `Gemini API 오류 (HTTP ${res.status})`);
+    throw new Error(json?.error?.message || `Claude API 오류 (HTTP ${res.status})`);
   }
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const text = json.content?.[0]?.text || '';
   return text.replace(/```json\s*|```\s*/g, '').trim();
 }
 
@@ -68,7 +71,7 @@ ${dataSection}
   { "category": "카테고리명", "reason": "왜 지금 이 카테고리가 유망한지 (1~2문장, 데이터가 있으면 근거로 인용)" }
 ]`;
 
-  const cleaned = await callGemini(prompt);
+  const cleaned = await callClaude(prompt);
   try {
     return JSON.parse(cleaned);
   } catch {
@@ -102,7 +105,7 @@ export async function suggestCandidateKeywords(input: {
 반드시 아래 JSON 배열 형식으로만 응답하세요:
 [{ "ko": "한글키워드", "en": "english keyword" }]`;
 
-  const cleaned = await callGemini(prompt);
+  const cleaned = await callClaude(prompt);
   try {
     return JSON.parse(cleaned);
   } catch {
@@ -165,7 +168,7 @@ ${findingsText}
   }
 ]`;
 
-  const cleaned = await callGemini(prompt);
+  const cleaned = await callClaude(prompt);
   try {
     return JSON.parse(cleaned);
   } catch {

@@ -96,15 +96,18 @@ export interface ProductRecommendation {
   caution: string;
 }
 
-// 2단계: 카테고리 안에서 실제 쿠팡 판매 랭킹(시장 전체) + 알리바바 소싱
-// 후보를 실시간으로 조회하고, 그 실데이터를 근거로 최종 상품을 추천한다.
+// 2단계: 카테고리 안에서 실제 쿠팡 판매 랭킹(시장 전체)을 먼저 조회해서
+// AI가 후보를 추리고, 최종 확정된 것만 알리바바 소싱 후보를 조회한다.
+// 알리바바는 봇 차단이 강해서 요청 1건에 최대 1분 가까이 걸리기 때문에,
+// 모든 후보에 대해 미리 돌리면 서버 시간제한을 넘기므로 이렇게 순서를
+// 나눴다.
 export async function runProductRecommendation(
   category: string,
   season: Season
 ): Promise<{ recommendations: ProductRecommendation[] } | { error: string }> {
   let keywords: { ko: string; en: string }[];
   try {
-    keywords = (await suggestCandidateKeywords({ category, season })).slice(0, 2);
+    keywords = (await suggestCandidateKeywords({ category, season })).slice(0, 3);
   } catch (e: any) {
     return { error: e?.message || String(e) };
   }
@@ -113,17 +116,14 @@ export async function runProductRecommendation(
     return { error: '후보 키워드를 생성하지 못했어요.' };
   }
 
-  const scraped = await Promise.all(
-    keywords.map(async ({ ko, en }) => {
-      const [coupang, alibaba] = await Promise.all([
-        fetchCoupangBestsellers(ko, 5).catch(() => []),
-        fetchAlibabaProducts(en, 3).catch(() => []),
-      ]);
-      return { keyword: ko, coupang, alibaba };
-    })
+  const coupangResults = await Promise.all(
+    keywords.map(async ({ ko }) => ({
+      keyword: ko,
+      coupang: await fetchCoupangBestsellers(ko, 5).catch(() => []),
+    }))
   );
 
-  const findings: KeywordFinding[] = scraped.map(({ keyword, coupang }) => {
+  const findings: KeywordFinding[] = coupangResults.map(({ keyword, coupang }) => {
     if (coupang.length === 0) {
       return { keyword, coupangSummary: '쿠팡 조회 실패/데이터 없음', hasAlibaba: false };
     }
@@ -145,9 +145,21 @@ export async function runProductRecommendation(
     return { error: e?.message || String(e) };
   }
 
+  // 최종 확정된 키워드만 알리바바 소싱 후보를 조회 (느려서 최소화)
+  const enMap = new Map(keywords.map((k) => [k.ko, k.en]));
+  const alibabaByKeyword = new Map(
+    await Promise.all(
+      drafts.map(async (d) => {
+        const en = enMap.get(d.keyword);
+        const alibaba = en ? await fetchAlibabaProducts(en, 3).catch(() => []) : [];
+        return [d.keyword, alibaba] as const;
+      })
+    )
+  );
+
   const recommendations: ProductRecommendation[] = drafts
     .map((d) => {
-      const match = scraped.find((s) => s.keyword === d.keyword);
+      const match = coupangResults.find((s) => s.keyword === d.keyword);
       if (!match) return null;
       return {
         item: d.displayName,
@@ -159,7 +171,7 @@ export async function runProductRecommendation(
           reviewCount: c.reviewCount,
           url: c.url,
         })),
-        sourcingLinks: match.alibaba.map((a) => ({
+        sourcingLinks: (alibabaByKeyword.get(d.keyword) || []).map((a) => ({
           name: a.name,
           price: a.price,
           url: a.url,

@@ -18,7 +18,7 @@ async function unlockerMarkdown(
   const apiKey = requireEnv('BRIGHTDATA_API_KEY');
   const zone = requireEnv('BRIGHTDATA_UNLOCKER_ZONE');
   const retries = options.retries ?? 0;
-  const timeoutMs = options.timeoutMs ?? 20000;
+  const timeoutMs = options.timeoutMs ?? 30000;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
@@ -76,7 +76,7 @@ export async function fetchCoupangBestsellers(
 ): Promise<CoupangBestseller[]> {
   const md = await unlockerMarkdown(
     `https://www.coupang.com/np/search?component=&q=${encodeURIComponent(keyword)}&sorter=saleCountDesc`,
-    { country: 'kr' }
+    { country: 'kr', timeoutMs: 25000 }
   );
 
   const blockRe =
@@ -127,9 +127,10 @@ export async function fetchAlibabaProducts(
   keyword: string,
   limit = 3
 ): Promise<AlibabaProduct[]> {
+  // 알리바바는 봇 차단이 강해서 정상 응답도 60초 가까이 걸릴 수 있다.
   const md = await unlockerMarkdown(
     `https://www.alibaba.com/trade/search?SearchText=${encodeURIComponent(keyword)}`,
-    { country: 'us' }
+    { country: 'us', timeoutMs: 90000 }
   );
 
   const headingRe = /^## \[(.+?)\]\((\/\/www\.alibaba\.com\/product-detail\/[^)]+)\)/gm;

@@ -124,8 +124,9 @@ export default function AiRecommendation() {
 
       {loadingProducts && (
         <p className="text-sm text-inkSoft">
-          쿠팡 판매 랭킹과 알리바바 소싱 후보를 실시간으로 조회하는 중이에요
-          (수십 초 걸릴 수 있어요)...
+          쿠팡 판매 랭킹과 알리바바 소싱 후보를 실시간으로 조회하는 중이에요.
+          알리바바는 봇 차단 때문에 느릴 수 있어서 최대 1~2분 정도 걸릴 수
+          있어요...
         </p>
       )}
 
