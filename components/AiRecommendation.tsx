@@ -242,11 +242,17 @@ export default function AiRecommendation() {
                 </div>
               )}
 
-              {p.sourcingLinks.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs font-semibold text-inkSoft mb-2">
-                    알리바바 소싱 후보
+              <div className="mb-4">
+                <p className="text-xs font-semibold text-inkSoft mb-2">
+                  알리바바 소싱 후보
+                </p>
+                {p.sourcingLinks.length === 0 ? (
+                  <p className="text-xs text-inkSoft bg-paper rounded-md px-3 py-2">
+                    알리바바 조회에 실패했거나 결과가 없어요. 알리바바 봇 차단
+                    때문일 수 있으니, alibaba.com에서 직접 검색해보시는 걸
+                    추천해요.
                   </p>
+                ) : (
                   <div className="grid gap-2 sm:grid-cols-3">
                     {p.sourcingLinks.map((s, j) => (
                       <a
@@ -278,8 +284,8 @@ export default function AiRecommendation() {
                       </a>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
               <p className="text-xs text-warn border-t border-paperLine/70 pt-3">
                 ⚠️ {p.caution}
