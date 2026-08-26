@@ -298,3 +298,38 @@ export async function runShoppingKeywordTrend(
     return { error: e?.message || String(e) };
   }
 }
+
+export interface CoupangSnapshotItem {
+  name: string;
+  price: string | null;
+  reviewCount: string | null;
+  url: string;
+  imageUrl: string | null;
+}
+
+// 네이버 트렌드 결과 옆에 나란히 보여줄 쿠팡 실제 판매 스냅샷 (다른 셀러
+// 포함 시장 전체). 직접 비교 도구도 네이버만 보지 말고 쿠팡도 같이
+// 보여달라는 요청으로 추가함.
+export async function runCoupangSnapshot(
+  titles: string[]
+): Promise<Record<string, CoupangSnapshotItem[]>> {
+  const uniqueTitles = [...new Set(titles.filter(Boolean))].slice(0, 5);
+
+  const entries = await Promise.all(
+    uniqueTitles.map(async (title) => {
+      const items = await fetchCoupangBestsellers(title, 3).catch(() => []);
+      return [
+        title,
+        items.map((c) => ({
+          name: c.name,
+          price: c.price,
+          reviewCount: c.reviewCount,
+          url: c.url,
+          imageUrl: c.imageUrl,
+        })),
+      ] as const;
+    })
+  );
+
+  return Object.fromEntries(entries);
+}

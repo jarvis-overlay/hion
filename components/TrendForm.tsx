@@ -5,6 +5,8 @@ import {
   runKeywordTrend,
   runCategoryTrend,
   runShoppingKeywordTrend,
+  runCoupangSnapshot,
+  type CoupangSnapshotItem,
 } from '@/app/dashboard/sourcing/trends/actions';
 
 const SHOPPING_CATEGORIES = [
@@ -57,6 +59,11 @@ export default function TrendForm() {
   const [result, setResult] = useState<ResultData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [coupangByTitle, setCoupangByTitle] = useState<Record<
+    string,
+    CoupangSnapshotItem[]
+  > | null>(null);
+  const [loadingCoupang, setLoadingCoupang] = useState(false);
 
   function toggleCategory(code: string) {
     setCategoryCodes((prev) =>
@@ -71,6 +78,7 @@ export default function TrendForm() {
   function handleRun() {
     setError(null);
     setResult(null);
+    setCoupangByTitle(null);
     const { startDate, endDate } = defaultRange(months);
 
     startTransition(async () => {
@@ -93,8 +101,23 @@ export default function TrendForm() {
         );
       }
 
-      if (res.error) setError(res.error);
-      else setResult(res.result);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setResult(res.result);
+
+      // 네이버 결과가 나오면 같은 이름으로 쿠팡 실제 판매 스냅샷도 조회
+      setLoadingCoupang(true);
+      try {
+        const titles = res.result.results.map((r: any) => r.title);
+        const snapshot = await runCoupangSnapshot(titles);
+        setCoupangByTitle(snapshot);
+      } catch {
+        // 쿠팡 조회 실패해도 네이버 결과는 이미 보여주고 있으니 조용히 무시
+      } finally {
+        setLoadingCoupang(false);
+      }
     });
   }
 
@@ -303,6 +326,56 @@ export default function TrendForm() {
                 <div className="flex justify-between text-[10px] text-inkSoft mt-1">
                   <span>{data[0]?.period}</span>
                   <span>{data[data.length - 1]?.period}</span>
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-paperLine">
+                  <p className="text-[11px] font-semibold text-inkSoft mb-1.5">
+                    쿠팡 실제 판매중 (참고)
+                  </p>
+                  {loadingCoupang && (
+                    <p className="text-[11px] text-inkSoft">조회 중...</p>
+                  )}
+                  {!loadingCoupang && coupangByTitle && (
+                    <>
+                      {(coupangByTitle[r.title] || []).length === 0 ? (
+                        <p className="text-[11px] text-inkSoft">
+                          데이터 없음 (검색 실패 또는 결과 없음)
+                        </p>
+                      ) : (
+                        <div className="grid gap-1.5 sm:grid-cols-3">
+                          {coupangByTitle[r.title].map((c, j) => (
+                            <a
+                              key={j}
+                              href={c.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex gap-1.5 border border-paperLine rounded-md p-1.5 hover:border-accent transition-colors"
+                            >
+                              {c.imageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={c.imageUrl}
+                                  alt={c.name}
+                                  className="w-10 h-10 rounded object-cover shrink-0 bg-[#F0F0F0]"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded shrink-0 bg-[#F0F0F0]" />
+                              )}
+                              <div className="min-w-0">
+                                <p className="text-[11px] text-ink line-clamp-2 leading-snug">
+                                  {c.name}
+                                </p>
+                                <p className="text-[10px] text-inkSoft">
+                                  {c.price ? `${c.price}원` : ''}
+                                  {c.reviewCount ? ` · 리뷰 ${c.reviewCount}개` : ''}
+                                </p>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             );
