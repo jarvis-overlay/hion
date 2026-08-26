@@ -24,10 +24,12 @@ export default function TrendsPage() {
         <div className="mt-4">
           <div className="text-sm text-inkSoft mb-5 space-y-2">
             <p>
-              이 도구는 <strong className="text-ink">네이버 데이터랩만</strong> 봐요
-              (쿠팡 데이터는 안 봐요 — 쿠팡 전체 판매 랭킹은 위쪽 "AI 소싱
-              추천"에서만 써요). 절대적인 판매량이 아니라 기간 내 상대적인
-              관심도(0~100)예요. 탭 세 개는 이런 차이가 있어요:
+              네이버 트렌드(상대적 관심도 0~100)와{' '}
+              <strong className="text-ink">쿠팡 실제 판매 데이터</strong>(다른
+              셀러 포함, 리뷰수·가격 등 진짜 판매 신호)를 같은 이름으로 조회해서
+              나란히 보여줘요. 메인 판매 채널이 쿠팡이니 최종 판단은 쿠팡
+              데이터를 더 우선해서 봐주세요 — 네이버는 검색 관심도 트렌드를
+              보는 보조 지표예요. 탭 세 개는 이런 차이가 있어요:
             </p>
             <ul className="list-disc pl-5 space-y-1">
               <li>

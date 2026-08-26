@@ -298,39 +298,11 @@ export default function TrendForm() {
 
             return (
               <div key={r.title} className="border border-paperLine rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold">{r.title}</span>
-                  <span
-                    className={`text-xs font-mono px-2 py-0.5 rounded-full ${
-                      change > 10
-                        ? 'bg-profitBg text-profit'
-                        : change < -10
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-paperLine text-inkSoft'
-                    }`}
-                  >
-                    {change > 0 ? '+' : ''}
-                    {change.toFixed(1)}% (전반 대비 후반)
-                  </span>
-                </div>
-                <div className="flex items-end gap-[2px] h-12">
-                  {data.map((d, i) => (
-                    <div
-                      key={i}
-                      title={`${d.period}: ${d.ratio}`}
-                      className="flex-1 bg-ink/70 rounded-sm"
-                      style={{ height: `${Math.max(2, (d.ratio / max) * 100)}%` }}
-                    />
-                  ))}
-                </div>
-                <div className="flex justify-between text-[10px] text-inkSoft mt-1">
-                  <span>{data[0]?.period}</span>
-                  <span>{data[data.length - 1]?.period}</span>
-                </div>
+                <span className="text-sm font-semibold">{r.title}</span>
 
-                <div className="mt-3 pt-3 border-t border-paperLine">
-                  <p className="text-[11px] font-semibold text-inkSoft mb-1.5">
-                    쿠팡 실제 판매중 (참고)
+                <div className="mt-2">
+                  <p className="text-[11px] font-semibold text-accent mb-1.5">
+                    🛒 쿠팡 실제 판매 현황 (메인 채널)
                   </p>
                   {loadingCoupang && (
                     <p className="text-[11px] text-inkSoft">조회 중...</p>
@@ -376,6 +348,40 @@ export default function TrendForm() {
                       )}
                     </>
                   )}
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-paperLine">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[11px] font-semibold text-inkSoft">
+                      📈 네이버 검색 관심도 (보조 지표)
+                    </p>
+                    <span
+                      className={`text-xs font-mono px-2 py-0.5 rounded-full ${
+                        change > 10
+                          ? 'bg-profitBg text-profit'
+                          : change < -10
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-paperLine text-inkSoft'
+                      }`}
+                    >
+                      {change > 0 ? '+' : ''}
+                      {change.toFixed(1)}% (전반 대비 후반)
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-[2px] h-10 opacity-70">
+                    {data.map((d, i) => (
+                      <div
+                        key={i}
+                        title={`${d.period}: ${d.ratio}`}
+                        className="flex-1 bg-ink/70 rounded-sm"
+                        style={{ height: `${Math.max(2, (d.ratio / max) * 100)}%` }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-inkSoft mt-1">
+                    <span>{data[0]?.period}</span>
+                    <span>{data[data.length - 1]?.period}</span>
+                  </div>
                 </div>
               </div>
             );
