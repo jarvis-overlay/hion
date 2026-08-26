@@ -136,9 +136,24 @@ export async function runProductRecommendation(
       return { keyword, coupangSummary: '쿠팡 조회 실패/데이터 없음', hasAlibaba: false };
     }
     const top = coupang[0];
-    const summary = `1위 "${top.name}" (리뷰 ${top.reviewCount ?? '?'}개, ${
-      top.price ?? '?'
-    }원), 총 ${coupang.length}개 상품 확인됨`;
+    const topReviews = Number((top.reviewCount || '0').replace(/,/g, '')) || 0;
+
+    // 1위 리뷰수는 "1위니까 잘 팔린다"가 아니라 절대적인 규모로 판단해야
+    // 한다 - 리뷰 100개 미만이면 검색 결과 1위라도 시장 자체가 작은 거다.
+    const scale =
+      topReviews >= 3000
+        ? '매우 큰 시장 (검증된 강한 수요)'
+        : topReviews >= 1000
+        ? '큰 시장 (수요 확실)'
+        : topReviews >= 300
+        ? '중간 규모 시장'
+        : topReviews >= 50
+        ? '작은 시장 (니치, 신중 필요)'
+        : '매우 작은 시장 (수요 거의 없음 - 비추천 가능성 높음)';
+
+    const summary = `1위 "${top.name}" (리뷰 ${
+      top.reviewCount ?? '0'
+    }개, ${top.price ?? '?'}원) - 시장 규모 판정: ${scale}. 총 ${coupang.length}개 상품 확인됨`;
     return { keyword, coupangSummary: summary, hasAlibaba: true };
   });
 
