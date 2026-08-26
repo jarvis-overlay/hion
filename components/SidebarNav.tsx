@@ -11,7 +11,7 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
   return (
     <>
       {/* 모바일 상단바 - md 이상에서는 숨김 */}
-      <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-paperLine bg-white sticky top-0 z-40">
+      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-white shadow-[0_1px_2px_rgba(31,36,48,0.06)] sticky top-0 z-40">
         <Link href="/dashboard" onClick={() => setOpen(false)}>
           <img src="/logo.png" alt="HION HUB" className="h-9 w-auto object-contain" />
         </Link>
@@ -37,7 +37,7 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
       )}
 
       <aside
-        className={`w-64 shrink-0 h-screen fixed md:sticky top-0 left-0 z-50 flex flex-col bg-white border-r border-paperLine transition-transform duration-200 md:translate-x-0 ${
+        className={`w-64 shrink-0 h-screen fixed md:sticky top-0 left-0 z-50 flex flex-col bg-white shadow-[1px_0_8px_-2px_rgba(31,36,48,0.06)] transition-transform duration-200 md:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -58,7 +58,7 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
           <NavLinks />
         </div>
 
-        <div className="px-5 py-4 border-t border-paperLine">
+        <div className="px-5 py-4 border-t border-[#F1F1F4]">
           <div className="text-xs text-inkSoft truncate mb-1">{userEmail}</div>
           <SignOutButton />
         </div>

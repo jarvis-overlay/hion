@@ -136,9 +136,9 @@ export default function TrendForm() {
               setResult(null);
               setError(null);
             }}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+            className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px transition ${
               mode === tab.key
-                ? 'border-ink text-ink'
+                ? 'border-accent text-accent'
                 : 'border-transparent text-inkSoft hover:text-ink'
             }`}
           >
@@ -153,10 +153,10 @@ export default function TrendForm() {
             <button
               key={p.months}
               onClick={() => setMonths(p.months)}
-              className={`px-3 py-1.5 text-xs rounded-full border ${
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                 months === p.months
-                  ? 'bg-ink text-white border-ink'
-                  : 'bg-[#F5F4F1] border-transparent text-ink hover:bg-[#EEECE8]'
+                  ? 'bg-accent text-white shadow-glow'
+                  : 'bg-white text-inkSoft ring-1 ring-paperLine hover:bg-paper'
               }`}
             >
               {p.label}
@@ -166,7 +166,7 @@ export default function TrendForm() {
         <select
           value={timeUnit}
           onChange={(e) => setTimeUnit(e.target.value as any)}
-          className="border border-paperLine bg-white px-2 py-1.5 text-xs rounded-lg"
+          className="ring-1 ring-paperLine rounded-lg bg-white px-2 py-1.5 text-xs focus:ring-accent outline-none transition"
         >
           <option value="date">일간</option>
           <option value="week">주간</option>
@@ -190,7 +190,7 @@ export default function TrendForm() {
                 setKeywordLines(next);
               }}
               placeholder={`후보 아이템 ${i + 1}`}
-              className="border border-paperLine bg-white px-3 py-2 text-sm"
+              className="ring-1 ring-paperLine rounded-lg bg-white px-3 py-2 text-sm focus:ring-accent outline-none transition"
             />
           ))}
           {keywordLines.length < 5 && (
@@ -212,10 +212,10 @@ export default function TrendForm() {
               <button
                 key={c.code}
                 onClick={() => toggleCategory(c.code)}
-                className={`px-3 py-1.5 text-xs rounded-full border ${
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                   categoryCodes.includes(c.code)
-                    ? 'bg-ink text-white border-ink'
-                    : 'bg-[#F5F4F1] border-transparent text-ink hover:bg-[#EEECE8]'
+                    ? 'bg-accent text-white shadow-glow'
+                    : 'bg-white text-inkSoft ring-1 ring-paperLine hover:bg-paper'
                 }`}
               >
                 {c.name}
@@ -232,7 +232,7 @@ export default function TrendForm() {
             <select
               value={shoppingCategory}
               onChange={(e) => setShoppingCategory(e.target.value)}
-              className="border border-paperLine bg-white px-3 py-2 text-sm w-full mt-1"
+              className="ring-1 ring-paperLine rounded-lg bg-white px-3 py-2 text-sm w-full mt-1 focus:ring-accent outline-none transition"
             >
               <option value="">선택하세요</option>
               {SHOPPING_CATEGORIES.map((c) => (
@@ -256,7 +256,7 @@ export default function TrendForm() {
                   setShoppingKeywords(next);
                 }}
                 placeholder={`후보 키워드 ${i + 1}`}
-                className="border border-paperLine bg-white px-3 py-2 text-sm"
+                className="ring-1 ring-paperLine rounded-lg bg-white px-3 py-2 text-sm focus:ring-accent outline-none transition"
               />
             ))}
             {shoppingKeywords.length < 5 && (
@@ -297,7 +297,7 @@ export default function TrendForm() {
               earlyAvg > 0 ? ((lateAvg - earlyAvg) / earlyAvg) * 100 : 0;
 
             return (
-              <div key={r.title} className="border border-paperLine rounded-lg p-4">
+              <div key={r.title} className="rounded-2xl ring-1 ring-paperLine p-4">
                 <span className="text-sm font-semibold">{r.title}</span>
 
                 <div className="mt-2">
@@ -321,17 +321,17 @@ export default function TrendForm() {
                               href={c.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex gap-1.5 border border-paperLine rounded-md p-1.5 hover:border-accent transition-colors"
+                              className="flex gap-1.5 ring-1 ring-paperLine rounded-lg p-1.5 hover:ring-accent transition"
                             >
                               {c.imageUrl ? (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                   src={c.imageUrl}
                                   alt={c.name}
-                                  className="w-10 h-10 rounded object-cover shrink-0 bg-[#EEECE8]"
+                                  className="w-10 h-10 rounded object-cover shrink-0 bg-paperLine"
                                 />
                               ) : (
-                                <div className="w-10 h-10 rounded shrink-0 bg-[#EEECE8]" />
+                                <div className="w-10 h-10 rounded shrink-0 bg-paperLine" />
                               )}
                               <div className="min-w-0">
                                 <p className="text-[11px] text-ink line-clamp-2 leading-snug">
@@ -350,7 +350,7 @@ export default function TrendForm() {
                   )}
                 </div>
 
-                <div className="mt-3 pt-3 border-t border-paperLine">
+                <div className="mt-3 pt-3 border-t border-paperLine/70">
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-[11px] font-semibold text-inkSoft">
                       📈 네이버 검색 관심도 (보조 지표)

@@ -71,10 +71,10 @@ export default function AiRecommendation() {
           <button
             key={opt.value}
             onClick={() => setSeason(opt.value)}
-            className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
+            className={`rounded-full px-3.5 py-1.5 text-[14px] font-semibold transition ${
               season === opt.value
-                ? 'bg-ink text-white border-ink'
-                : 'bg-[#F5F4F1] border-transparent text-ink hover:bg-[#EEECE8]'
+                ? 'bg-accent text-white shadow-glow'
+                : 'bg-white text-inkSoft ring-1 ring-paperLine hover:bg-paper'
             }`}
           >
             {opt.label}
@@ -83,7 +83,7 @@ export default function AiRecommendation() {
         <button
           onClick={handleCategoryClick}
           disabled={loadingCategories}
-          className="btn-primary px-5 py-2 text-sm font-semibold sm:ml-auto disabled:opacity-50"
+          className="btn-primary px-5 py-2.5 text-sm sm:ml-auto disabled:opacity-50"
         >
           {loadingCategories ? '분석 중...' : '카테고리 추천받기'}
         </button>
@@ -104,10 +104,10 @@ export default function AiRecommendation() {
                 key={i}
                 onClick={() => handlePickCategory(c.category)}
                 title={c.reason}
-                className={`px-4 py-2 rounded-lg text-sm border transition-colors ${
+                className={`rounded-full px-3.5 py-1.5 text-[14px] font-semibold transition ${
                   selectedCategory === c.category
-                    ? 'bg-accentBg border-accent text-accent font-semibold'
-                    : 'bg-[#F5F4F1] border-transparent text-ink hover:bg-[#EEECE8]'
+                    ? 'bg-accent text-white shadow-glow'
+                    : 'bg-white text-inkSoft ring-1 ring-paperLine hover:bg-paper'
                 }`}
               >
                 {c.category}
@@ -139,20 +139,20 @@ export default function AiRecommendation() {
       {products && products.length > 0 && (
         <div className="space-y-5">
           {products.map((p, i) => (
-            <div key={i} className="rounded-xl border border-paperLine p-5 sm:p-6">
+            <div key={i} className="rounded-2xl ring-1 ring-paperLine p-5 sm:p-6">
               <h3 className="text-lg font-bold mb-1.5">{p.item}</h3>
               <p className="text-sm text-ink leading-relaxed mb-4">{p.reason}</p>
 
               <dl className="grid gap-2 text-xs mb-4 sm:grid-cols-3">
-                <div className="bg-[#F5F4F1] rounded-md px-3 py-2">
+                <div className="bg-paper rounded-md px-3 py-2">
                   <dt className="font-semibold text-inkSoft mb-0.5">📊 수요 근거</dt>
                   <dd className="text-ink leading-relaxed">{p.criteria.demand}</dd>
                 </div>
-                <div className="bg-[#F5F4F1] rounded-md px-3 py-2">
+                <div className="bg-paper rounded-md px-3 py-2">
                   <dt className="font-semibold text-inkSoft mb-0.5">⚔️ 경쟁/전략</dt>
                   <dd className="text-ink leading-relaxed">{p.criteria.competition}</dd>
                 </div>
-                <div className="bg-[#F5F4F1] rounded-md px-3 py-2">
+                <div className="bg-paper rounded-md px-3 py-2">
                   <dt className="font-semibold text-inkSoft mb-0.5">🗓️ 시기 근거</dt>
                   <dd className="text-ink leading-relaxed">{p.criteria.seasonality}</dd>
                 </div>
@@ -170,17 +170,17 @@ export default function AiRecommendation() {
                         href={r.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex gap-2 border border-paperLine rounded-lg p-2 hover:border-accent transition-colors"
+                        className="flex gap-2 ring-1 ring-paperLine rounded-xl p-2 hover:ring-accent transition"
                       >
                         {r.imageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={r.imageUrl}
                             alt={r.name}
-                            className="w-14 h-14 rounded object-cover shrink-0 bg-[#EEECE8]"
+                            className="w-14 h-14 rounded object-cover shrink-0 bg-paperLine"
                           />
                         ) : (
-                          <div className="w-14 h-14 rounded shrink-0 bg-[#EEECE8]" />
+                          <div className="w-14 h-14 rounded shrink-0 bg-paperLine" />
                         )}
                         <div className="min-w-0">
                           <p className="text-xs text-ink line-clamp-2 leading-snug mb-1">
@@ -209,17 +209,17 @@ export default function AiRecommendation() {
                         href={s.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex gap-2 border border-paperLine rounded-lg p-2 hover:border-accent transition-colors"
+                        className="flex gap-2 ring-1 ring-paperLine rounded-xl p-2 hover:ring-accent transition"
                       >
                         {s.imageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={s.imageUrl}
                             alt={s.nameKo}
-                            className="w-14 h-14 rounded object-cover shrink-0 bg-[#EEECE8]"
+                            className="w-14 h-14 rounded object-cover shrink-0 bg-paperLine"
                           />
                         ) : (
-                          <div className="w-14 h-14 rounded shrink-0 bg-[#EEECE8]" />
+                          <div className="w-14 h-14 rounded shrink-0 bg-paperLine" />
                         )}
                         <div className="min-w-0">
                           <p className="text-xs text-ink line-clamp-2 leading-snug mb-0.5">
@@ -236,7 +236,7 @@ export default function AiRecommendation() {
                 </div>
               )}
 
-              <p className="text-xs text-warn border-t border-paperLine pt-3">
+              <p className="text-xs text-warn border-t border-paperLine/70 pt-3">
                 ⚠️ {p.caution}
               </p>
             </div>

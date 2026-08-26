@@ -7,18 +7,17 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // 미니멀 + 자연스러운 톤 - 순백/순검정 대신 부드러운 오프화이트/
-        // 웜그레이, 채도 낮춘 인디고 포인트
-        paper: '#FAFAF9',
-        paperLine: '#E7E5E2',
-        ink: '#20201E',
-        inkSoft: '#75726C',
-        accent: '#4759A8',
-        accentBg: '#EEF0FA',
-        profit: '#3A8B5E',
-        profitBg: '#EAF5EE',
-        warn: '#C15B3D',
-        warnBg: '#FBEEE8',
+        // RP-AI 디자인 시스템 참고 - 캔버스 그레이 바탕 + 비비드 핑크레드 포인트
+        paper: '#F5F5F7',
+        paperLine: '#F1F1F4',
+        ink: '#1F2430',
+        inkSoft: '#9CA3AF',
+        accent: '#F5285C',
+        accentBg: '#FFF1F4',
+        profit: '#10B981',
+        profitBg: '#ECFDF5',
+        warn: '#F59E0B',
+        warnBg: '#FFFBEB',
       },
       fontFamily: {
         display: [
@@ -38,7 +37,8 @@ module.exports = {
         mono: ['"JetBrains Mono"', 'monospace'],
       },
       boxShadow: {
-        card: '0 1px 2px rgba(32, 32, 30, 0.03), 0 4px 14px -6px rgba(32, 32, 30, 0.07)',
+        card: '0 1px 2px rgba(31, 36, 48, 0.04)',
+        glow: '0 4px 10px -2px rgba(245, 40, 92, 0.35)',
       },
     },
   },

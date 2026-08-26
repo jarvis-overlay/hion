@@ -6,64 +6,69 @@
 
 body {
   font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
-  background-color: #FAFAF9;
-  color: #20201E;
+  font-weight: 500;
+  background-color: #F5F5F7;
+  color: #1F2430;
+  -webkit-font-smoothing: antialiased;
 }
 
 h1, h2, h3, .font-display {
   letter-spacing: -0.02em;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .card {
   background: #FFFFFF;
-  border: 1px solid #E7E5E2;
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(32, 32, 30, 0.03), 0 4px 14px -6px rgba(32, 32, 30, 0.07);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(31, 36, 48, 0.04);
+  outline: 1px solid #F1F1F4;
+  outline-offset: -1px;
 }
 
 .btn-primary {
-  background: #20201E;
+  background: #F5285C;
   color: #FFFFFF;
-  border-radius: 8px;
-  font-weight: 500;
-  transition: background-color 0.15s ease;
+  border-radius: 10px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px -2px rgba(245, 40, 92, 0.35);
+  transition: background-color 0.15s ease, transform 0.1s ease;
 }
 .btn-primary:hover {
-  background: #4759A8;
+  background: #E30F49;
+}
+.btn-primary:active {
+  transform: translateY(1px);
 }
 
-/* 사이드바는 화이트 배경 + 블랙 텍스트 - nav-link/label은 이 라이트 배경
-   전용 색상이다 (사이드바 밖에서는 안 쓰임) */
+/* 사이드바는 화이트 배경 - nav-link/label은 이 라이트 배경 전용
+   색상이다 (사이드바 밖에서는 안 쓰임) */
 .nav-link {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 9px 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 13.5px;
-  font-weight: 500;
-  color: #57544E;
-  border-left: 2px solid transparent;
+  font-weight: 600;
+  color: #6B7280;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 .nav-link:hover {
-  background: #F2F1EE;
-  color: #20201E;
+  background: #F5F5F7;
+  color: #1F2430;
 }
 .nav-link.active {
-  background: #EEF0FA;
-  color: #4759A8;
-  font-weight: 600;
-  border-left: 2px solid #4759A8;
+  background: #FFF1F4;
+  color: #F5285C;
+  font-weight: 700;
 }
 .nav-section-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  color: #A6A39C;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #C1C4CC;
   text-transform: uppercase;
   padding: 0 12px;
-  margin-top: 20px;
-  margin-bottom: 6px;
+  margin-top: 22px;
+  margin-bottom: 8px;
 }
