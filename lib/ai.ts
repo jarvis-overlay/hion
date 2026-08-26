@@ -21,7 +21,7 @@ async function callClaude(prompt: string): Promise<string> {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 3000,
+      max_tokens: 6000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -44,6 +44,40 @@ function extractJson(text: string): string {
     return cleaned.slice(start, end + 1);
   }
   return cleaned;
+}
+
+// 응답이 max_tokens 제한 등으로 중간에 잘려서 배열이 안 닫혔을 때도,
+// 완전하게 끝난 객체들만이라도 건져서 반환한다 (전체 실패보다 낫다).
+function parseJsonArray(text: string): any[] {
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    // fall through to repair
+  }
+
+  const items: any[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        try {
+          items.push(JSON.parse(text.slice(start, i + 1)));
+        } catch {
+          // 이 조각도 깨졌으면 건너뛴다
+        }
+        start = -1;
+      }
+    }
+  }
+  if (items.length > 0) return items;
+  throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
 }
 
 export type Season = 'summer' | 'winter' | 'all';
@@ -110,7 +144,7 @@ ${dataSection}
 
   const cleaned = await callClaude(prompt);
   try {
-    return JSON.parse(cleaned);
+    return parseJsonArray(cleaned);
   } catch {
     throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
   }
@@ -148,7 +182,7 @@ ${SOURCING_EXCLUSION_RULE}
 
   const cleaned = await callClaude(prompt);
   try {
-    return JSON.parse(cleaned);
+    return parseJsonArray(cleaned);
   } catch {
     throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
   }
@@ -227,7 +261,7 @@ keyword는 반드시 위 후보 목록에 있는 문자열과 정확히 동일�
 
   const cleaned = await callClaude(prompt);
   try {
-    return JSON.parse(cleaned);
+    return parseJsonArray(cleaned);
   } catch {
     throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
   }
