@@ -115,7 +115,7 @@ export async function runProductRecommendation(
 ): Promise<{ recommendations: ProductRecommendation[] } | { error: string }> {
   let keywords: { ko: string; en: string }[];
   try {
-    keywords = (await suggestCandidateKeywords({ category, season })).slice(0, 3);
+    keywords = (await suggestCandidateKeywords({ category, season })).slice(0, 4);
   } catch (e: any) {
     return { error: e?.message || String(e) };
   }
