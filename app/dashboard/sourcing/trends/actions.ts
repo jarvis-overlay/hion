@@ -13,6 +13,7 @@ import {
   finalizeProductRecommendations,
   refineAlibabaSearchTerms,
   translateProductNames,
+  recommendFromKnowledgeOnly,
   type Season,
   type CategoryRecommendation,
   type KeywordFinding,
@@ -90,7 +91,8 @@ export type CompetitionTier = 'low' | 'mid' | 'high';
 export interface ProductRecommendation {
   item: string;
   reason: string;
-  criteria: { demand: string; competition: string; seasonality: string };
+  verified: boolean; // false면 실시간 데이터 없이 AI 일반 지식만으로 추천된 것
+  criteria: { demand: string; competition: string; seasonality: string } | null;
   badges: {
     marketScaleLabel: string; // "매우 큼" / "큼" / "중간" / "작음" / "매우 작음"
     marketScaleTier: MarketScaleTier;
@@ -99,7 +101,7 @@ export interface ProductRecommendation {
     competitionTier: CompetitionTier;
     productCount: number;
     priceRange: string;
-  };
+  } | null;
   coupangReferences: {
     name: string;
     price: string | null;
@@ -137,12 +139,44 @@ export async function runProductRecommendation(
     return { error: '후보 키워드를 생성하지 못했어요.' };
   }
 
-  const coupangResults = await Promise.all(
-    keywords.map(async ({ ko }) => ({
-      keyword: ko,
-      coupang: await fetchCoupangBestsellers(ko, 5).catch(() => []),
-    }))
-  );
+  // 6개를 한꺼번에 병렬로 쏘면 같은 Bright Data 존 안에서 서로 경합해서
+  // 오히려 다 같이 타임아웃 나는 경우가 많았다. 3개씩 나눠서 순차 처리
+  // (배치 안에서는 병렬)하면 경합이 줄어서 개별 성공률이 올라간다.
+  const COUPANG_BATCH_SIZE = 3;
+  const coupangResults: { keyword: string; coupang: Awaited<ReturnType<typeof fetchCoupangBestsellers>> }[] = [];
+  for (let i = 0; i < keywords.length; i += COUPANG_BATCH_SIZE) {
+    const batch = keywords.slice(i, i + COUPANG_BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async ({ ko }) => ({
+        keyword: ko,
+        coupang: await fetchCoupangBestsellers(ko, 5).catch(() => []),
+      }))
+    );
+    coupangResults.push(...batchResults);
+  }
+
+  // 쿠팡 스크래핑이 (캡차 차단 등으로) 후보 전부 실패했으면, 빈 결과를
+  // 보여주는 대신 AI 일반 지식으로라도 추천한다 - "실시간 데이터 아님"을
+  // 명확히 표시해서 보여준다.
+  if (coupangResults.every((r) => r.coupang.length === 0)) {
+    try {
+      const fallback = await recommendFromKnowledgeOnly(category, season);
+      return {
+        recommendations: fallback.map((f) => ({
+          item: f.item,
+          reason: f.reason,
+          verified: false,
+          criteria: null,
+          badges: null,
+          coupangReferences: [],
+          sourcingLinks: [],
+          caution: f.caution,
+        })),
+      };
+    } catch (e: any) {
+      return { error: e?.message || String(e) };
+    }
+  }
 
   const badgesByKeyword = new Map<string, ProductRecommendation['badges']>();
 
@@ -261,13 +295,14 @@ export async function runProductRecommendation(
   const translationMap = new Map(allAlibabaNames.map((name, i) => [name, translations[i]]));
 
   const recommendations: ProductRecommendation[] = drafts
-    .map((d) => {
+    .map((d): ProductRecommendation | null => {
       const match = coupangResults.find((s) => s.keyword === d.keyword);
       const badges = badgesByKeyword.get(d.keyword);
       if (!match || !badges) return null;
       return {
         item: d.displayName,
         reason: d.reason,
+        verified: true,
         criteria: d.criteria,
         badges,
         coupangReferences: match.coupang.slice(0, 5).map((c) => ({

@@ -17,7 +17,9 @@ const SEASON_OPTIONS: { value: Season; label: string }[] = [
 // 시장규모/경쟁강도 뱃지 색상 (RP-AI StatusBadge 패턴 참고 - dot + ring-inset pill)
 type BadgeTier = 'good' | 'ok' | 'bad' | 'neutral';
 
-const MARKET_TIER_COLOR: Record<ProductRecommendation['badges']['marketScaleTier'], BadgeTier> = {
+type Badges = NonNullable<ProductRecommendation['badges']>;
+
+const MARKET_TIER_COLOR: Record<Badges['marketScaleTier'], BadgeTier> = {
   'very-high': 'good',
   high: 'good',
   mid: 'ok',
@@ -25,7 +27,7 @@ const MARKET_TIER_COLOR: Record<ProductRecommendation['badges']['marketScaleTier
   'very-low': 'bad',
 };
 
-const COMPETITION_TIER_COLOR: Record<ProductRecommendation['badges']['competitionTier'], BadgeTier> = {
+const COMPETITION_TIER_COLOR: Record<Badges['competitionTier'], BadgeTier> = {
   low: 'good',
   mid: 'ok',
   high: 'bad',
@@ -176,32 +178,43 @@ export default function AiRecommendation() {
             <div key={i} className="rounded-2xl ring-1 ring-paperLine p-5 sm:p-6">
               <h3 className="text-lg font-bold mb-2">{p.item}</h3>
 
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                <Badge tier={MARKET_TIER_COLOR[p.badges.marketScaleTier]}>
-                  🔥 시장규모 {p.badges.marketScaleLabel} (리뷰 {p.badges.topReviewCount.toLocaleString()}개)
-                </Badge>
-                <Badge tier={COMPETITION_TIER_COLOR[p.badges.competitionTier]}>
-                  ⚔️ 경쟁강도 {p.badges.competitionLabel} (상품 {p.badges.productCount}개)
-                </Badge>
-                <Badge tier="neutral">💰 {p.badges.priceRange}</Badge>
-              </div>
+              {!p.verified && (
+                <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2 mb-3">
+                  ⚠️ 실시간 쿠팡 데이터 조회에 실패해서(캡차 차단 등), AI의
+                  일반 지식만으로 추천된 결과예요. 참고용으로만 봐주세요.
+                </p>
+              )}
+
+              {p.badges && (
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  <Badge tier={MARKET_TIER_COLOR[p.badges.marketScaleTier]}>
+                    🔥 시장규모 {p.badges.marketScaleLabel} (리뷰 {p.badges.topReviewCount.toLocaleString()}개)
+                  </Badge>
+                  <Badge tier={COMPETITION_TIER_COLOR[p.badges.competitionTier]}>
+                    ⚔️ 경쟁강도 {p.badges.competitionLabel} (상품 {p.badges.productCount}개)
+                  </Badge>
+                  <Badge tier="neutral">💰 {p.badges.priceRange}</Badge>
+                </div>
+              )}
 
               <p className="text-sm text-ink leading-relaxed mb-4">{p.reason}</p>
 
-              <dl className="grid gap-2 text-xs mb-4 sm:grid-cols-3">
-                <div className="bg-paper rounded-md px-3 py-2">
-                  <dt className="font-semibold text-inkSoft mb-0.5">📊 수요 근거</dt>
-                  <dd className="text-ink leading-relaxed">{p.criteria.demand}</dd>
-                </div>
-                <div className="bg-paper rounded-md px-3 py-2">
-                  <dt className="font-semibold text-inkSoft mb-0.5">⚔️ 경쟁/전략</dt>
-                  <dd className="text-ink leading-relaxed">{p.criteria.competition}</dd>
-                </div>
-                <div className="bg-paper rounded-md px-3 py-2">
-                  <dt className="font-semibold text-inkSoft mb-0.5">🗓️ 시기 근거</dt>
-                  <dd className="text-ink leading-relaxed">{p.criteria.seasonality}</dd>
-                </div>
-              </dl>
+              {p.criteria && (
+                <dl className="grid gap-2 text-xs mb-4 sm:grid-cols-3">
+                  <div className="bg-paper rounded-md px-3 py-2">
+                    <dt className="font-semibold text-inkSoft mb-0.5">📊 수요 근거</dt>
+                    <dd className="text-ink leading-relaxed">{p.criteria.demand}</dd>
+                  </div>
+                  <div className="bg-paper rounded-md px-3 py-2">
+                    <dt className="font-semibold text-inkSoft mb-0.5">⚔️ 경쟁/전략</dt>
+                    <dd className="text-ink leading-relaxed">{p.criteria.competition}</dd>
+                  </div>
+                  <div className="bg-paper rounded-md px-3 py-2">
+                    <dt className="font-semibold text-inkSoft mb-0.5">🗓️ 시기 근거</dt>
+                    <dd className="text-ink leading-relaxed">{p.criteria.seasonality}</dd>
+                  </div>
+                </dl>
+              )}
 
               {p.coupangReferences.length > 0 && (
                 <div className="mb-4">
@@ -242,6 +255,7 @@ export default function AiRecommendation() {
                 </div>
               )}
 
+              {p.verified && (
               <div className="mb-4">
                 <p className="text-xs font-semibold text-inkSoft mb-2">
                   알리바바 소싱 후보
@@ -286,6 +300,7 @@ export default function AiRecommendation() {
                   </div>
                 )}
               </div>
+              )}
 
               <p className="text-xs text-warn border-t border-paperLine/70 pt-3">
                 ⚠️ {p.caution}

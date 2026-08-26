@@ -75,12 +75,12 @@ export async function fetchCoupangBestsellers(
   keyword: string,
   limit = 8
 ): Promise<CoupangBestseller[]> {
-  // 실측 결과 쿠팡 응답이 정상적으로도 30초 가까이 걸릴 때가 많고,
-  // 여러 키워드를 동시에(병렬) 조회하면 존 안에서 대기가 걸려 더 오래
-  // 걸릴 수 있어서 넉넉하게 잡는다.
+  // 실측 결과 실패 원인은 타임아웃보다 캡차 차단이 더 많았다 (14~20초
+  // 만에 캡차로 막혀서 끝나는 패턴). 재시도를 2회로 늘려서 캡차를
+  // 우회할 확률을 높인다.
   const md = await unlockerMarkdown(
     `https://www.coupang.com/np/search?component=&q=${encodeURIComponent(keyword)}&sorter=saleCountDesc`,
-    { country: 'kr', timeoutMs: 60000, retries: 1 }
+    { country: 'kr', timeoutMs: 45000, retries: 2 }
   );
 
   const blockRe =

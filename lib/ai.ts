@@ -276,6 +276,41 @@ keyword는 반드시 위 후보 목록에 있는 문자열과 정확히 동일�
   }
 }
 
+export interface KnowledgeFallbackItem {
+  item: string;
+  reason: string;
+  caution: string;
+}
+
+// 쿠팡 스크래핑이 (캡차 차단 등으로) 전부 실패했을 때 쓰는 안전장치.
+// 실시간 데이터 없이 완전히 빈 결과를 보여주는 것보다는, AI의 일반
+// 지식으로라도 추천하는 게 낫다 - 대신 UI에서 "실데이터 아님"을
+// 명확히 표시해야 한다.
+export async function recommendFromKnowledgeOnly(
+  category: string,
+  season: Season
+): Promise<KnowledgeFallbackItem[]> {
+  const prompt = `당신은 1인 이커머스 셀러(쿠팡 로켓그로스, 중국 알리바바에서 소싱)의 소싱 컨설턴트입니다.
+
+카테고리: "${category}" / 시즌 조건: "${SEASON_LABEL[season]}" — ${SEASON_RULE[season]}
+
+${SOURCING_EXCLUSION_RULE}
+
+지금 실시간 데이터 조회에 실패해서, 당신의 일반 지식(계절성, 최근 몇 년간 한국 이커머스 트렌드)만으로 이 카테고리 안에서 소싱하기 좋은 **구체적인 상품** 3~4개를 추천해주세요.
+
+반드시 아래 JSON 배열 형식으로만 응답하세요:
+[
+  {
+    "item": "구체적인 상품명",
+    "reason": "왜 지금 이 상품을 추천하는지 (2~3문장)",
+    "caution": "소싱/판매 시 주의할 점 (1~2문장)"
+  }
+]`;
+
+  const cleaned = await callClaude(prompt);
+  return parseJsonArray(cleaned) as KnowledgeFallbackItem[];
+}
+
 // 2단계 - 3차: 최종 확정된 상품의 "실제 쿠팡 1위 상품명"을 보고 알리바바
 // 검색어를 다시 만든다. 카테고리 단계에서 미리 만든 일반적인 영어
 // 키워드로는 실제로 잘 팔리는 상품의 구체적인 소재/디자인/기능이 반영이
