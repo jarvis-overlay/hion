@@ -21,7 +21,7 @@ async function callClaude(prompt: string): Promise<string> {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: 3000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -30,7 +30,20 @@ async function callClaude(prompt: string): Promise<string> {
     throw new Error(json?.error?.message || `Claude API 오류 (HTTP ${res.status})`);
   }
   const text = json.content?.[0]?.text || '';
-  return text.replace(/```json\s*|```\s*/g, '').trim();
+  return extractJson(text);
+}
+
+// Claude가 마크다운 코드블록으로 감싸거나 앞뒤에 설명 문장을 붙여서
+// 응답할 때가 있어서, 순수 텍스트 stripping만으로는 부족하다. 첫 '['와
+// 마지막 ']' 사이만 잘라내서 JSON.parse가 먹을 수 있게 만든다.
+function extractJson(text: string): string {
+  const cleaned = text.replace(/```json\s*|```\s*/g, '').trim();
+  const start = cleaned.indexOf('[');
+  const end = cleaned.lastIndexOf(']');
+  if (start !== -1 && end !== -1 && end > start) {
+    return cleaned.slice(start, end + 1);
+  }
+  return cleaned;
 }
 
 export type Season = 'summer' | 'winter' | 'all';
