@@ -75,9 +75,12 @@ export async function fetchCoupangBestsellers(
   keyword: string,
   limit = 8
 ): Promise<CoupangBestseller[]> {
+  // 실측 결과 쿠팡 응답이 정상적으로도 30초 가까이 걸릴 때가 많고,
+  // 여러 키워드를 동시에(병렬) 조회하면 존 안에서 대기가 걸려 더 오래
+  // 걸릴 수 있어서 넉넉하게 잡는다.
   const md = await unlockerMarkdown(
     `https://www.coupang.com/np/search?component=&q=${encodeURIComponent(keyword)}&sorter=saleCountDesc`,
-    { country: 'kr', timeoutMs: 25000 }
+    { country: 'kr', timeoutMs: 60000, retries: 1 }
   );
 
   const blockRe =
