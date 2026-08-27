@@ -186,19 +186,18 @@ export async function runCategoryRecommendation(
   }
 
   // 후보 카테고리 이름 그대로 쿠팡에서 실제 검색해서 시장규모/경쟁강도를
-  // 실측한다. 한꺼번에 다 쏘면 경합이 심해지므로 4개씩 배치 처리.
-  const CATEGORY_BATCH_SIZE = 4;
+  // 실측한다. 예전엔 4개씩 배치로 순차 처리했는데, 캡차 실패율이 높다
+  // 보니 순차 라운드가 늘어날수록 전체 시간만 늘고(서버리스 타임아웃
+  // 위험) 실패율은 그대로였다. 한 번에 다 병렬로 쏘는 게 총 소요 시간을
+  // (배치 수와 무관하게) 요청 1건의 최악 시간 수준으로 줄여준다.
   const coupangByCategory = new Map<string, CoupangBestseller[]>();
-  for (let i = 0; i < candidates.length; i += CATEGORY_BATCH_SIZE) {
-    const batch = candidates.slice(i, i + CATEGORY_BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map(async (c) => ({
-        category: c.category,
-        coupang: await fetchCoupangBestsellers(c.category, 5).catch(() => []),
-      }))
-    );
-    for (const r of batchResults) coupangByCategory.set(r.category, r.coupang);
-  }
+  const coupangCategoryResults = await Promise.all(
+    candidates.map(async (c) => ({
+      category: c.category,
+      coupang: await fetchCoupangBestsellers(c.category, 5).catch(() => []),
+    }))
+  );
+  for (const r of coupangCategoryResults) coupangByCategory.set(r.category, r.coupang);
 
   const badgesByCategory = new Map<string, MarketBadges>();
   const findings: CategoryFinding[] = candidates.map((c) => {
@@ -283,23 +282,20 @@ export async function runProductRecommendation(
     return { error: '검색어를 생성하지 못했어요.' };
   }
 
-  // 4개를 한꺼번에 병렬로 쏘면 같은 Bright Data 존 안에서 서로 경합해서
-  // 오히려 다 같이 실패하는 경우가 많았다. 3개씩 나눠서 순차 처리(배치
-  // 안에서는 병렬)하면 경합이 줄어든다. limit도 8로 늘려서 검색어당 더
-  // 풍부한 실제 상품 풀을 확보 - AI가 이 안에서 "진짜 메인 상품"을 골라야
-  // 하기 때문에 후보가 많을수록 좋다.
-  const COUPANG_BATCH_SIZE = 3;
-  const coupangResults: { keyword: string; coupang: CoupangBestseller[] }[] = [];
-  for (let i = 0; i < keywords.length; i += COUPANG_BATCH_SIZE) {
-    const batch = keywords.slice(i, i + COUPANG_BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map(async ({ ko }) => ({
-        keyword: ko,
-        coupang: await fetchCoupangBestsellers(ko, 8).catch(() => []),
-      }))
-    );
-    coupangResults.push(...batchResults);
-  }
+  // 예전엔 "한꺼번에 쏘면 다 같이 실패한다"고 보고 3개씩 순차 배치했는데,
+  // 실측해보니 그 "다 같이 실패"의 진짜 원인은 경합이 아니라 별도 버그
+  // (빈 응답을 성공으로 오판해서 재시도를 안 함, brightdata.ts에서 수정함)
+  // 였다. 버그를 고친 뒤 10개 동시 요청도 60%대로 정상 성공하는 걸
+  // 확인했으므로 순차 배치를 없애고 한 번에 병렬로 쏜다 - 총 소요 시간이
+  // 배치 수와 무관하게 요청 1건의 최악 시간 수준으로 줄어든다. limit도
+  // 8로 늘려서 검색어당 더 풍부한 실제 상품 풀을 확보 - AI가 이 안에서
+  // "진짜 메인 상품"을 골라야 하기 때문에 후보가 많을수록 좋다.
+  const coupangResults = await Promise.all(
+    keywords.map(async ({ ko }) => ({
+      keyword: ko,
+      coupang: await fetchCoupangBestsellers(ko, 8).catch(() => []),
+    }))
+  );
 
   // 쿠팡 스크래핑이 (캡차 차단 등으로) 후보 전부 실패했으면, 빈 결과를
   // 보여주는 대신 AI 일반 지식으로라도 추천한다 - "실시간 데이터 아님"을

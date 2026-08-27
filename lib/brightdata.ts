@@ -42,7 +42,11 @@ async function unlockerMarkdown(
 
       if (res.ok) {
         const text = await res.text();
-        if (!/captcha|protection page/i.test(text.slice(0, 200))) {
+        // 빈 응답(HTTP 200인데 바디가 없거나 너무 짧음)도 캡차/차단 페이지와
+        // 동일하게 실패로 취급해서 재시도한다. 예전엔 이 케이스를 놓쳐서
+        // "성공"으로 처리한 뒤 빈 마크다운을 그대로 반환 -> 파싱 결과가
+        // 항상 0건이 되는 버그가 있었다.
+        if (text.length >= 50 && !/captcha|protection page/i.test(text.slice(0, 200))) {
           return text;
         }
       }
