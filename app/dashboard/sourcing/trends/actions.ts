@@ -200,27 +200,6 @@ export async function runCategoryRecommendation(
     for (const r of batchResults) coupangByCategory.set(r.category, r.coupang);
   }
 
-  // 캡차 차단 등으로 조회 실패한 후보가 많으면 검증된 카테고리가 너무
-  // 적게 남는다. 실패한 후보만 골라서 한 번 더 재시도해서 보강한다 -
-  // 전체를 다시 돌리는 것보다 훨씬 빠르고, 이미 성공한 건 건드리지 않음.
-  const failedCandidates = candidates.filter(
-    (c) => (coupangByCategory.get(c.category) || []).length === 0
-  );
-  if (failedCandidates.length > 0) {
-    for (let i = 0; i < failedCandidates.length; i += CATEGORY_BATCH_SIZE) {
-      const batch = failedCandidates.slice(i, i + CATEGORY_BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map(async (c) => ({
-          category: c.category,
-          coupang: await fetchCoupangBestsellers(c.category, 5).catch(() => []),
-        }))
-      );
-      for (const r of batchResults) {
-        if (r.coupang.length > 0) coupangByCategory.set(r.category, r.coupang);
-      }
-    }
-  }
-
   const badgesByCategory = new Map<string, MarketBadges>();
   const findings: CategoryFinding[] = candidates.map((c) => {
     const coupang = coupangByCategory.get(c.category) || [];
@@ -320,27 +299,6 @@ export async function runProductRecommendation(
       }))
     );
     coupangResults.push(...batchResults);
-  }
-
-  // 캡차 차단 등으로 실패한 검색어만 골라서 한 번 더 재시도한다 - 전체가
-  // 다 실패했다고 바로 AI 일반 지식 폴백으로 넘어가면 실데이터 기반 추천
-  // 기회를 너무 쉽게 포기하는 셈이라, 실패한 것만 보강 시도한다.
-  const failedIdx = coupangResults
-    .map((r, i) => (r.coupang.length === 0 ? i : -1))
-    .filter((i) => i !== -1);
-  if (failedIdx.length > 0) {
-    for (let i = 0; i < failedIdx.length; i += COUPANG_BATCH_SIZE) {
-      const idxBatch = failedIdx.slice(i, i + COUPANG_BATCH_SIZE);
-      const batchResults = await Promise.all(
-        idxBatch.map(async (idx) => ({
-          idx,
-          coupang: await fetchCoupangBestsellers(coupangResults[idx].keyword, 8).catch(() => []),
-        }))
-      );
-      for (const r of batchResults) {
-        if (r.coupang.length > 0) coupangResults[r.idx].coupang = r.coupang;
-      }
-    }
   }
 
   // 쿠팡 스크래핑이 (캡차 차단 등으로) 후보 전부 실패했으면, 빈 결과를
