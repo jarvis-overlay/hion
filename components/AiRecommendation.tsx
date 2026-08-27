@@ -54,6 +54,7 @@ export default function AiRecommendation() {
   const [season, setSeason] = useState<Season>('summer');
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [categories, setCategories] = useState<CategoryRecommendation[] | null>(null);
+  const [seenCategories, setSeenCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [products, setProducts] = useState<ProductRecommendation[] | null>(null);
@@ -62,14 +63,16 @@ export default function AiRecommendation() {
   async function handleCategoryClick() {
     setLoadingCategories(true);
     setError(null);
-    setCategories(null);
     setProducts(null);
     setSelectedCategory(null);
     try {
-      const res = await runCategoryRecommendation(season);
+      const res = await runCategoryRecommendation(season, seenCategories);
       if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
       else if ('error' in res) setError(res.error);
-      else setCategories(res.categories);
+      else {
+        setCategories((prev) => [...(prev || []), ...res.categories]);
+        setSeenCategories((prev) => [...prev, ...res.categories.map((c) => c.category)]);
+      }
     } catch (e: any) {
       setError(e?.message || '오류가 발생했어요. 다시 시도해주세요.');
     } finally {
@@ -106,7 +109,10 @@ export default function AiRecommendation() {
         {SEASON_OPTIONS.map((opt) => (
           <button
             key={opt.value}
-            onClick={() => setSeason(opt.value)}
+            onClick={() => {
+              setSeason(opt.value);
+              setSeenCategories([]);
+            }}
             className={`rounded-full px-3.5 py-1.5 text-[14px] font-semibold transition ${
               season === opt.value
                 ? 'bg-accent text-white shadow-glow'
@@ -121,7 +127,11 @@ export default function AiRecommendation() {
           disabled={loadingCategories}
           className="btn-primary px-5 py-2.5 text-sm sm:ml-auto disabled:opacity-50"
         >
-          {loadingCategories ? '분석 중...' : '카테고리 추천받기'}
+          {loadingCategories
+            ? '분석 중...'
+            : seenCategories.length > 0
+            ? '다른 카테고리 더 보기'
+            : '카테고리 추천받기'}
         </button>
       </div>
 

@@ -127,12 +127,20 @@ export interface CategoryRecommendation {
 export async function recommendCategories(input: {
   season: Season;
   contextSummary: string | null;
+  excludeCategories?: string[];
 }): Promise<CategoryRecommendation[]> {
-  const { season, contextSummary } = input;
+  const { season, contextSummary, excludeCategories = [] } = input;
 
   const dataSection = contextSummary
     ? `아래는 참고할 실데이터입니다:\n\n${contextSummary}`
     : '(현재 연동된 실시간 데이터는 없습니다. 일반 지식으로 판단해주세요.)';
+
+  const excludeSection =
+    excludeCategories.length > 0
+      ? `\n**이미 이전에 추천했던 카테고리입니다 - 이것들과 겹치거나 비슷한 카테고리는 절대 다시 추천하지 마세요. 완전히 다른 새로운 카테고리를 찾아주세요**:\n${excludeCategories
+          .map((c) => `- ${c}`)
+          .join('\n')}\n`
+      : '';
 
   const prompt = `당신은 1인 이커머스 셀러(쿠팡 로켓그로스, 중국 알리바바/1688에서 소싱)의 소싱 컨설턴트입니다.
 
@@ -141,10 +149,10 @@ export async function recommendCategories(input: {
 **시즌 조건 (반드시 지킬 것)**: ${SEASON_RULE[season]}
 
 ${SOURCING_EXCLUSION_RULE}
-
+${excludeSection}
 ${dataSection}
 
-이 조건에 맞는, 지금 소싱하기 좋은 **카테고리(상품군)** 4~6개를 추천해주세요. "패션의류" 같은 너무 넓은 대분류 말고, "여름 휴대용 냉방 소품" "캠핑 조명용품" 처럼 실제로 무엇을 찾아야 할지 감이 오는 수준의 구체성으로 적어주세요. 단, "A/B", "A·B", "A 및 B" 처럼 서로 다른 상품 여러 개를 하나로 묶은 이름은 절대 쓰지 마세요 — 하나의 일관된 상품군이어야 합니다 (예: "수건걸이/샴푸디스펜서 세트" (X), "선풍기/가습기" (X) → "욕실 정리용품" (O)).
+이 조건에 맞는, 지금 소싱하기 좋은 **카테고리(상품군)** 8~10개를 최대한 다양하게(서로 겹치지 않는 여러 생활 영역에 걸쳐서) 추천해주세요. "패션의류" 같은 너무 넓은 대분류 말고, "여름 휴대용 냉방 소품" "캠핑 조명용품" 처럼 실제로 무엇을 찾아야 할지 감이 오는 수준의 구체성으로 적어주세요. 단, "A/B", "A·B", "A 및 B" 처럼 서로 다른 상품 여러 개를 하나로 묶은 이름은 절대 쓰지 마세요 — 하나의 일관된 상품군이어야 합니다 (예: "수건걸이/샴푸디스펜서 세트" (X), "선풍기/가습기" (X) → "욕실 정리용품" (O)).
 
 반드시 아래 JSON 배열 형식으로만 응답하세요:
 [

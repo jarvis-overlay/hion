@@ -70,7 +70,8 @@ async function fetchNaverTrendSummary(): Promise<string | null> {
 // 우리 스토어의 과거 판매 데이터는 일부러 근거로 안 쓴다 - 이미 팔던 걸
 // 근거 삼으면 새로운 소싱 기회를 찾는다는 목적과 순환논리가 되기 때문.
 export async function runCategoryRecommendation(
-  season: Season
+  season: Season,
+  excludeCategories: string[] = []
 ): Promise<{ categories: CategoryRecommendation[] } | { error: string }> {
   const naverSummary = await fetchNaverTrendSummary();
   const contextSummary = naverSummary
@@ -78,7 +79,7 @@ export async function runCategoryRecommendation(
     : null;
 
   try {
-    const categories = await recommendCategories({ season, contextSummary });
+    const categories = await recommendCategories({ season, contextSummary, excludeCategories });
     return { categories };
   } catch (e: any) {
     return { error: e?.message || String(e) };
