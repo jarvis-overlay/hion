@@ -5,8 +5,9 @@ import {
   runCategoryRecommendation,
   runProductRecommendation,
   type ProductRecommendation,
+  type CategoryRecommendation,
 } from '@/app/dashboard/sourcing/trends/actions';
-import type { CategoryRecommendation, Season } from '@/lib/ai';
+import type { Season } from '@/lib/ai';
 
 const SEASON_OPTIONS: { value: Season; label: string }[] = [
   { value: 'summer', label: '여름 시즌' },
@@ -142,29 +143,40 @@ export default function AiRecommendation() {
       {categories && categories.length > 0 && (
         <div className="mb-6">
           <p className="text-xs font-semibold text-inkSoft mb-2">
-            카테고리를 선택하면 구체 상품을 추천해드려요
+            쿠팡 실제 검색 데이터로 검증된 카테고리예요. 선택하면 구체 상품을
+            추천해드려요.
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {categories.map((c, i) => (
               <button
                 key={i}
                 onClick={() => handlePickCategory(c.category)}
-                title={c.reason}
-                className={`rounded-full px-3.5 py-1.5 text-[14px] font-semibold transition ${
+                className={`text-left rounded-xl p-3 transition ${
                   selectedCategory === c.category
-                    ? 'bg-accent text-white shadow-glow'
-                    : 'bg-white text-inkSoft ring-1 ring-paperLine hover:bg-paper'
+                    ? 'bg-accentBg ring-2 ring-accent'
+                    : 'bg-white ring-1 ring-paperLine hover:ring-accent'
                 }`}
               >
-                {c.category}
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-sm font-bold">{c.category}</span>
+                  {!c.verified && (
+                    <span className="text-[10px] text-inkSoft shrink-0">미검증</span>
+                  )}
+                </div>
+                {c.badges && (
+                  <div className="flex flex-wrap gap-1 mb-1.5">
+                    <Badge tier={MARKET_TIER_COLOR[c.badges.marketScaleTier]}>
+                      🔥 {c.badges.marketScaleLabel} (리뷰 {c.badges.topReviewCount.toLocaleString()})
+                    </Badge>
+                    <Badge tier={COMPETITION_TIER_COLOR[c.badges.competitionTier]}>
+                      ⚔️ 경쟁 {c.badges.competitionLabel}
+                    </Badge>
+                  </div>
+                )}
+                <p className="text-xs text-inkSoft leading-relaxed">{c.reason}</p>
               </button>
             ))}
           </div>
-          {selectedCategory && (
-            <p className="text-xs text-inkSoft mt-2">
-              {categories.find((c) => c.category === selectedCategory)?.reason}
-            </p>
-          )}
         </div>
       )}
 

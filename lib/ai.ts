@@ -122,8 +122,9 @@ export interface CategoryRecommendation {
   reason: string;
 }
 
-// 1단계: 시즌 + 우리 판매 데이터/네이버 트렌드(있으면)를 근거로 소싱하기
-// 좋은 카테고리 몇 개를 추천한다. 가벼운 호출 (스크래핑 없음).
+// 1단계 - 1차: 시즌 + 네이버 트렌드(되면)를 근거로 "검증해볼 후보"
+// 카테고리를 브레인스토밍한다. 아직 쿠팡 실데이터는 안 본 상태라
+// 최종 결과가 아니라 다음 단계(실데이터 검증)의 입력일 뿐이다.
 export async function recommendCategories(input: {
   season: Season;
   contextSummary: string | null;
@@ -167,14 +168,70 @@ ${dataSection}
   }
 }
 
+export type MarketScaleTier = 'very-high' | 'high' | 'mid' | 'low' | 'very-low';
+export type CompetitionTier = 'low' | 'mid' | 'high';
+
+export interface CategoryFinding {
+  category: string;
+  summary: string; // 그 카테고리명으로 실제 쿠팡 검색을 해본 결과 요약
+}
+
+export interface CategoryRecommendationDraft {
+  category: string; // 후보 목록의 category와 정확히 일치해야 함
+  reason: string; // 실데이터 근거 포함
+}
+
+// 1단계 - 2차: 브레인스토밍한 후보 카테고리마다 실제 쿠팡 검색을 해본
+// 결과를 근거로 최종 카테고리를 확정한다. "우리 주 채널은 쿠팡"이라는
+// 요청에 맞춰, 카테고리 단계부터 실데이터로 검증하도록 추가한 단계.
+export async function finalizeCategoryRecommendations(input: {
+  season: Season;
+  findings: CategoryFinding[];
+}): Promise<CategoryRecommendationDraft[]> {
+  const { season, findings } = input;
+
+  const findingsText = findings
+    .map((f) => `- "${f.category}": ${f.summary}`)
+    .join('\n');
+
+  const prompt = `당신은 1인 이커머스 셀러(쿠팡 로켓그로스, 중국 알리바바에서 소싱)의 소싱 컨설턴트입니다.
+
+시즌 조건: "${SEASON_LABEL[season]}"
+
+아래는 후보 카테고리마다 그 이름으로 쿠팡에서 실제 판매량순 검색을 해본 결과입니다 (다른 셀러 포함 시장 전체 데이터):
+${findingsText}
+
+**중요한 판단 기준**: 시장 규모는 목록 내 "리뷰 최다 상품"의 리뷰수 절대값으로 판단하세요:
+- 리뷰 3,000개 이상: 매우 큰 검증된 시장 / 1,000~3,000개: 확실한 수요 / 300~1,000개: 중간 규모 / 50~300개: 니치 시장 / 50개 미만: 시장이 거의 없음
+
+이 실데이터를 근거로 최종 카테고리를 선별하세요:
+- "쿠팡 조회 실패/데이터 없음"인 카테고리는 실데이터 검증이 안 된 것이므로 제외하세요 (단, 전부가 데이터 없음이면 예외적으로 원래 후보 그대로 반환해도 됩니다).
+- 시장 규모가 매우 작거나(리뷰 50개 미만) 상품 수가 극단적으로 많아(200개 이상, 이미 레드오션) 신규 진입이 무의미한 카테고리는 제외하세요.
+- reason에는 반드시 실제 수치(리뷰수, 상품수, 가격대)를 인용해서 왜 이 카테고리가 지금 유망한지 설명하세요. "~일 것 같다" 같은 추측이 아니라 데이터로 뒷받침하세요.
+- 후보 순서를 시장성이 좋은 순서대로 재배열하세요.
+
+category는 반드시 후보 목록에 있는 문자열과 정확히 동일해야 합니다 (지어내지 마세요).
+
+반드시 아래 JSON 배열 형식으로만 응답하세요:
+[{ "category": "후보 목록의 카테고리명 그대로", "reason": "실데이터 근거 (2~3문장)" }]`;
+
+  const cleaned = await callClaude(prompt);
+  try {
+    return parseJsonArray(cleaned);
+  } catch {
+    throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
+  }
+}
+
 export interface CandidateKeyword {
   ko: string; // 쿠팡 검색용 한글 키워드
   en: string; // 알리바바 검색용 영문 키워드
 }
 
-// 2단계 - 1차: 선택된 카테고리 안에서 실제로 검색해볼 만한 구체적인
-// 상품 키워드 후보를 뽑는다 (이후 이 키워드로 쿠팡/알리바바를 실제 조회).
-// 쿠팡은 한글, 알리바바는 영문 검색이 필요해서 둘 다 받는다.
+// 2단계 - 1차: 선택된 카테고리를 실제로 쿠팡에서 검색해서 커버할 "검색
+// 관점(facet)"을 뽑는다. 여기서 나오는 건 "추천 상품"이 아니라 그냥
+// 검색어일 뿐이다 - 진짜 상품 판단은 이 검색으로 나온 실제 목록을
+// 놓고 3단계(finalizeProductRecommendations)에서 한다.
 export async function suggestCandidateKeywords(input: {
   category: string;
   season: Season;
@@ -186,13 +243,13 @@ export async function suggestCandidateKeywords(input: {
 
 ${SOURCING_EXCLUSION_RULE}
 
-이 카테고리 안에서, 위 시즌 조건에 맞는 실제로 검색해볼 만한 **서로 다른 구체적인 상품** 6개를 뽑아주세요 (같은 상품의 변형이 아니라 실제로 다른 상품이어야 함). 브랜드명은 빼고 일반명사로 적어주세요.
+이 카테고리를 쿠팡에서 실제로 검색해서 폭넓게 커버하고 싶습니다. 서로 다른 하위 유형을 대표하는 **검색어** 4개를 뽑아주세요 (예를 들어 카테고리가 "욕실 정리용품"이면 "수건걸이", "샴푸 디스펜서", "코너 선반", "칫솔꽂이"처럼 카테고리 안의 서로 다른 하위 유형).
 
-**중요**: ko 키워드는 사람들이 쿠팡에 실제로 검색할 법한 **짧고 단일한** 검색어여야 합니다 (2~4단어). "A + B", "A·B", "A/B" 처럼 여러 상품을 조합하거나 나열한 키워드는 절대 만들지 마세요 — 이런 건 실제 검색 결과가 거의 안 나옵니다. 예를 들어 "수건걸이 + 샴푸 디스펜서 세트" (X) 대신 "욕실 수건걸이" (O)와 "샴푸 디스펜서" (O)처럼 각각 별개 후보로 나누세요.
+**중요**: ko 키워드는 사람들이 쿠팡에 실제로 검색할 법한 **짧고 단일한** 검색어여야 합니다 (2~4단어). "A + B", "A·B", "A/B" 처럼 여러 상품을 조합하거나 나열한 키워드는 절대 만들지 마세요 — 이런 건 실제 검색 결과가 거의 안 나옵니다.
 
-각 상품마다 두 가지 키워드가 필요합니다:
-- ko: 쿠팡/네이버쇼핑에 실제로 검색할 한글 키워드, 단일 상품명 (예: "목걸이선풍기", "캠핑 랜턴", "욕실 수건걸이")
-- en: 같은 상품을 alibaba.com에서 검색할 영문 키워드 (예: "neck fan", "camping lantern", "bathroom towel rack")
+각 검색어마다 두 가지 버전이 필요합니다:
+- ko: 쿠팡/네이버쇼핑에 실제로 검색할 한글 키워드 (예: "목걸이선풍기", "캠핑 랜턴", "욕실 수건걸이")
+- en: 같은 걸 alibaba.com에서 검색할 영문 키워드 (예: "neck fan", "camping lantern", "bathroom towel rack")
 
 반드시 아래 JSON 배열 형식으로만 응답하세요:
 [{ "ko": "한글키워드", "en": "english keyword" }]`;
@@ -207,12 +264,13 @@ ${SOURCING_EXCLUSION_RULE}
 
 export interface KeywordFinding {
   keyword: string;
-  coupangSummary: string; // "리뷰 5,047개, 순위 1위, 50,050원" 같은 요약
-  hasAlibaba: boolean;
+  productListText: string; // 실제 검색된 상품 목록 (여러 줄, 상품명+리뷰수+가격)
+  hasData: boolean;
 }
 
 export interface ProductRecommendationDraft {
-  keyword: string; // keywordFindings 중 하나의 keyword와 정확히 일치해야 함
+  keyword: string; // 어느 검색어에서 나왔는지 (badge/facet 조회용)
+  representativeProductName: string; // 실제 목록에 있는 상품명 그대로 - "진짜 메인 상품"
   displayName: string;
   reason: string;
   criteria: {
@@ -223,10 +281,10 @@ export interface ProductRecommendationDraft {
   caution: string;
 }
 
-// 2단계 - 2차: 실제 쿠팡/알리바바 조회 결과를 근거로 최종 추천을 확정한다.
-// 링크/가격 같은 사실 데이터는 AI가 아니라 실제 스크래핑 결과에서 그대로
-// 가져다 붙이므로(코드에서 매칭), AI는 keyword를 후보 중에서 정확히
-// 골라서 반환하기만 하면 된다 - 링크 환각을 원천 차단.
+// 2단계 - 2차: 검색어별로 실제 쿠팡에서 나온 진짜 상품 목록을 통째로
+// 주고, 그 안에서 "진짜 메인 상품"을 골라내게 한다 - AI가 상품을
+// 지어내는 게 아니라 실제 검색 결과 중에서 선택하는 것. 링크/가격 같은
+// 사실 데이터는 코드에서 정확히 일치하는 상품명으로 다시 찾아서 붙인다.
 export async function finalizeProductRecommendations(input: {
   category: string;
   season: Season;
@@ -235,37 +293,36 @@ export async function finalizeProductRecommendations(input: {
   const { category, season, findings } = input;
 
   const findingsText = findings
-    .map((f) => `- "${f.keyword}": ${f.coupangSummary}`)
+    .map((f) => `\n[검색어 "${f.keyword}"의 실제 쿠팡 판매량순 검색 결과]\n${f.productListText}`)
     .join('\n');
 
-  const prompt = `당신은 1인 이커머스 셀러의 소싱 컨설턴트입니다.
+  const prompt = `당신은 1인 이커머스 셀러의 소싱 컨설턴트입니다. 아래는 지어낸 게 아니라 실제로 쿠팡에서 검색해서 나온 진짜 상품 목록입니다 (다른 셀러 포함 시장 전체 데이터).
+${findingsText}
 
 카테고리: "${category}" / 시즌 조건: "${SEASON_LABEL[season]}"
 
-아래는 후보 키워드별로 쿠팡에서 실제 판매량순 검색을 해본 결과입니다 (다른 셀러 포함 시장 전체 데이터):
-${findingsText}
+**당신의 임무는 후보를 지어내는 게 아니라, 위 실제 목록 중에서 소싱할 가치가 있는 "진짜 메인 상품"을 찾아내는 것입니다.** 같은 상품의 색상/사이즈만 다른 변형은 하나로 묶고, 서로 다른 상품 유형 **최대 3개**만 엄선하세요 (많이 나열하지 말고 가장 유망한 것만 압축해서 고르세요).
 
-**중요한 판단 기준**: 쿠팡 "판매량순 1위"는 최근 판매 속도 기준이라 리뷰가 가장 많은 상품이 아닐 수 있습니다. 시장 규모는 반드시 목록 내 "리뷰 최다 상품"의 리뷰수 절대값으로 판단하세요 (판매량 1위 상품의 리뷰수가 아닙니다):
-- 리뷰 3,000개 이상: 매우 큰 검증된 시장
-- 리뷰 1,000~3,000개: 확실한 수요
-- 리뷰 300~1,000개: 중간 규모, 괜찮은 편
-- 리뷰 50~300개: 니치 시장, 신중하게 접근
-- 리뷰 50개 미만: 시장 자체가 거의 없다는 뜻 — 검색 결과 1위여도 "수요가 검증됐다"고 쓰면 안 됩니다. caution에 "시장이 매우 작다"고 명확히 경고하세요.
+**주의**: 검색 결과에는 검색어와 무관한 상품(광고/추천 알고리즘으로 섞여 들어온 다른 카테고리 상품)이 섞여 있을 수 있습니다. 카테고리 "${category}"와 명백히 관련 없는 상품(예: 가구/수납 카테고리에 전자기기가 섞여 있는 경우 등)은 절대 고르지 마세요.
 
-이 실데이터를 근거로 최종 추천을 골라주세요. **당신은 전문 소싱 컨설턴트로서 표면적인 "리뷰 많다/적다" 수준을 넘어서 분석해야 합니다**:
-- 데이터가 있는 후보는 웬만하면 다 포함시키세요 (약한 것도 caution으로 경고하며 포함). 한 카테고리에서 상품 하나만 나오는 것보다 여러 개를 폭넓게 보여주는 게 훨씬 유용합니다. 후보 전부가 "쿠팡 조회 실패/데이터 없음"일 때만 빈 배열을 반환하세요.
-- reason과 criteria는 단순히 숫자를 나열하지 말고, 그 숫자가 시사하는 시장 해석(왜 이 규모인지, 진입 타이밍이 왜 지금인지, 어떤 소비자 니즈를 반영하는지)까지 설명하세요.
-- criteria.competition에는 상품 개수/가격 분포를 보고 경쟁 강도를 판단하고, 어떻게 차별화해서 진입할지 구체적인 전략(가격/디자인/기능/번들 등)을 제시하세요.
+**중요한 판단 기준**: "판매량순 1위"는 최근 판매 속도 기준이라 리뷰가 가장 많은 상품이 아닐 수 있습니다. 시장 규모는 각 검색어 목록 내 "리뷰 최다 상품"의 리뷰수 절대값으로 판단하세요:
+- 리뷰 3,000개 이상: 매우 큰 검증된 시장 / 1,000~3,000개: 확실한 수요 / 300~1,000개: 중간 규모 / 50~300개: 니치 시장 / 50개 미만: 시장이 거의 없음 — 이 경우 caution에 명확히 경고하세요.
 
-**후보 중 액체/젤/스프레이형 제품, 화장품, 식품, 리튬배터리 내장 전자기기가 있다면 통관/위험물 규제 문제로 소싱이 어려우니 제외하세요.**
+**당신은 전문 소싱 컨설턴트로서 표면적인 "리뷰 많다/적다" 수준을 넘어서 분석해야 합니다**:
+- 데이터가 있는 검색어는 웬만하면 다 활용하세요 (약해도 caution으로 경고하며 포함). "쿠팡 조회 실패/데이터 없음"인 검색어만 건너뛰세요. 전부 데이터 없으면 빈 배열을 반환하세요.
+- reason과 criteria는 단순 숫자 나열이 아니라, 그 숫자가 시사하는 시장 해석(왜 이 규모인지, 진입 타이밍이 왜 지금인지, 어떤 소비자 니즈를 반영하는지)까지 설명하세요.
+- criteria.competition에는 목록의 상품 개수/가격 분포를 보고 경쟁 강도를 판단하고, 구체적인 차별화/진입 전략(가격/디자인/기능/번들 등)을 제시하세요.
 
-keyword는 반드시 위 후보 목록에 있는 문자열과 정확히 동일해야 합니다 (지어내지 마세요).
+**액체/젤/스프레이형 제품, 화장품, 식품, 리튬배터리 내장 전자기기는 통관/위험물 규제 문제로 소싱이 어려우니 목록에 있어도 고르지 마세요.**
+
+representativeProductName은 반드시 위 목록에 실제로 있는 상품명과 **정확히 동일한 문자열**이어야 합니다 (지어내거나 요약하지 마세요). keyword는 그 상품이 어느 검색어 목록에서 나왔는지 표시하세요.
 
 반드시 아래 JSON 배열 형식으로만 응답하세요:
 [
   {
-    "keyword": "후보 목록의 키워드 그대로",
-    "displayName": "고객에게 보여줄 상품명 (키워드보다 자연스럽게)",
+    "keyword": "그 상품이 나온 검색어",
+    "representativeProductName": "위 목록에 있는 실제 상품명 그대로",
+    "displayName": "고객에게 보여줄 상품명 (더 자연스럽게 다듬어도 됨)",
     "reason": "왜 이걸 추천하는지, 시장 해석 포함 (2~3문장)",
     "criteria": {
       "demand": "쿠팡 실데이터 근거 + 그게 의미하는 수요 해석 (구체적 수치 인용)",
