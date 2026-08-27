@@ -202,8 +202,9 @@ export async function runCategoryRecommendation(
 
   // 캡차로 실패한 후보만 골라서, 시간이 충분히 남아있을 때만 한 번 더
   // 재시도해서 검증된 카테고리 수를 보강한다. 시간이 부족하면 건너뛰어서
-  // 서버리스 타임아웃 위험을 피한다.
-  const CATEGORY_STAGE_BUDGET_MS = 550000;
+  // 서버리스 타임아웃 위험을 피한다. (실측: 재시도 없이도 전체 171초
+  // 수준이라 300초 한도 안에서 재시도 여유가 있음)
+  const CATEGORY_STAGE_BUDGET_MS = 270000;
   const CATEGORY_RETRY_WORST_CASE_MS = 90000;
   const failedCandidates = candidates.filter(
     (c) => (coupangByCategory.get(c.category) || []).length === 0
@@ -295,7 +296,6 @@ export async function runProductRecommendation(
   category: string,
   season: Season
 ): Promise<{ recommendations: ProductRecommendation[] } | { error: string }> {
-  const stageStart = Date.now();
   let keywords: { ko: string; en: string }[];
   try {
     keywords = (await suggestCandidateKeywords({ category, season })).slice(0, 4);
@@ -315,33 +315,16 @@ export async function runProductRecommendation(
   // 배치 수와 무관하게 요청 1건의 최악 시간 수준으로 줄어든다. limit도
   // 8로 늘려서 검색어당 더 풍부한 실제 상품 풀을 확보 - AI가 이 안에서
   // "진짜 메인 상품"을 골라야 하기 때문에 후보가 많을수록 좋다.
-  let coupangResults = await Promise.all(
+  // 실측 결과 이 단계 이후(finalize/알리바바 조회/번역)까지 포함해서
+  // 정상 케이스도 280초 안팎으로 300초 한도에 거의 붙어있어서, 여기서
+  // 실패 후 재시도를 넣을 시간 여유가 없다. 재시도는 안 하고 대신
+  // 아래에서 알리바바 조회 자체의 최악 시간을 줄여서 여유를 확보한다.
+  const coupangResults = await Promise.all(
     keywords.map(async ({ ko }) => ({
       keyword: ko,
       coupang: await fetchCoupangBestsellers(ko, 8).catch(() => []),
     }))
   );
-
-  // 캡차 확률상 4개가 동시에 다 실패하는 경우도 드물게 생긴다. 이후
-  // 단계(알리바바 조회까지)에 쓸 시간이 충분히 남아있을 때만 한 번
-  // 통째로 재시도한다 - 시간이 부족하면 재시도 없이 바로 폴백으로
-  // 넘어가서 타임아웃 위험을 피한다.
-  // 재시도 이후에도 finalize/refineAlibabaSearchTerms/알리바바 조회/번역
-  // 단계가 더 남아있어서, 재시도 자체의 최악 시간(~135초)뿐 아니라 그
-  // 이후 단계 최악 시간(~200초)까지 합쳐서 버퍼를 잡아야 안전하다.
-  const STAGE_BUDGET_MS = 550000;
-  const RETRY_WORST_CASE_MS = 340000;
-  if (
-    coupangResults.every((r) => r.coupang.length === 0) &&
-    Date.now() - stageStart < STAGE_BUDGET_MS - RETRY_WORST_CASE_MS
-  ) {
-    coupangResults = await Promise.all(
-      keywords.map(async ({ ko }) => ({
-        keyword: ko,
-        coupang: await fetchCoupangBestsellers(ko, 8).catch(() => []),
-      }))
-    );
-  }
 
   // 쿠팡 스크래핑이 (캡차 차단 등으로) 후보 전부 실패했으면, 빈 결과를
   // 보여주는 대신 AI 일반 지식으로라도 추천한다 - "실시간 데이터 아님"을

@@ -139,10 +139,14 @@ export async function fetchAlibabaProducts(
   limit = 3
 ): Promise<AlibabaProduct[]> {
   // 알리바바는 봇 차단이 강해서 정상 응답도 60초 가까이 걸릴 수 있다.
-  // 실패율이 꽤 있어서(캡차/타임아웃) 재시도를 1회 건다.
+  // 재시도를 완전히 없애봤더니(최악 75초) 소싱 링크가 통째로 안 나오는
+  // 경우가 늘어서, timeoutMs를 60초로 줄이는 대신 재시도는 1회 유지해서
+  // 최악 시간을 120초로 눌렀다(원래 150초). 상품 추천 파이프라인 전체가
+  // 300초 한도에 붙어있어서(재시도 없앤 버전 실측 229초) 이 정도면
+  // 여유 안에서 재시도 효과를 살릴 수 있다.
   const md = await unlockerMarkdown(
     `https://www.alibaba.com/trade/search?SearchText=${encodeURIComponent(keyword)}`,
-    { country: 'us', timeoutMs: 75000, retries: 1 }
+    { country: 'us', timeoutMs: 60000, retries: 1 }
   );
 
   const headingRe = /^## \[(.+?)\]\((\/\/www\.alibaba\.com\/product-detail\/[^)]+)\)/gm;

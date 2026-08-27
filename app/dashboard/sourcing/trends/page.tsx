@@ -2,10 +2,11 @@ import AiRecommendation from '@/components/AiRecommendation';
 import TrendForm from '@/components/TrendForm';
 
 // 상품 추천 단계에서 쿠팡/알리바바를 실시간으로 여러 번 조회하느라
-// 기본 서버리스 타임아웃을 넘길 수 있다. 실측 결과 정상 케이스도 280초
-// 가까이 걸려서(300초 한도의 20초 밖에 여유가 없었음) 상한 자체를
-// 크게 올려서 여유를 확보함. 캡차로 인한 재시도까지 감안한 값.
-export const maxDuration = 600;
+// 기본 서버리스 타임아웃을 넘길 수 있다. 600/800으로 올려 배포해봤더니
+// 플랜 한도(300초) 초과로 배포 자체가 거부됐다 - 이 값을 더 못 올리므로
+// 아래 알리바바 재시도 제거 등으로 파이프라인 최악 소요 시간을 줄여서
+// 300초 안에 맞추는 쪽으로 대응함.
+export const maxDuration = 300;
 
 export default function TrendsPage() {
   return (
