@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
-export async function addSourcingPost(formData: FormData) {
+export async function addSourcingItem(formData: FormData) {
   const supabase = createClient();
   const {
     data: { user },
@@ -11,19 +11,21 @@ export async function addSourcingPost(formData: FormData) {
   if (!user) return;
 
   const title = String(formData.get('title') || '').trim();
-  const source_url = String(formData.get('source_url') || '').trim();
+  const link = String(formData.get('link') || '').trim();
   const price = formData.get('price') ? Number(formData.get('price')) : null;
+  const cost = formData.get('cost') ? Number(formData.get('cost')) : null;
   const moq = String(formData.get('moq') || '').trim();
-  const notes = String(formData.get('notes') || '').trim();
+  const content = String(formData.get('content') || '').trim();
 
   if (!title) return;
 
-  await supabase.from('sourcing_posts').insert({
+  await supabase.from('sourcing_items').insert({
     title,
-    source_url: source_url || null,
+    link: link || null,
     price,
+    cost,
     moq: moq || null,
-    notes: notes || null,
+    content: content || null,
     author_email: user.email,
   });
 
@@ -32,12 +34,18 @@ export async function addSourcingPost(formData: FormData) {
 
 export async function updateSourcingStatus(id: string, status: string) {
   const supabase = createClient();
-  await supabase.from('sourcing_posts').update({ status }).eq('id', id);
+  await supabase.from('sourcing_items').update({ status }).eq('id', id);
   revalidatePath('/dashboard/sourcing/list');
 }
 
-export async function deleteSourcingPost(id: string) {
+export async function updateSourcingStage(id: string, stage: string) {
   const supabase = createClient();
-  await supabase.from('sourcing_posts').delete().eq('id', id);
+  await supabase.from('sourcing_items').update({ stage }).eq('id', id);
+  revalidatePath('/dashboard/sourcing/list');
+}
+
+export async function deleteSourcingItem(id: string) {
+  const supabase = createClient();
+  await supabase.from('sourcing_items').delete().eq('id', id);
   revalidatePath('/dashboard/sourcing/list');
 }

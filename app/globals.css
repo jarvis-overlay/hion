@@ -63,12 +63,28 @@ h1, h2, h3, .font-display {
   font-weight: 700;
 }
 .nav-section-label {
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 14px;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  color: #C1C4CC;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  color: #4B5563;
   padding: 0 12px;
   margin-top: 22px;
   margin-bottom: 8px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.nav-section-label:hover {
+  color: #1F2430;
+}
+.nav-section-chevron {
+  font-size: 10px;
+  color: #C1C4CC;
+  transition: transform 0.15s ease;
+}
+.nav-section-chevron.open {
+  transform: rotate(90deg);
 }

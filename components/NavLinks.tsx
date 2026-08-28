@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -15,9 +16,9 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
   {
     label: '소싱',
     items: [
-      { href: '/dashboard/sourcing/info', label: '소싱 정보' },
-      { href: '/dashboard/sourcing/list', label: '소싱 리스트' },
-      { href: '/dashboard/sourcing/trends', label: '트렌드 발굴' },
+      { href: '/dashboard/sourcing/list', label: '소싱' },
+      { href: '/dashboard/sourcing/trends', label: 'AI 소싱 추천' },
+      { href: '/dashboard/sourcing/compare', label: '키워드 리서치' },
     ],
   },
   {
@@ -41,31 +42,63 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
 
 export default function NavLinks() {
   const pathname = usePathname();
+  // 그룹 안에 현재 활성 링크가 있으면 그 그룹은 강제로 펼쳐서 보여줘야
+  // 하므로, 접힘 상태는 "닫힌 그룹" 집합으로 관리한다 (기본은 전부 열림).
+  const [closedGroups, setClosedGroups] = useState<Set<string>>(new Set());
+
+  function isGroupActive(group: (typeof GROUPS)[number]) {
+    return group.items.some((item) =>
+      item.href === '/dashboard' ? pathname === '/dashboard' : pathname?.startsWith(item.href)
+    );
+  }
+
+  function toggleGroup(label: string) {
+    setClosedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
 
   return (
     <nav className="flex-1 px-3">
-      {GROUPS.map((group, i) => (
-        <div key={i}>
-          {group.label && <div className="nav-section-label">{group.label}</div>}
-          <div className="flex flex-col gap-0.5">
-            {group.items.map((item) => {
-              const isActive =
-                item.href === '/dashboard'
-                  ? pathname === '/dashboard'
-                  : pathname?.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`nav-link ${isActive ? 'active' : ''}`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
+      {GROUPS.map((group, i) => {
+        const isOpen = !group.label || !closedGroups.has(group.label) || isGroupActive(group);
+        return (
+          <div key={i}>
+            {group.label && (
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.label!)}
+                className="nav-section-label"
+              >
+                <span>{group.label}</span>
+                <span className={`nav-section-chevron ${isOpen ? 'open' : ''}`}>▸</span>
+              </button>
+            )}
+            {isOpen && (
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((item) => {
+                  const isActive =
+                    item.href === '/dashboard'
+                      ? pathname === '/dashboard'
+                      : pathname?.startsWith(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`nav-link ${isActive ? 'active' : ''}`}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </nav>
   );
 }

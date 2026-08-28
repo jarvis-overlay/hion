@@ -113,6 +113,51 @@ export async function fetchShoppingKeywordTrend({
   });
 }
 
+export interface NaverShoppingItem {
+  title: string;
+  link: string;
+  image: string | null;
+  lprice: string | null; // 최저가
+  mallName: string | null;
+  productType: string | null;
+}
+
+// 네이버쇼핑 검색 API (데이터랩과는 다른 API - 같은 애플리케이션의 별도
+// 권한이라 데이터랩이 막혀있어도 이건 될 수 있고, 반대도 가능함). 실제
+// 판매중인 상품 목록을 준다 - 키워드 하나로 유사 상품을 찾을 때 씀.
+export async function searchNaverShopping(
+  query: string,
+  display = 10
+): Promise<NaverShoppingItem[]> {
+  const clientId = requireEnv('NAVER_CLIENT_ID');
+  const clientSecret = requireEnv('NAVER_CLIENT_SECRET');
+
+  const res = await fetch(
+    `https://openapi.naver.com/v1/search/shop.json?query=${encodeURIComponent(query)}&display=${display}&sort=sim`,
+    {
+      headers: {
+        'X-Naver-Client-Id': clientId,
+        'X-Naver-Client-Secret': clientSecret,
+      },
+      cache: 'no-store',
+    }
+  );
+
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json?.errorMessage || `네이버 쇼핑 검색 오류 (HTTP ${res.status})`);
+  }
+
+  return (json.items || []).map((it: any) => ({
+    title: String(it.title || '').replace(/<\/?b>/g, ''),
+    link: it.link,
+    image: it.image || null,
+    lprice: it.lprice || null,
+    mallName: it.mallName || null,
+    productType: it.productType || null,
+  }));
+}
+
 // 자주 쓰는 네이버쇼핑 대분류 카테고리 코드 (쇼핑인사이트 API용)
 export const SHOPPING_CATEGORIES = [
   { code: '50000000', name: '패션의류' },

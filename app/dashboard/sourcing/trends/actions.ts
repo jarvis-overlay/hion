@@ -4,8 +4,10 @@ import {
   fetchSearchTrend,
   fetchShoppingCategoryTrend,
   fetchShoppingKeywordTrend,
+  searchNaverShopping,
   SHOPPING_CATEGORIES,
   type TimeUnit,
+  type NaverShoppingItem,
 } from '@/lib/naver';
 import {
   recommendCategories,
@@ -568,4 +570,42 @@ export async function runCoupangSnapshot(
   );
 
   return Object.fromEntries(entries);
+}
+
+export interface ProductSearchResult {
+  coupang: CoupangSnapshotItem[];
+  naver: NaverShoppingItem[];
+  coupangError: string | null;
+  naverError: string | null;
+}
+
+// 키워드 하나로 쿠팡/네이버 각각에서 실제 판매중인 유사 상품을 따로
+// 찾아준다 (트렌드 추이가 아니라 지금 팔리고 있는 진짜 상품 목록).
+// 둘 중 하나가 실패해도(캡차/네이버 권한 이슈 등) 나머지 결과는 보여준다.
+export async function runProductSearch(keyword: string): Promise<ProductSearchResult> {
+  const q = keyword.trim();
+  if (!q) {
+    return { coupang: [], naver: [], coupangError: null, naverError: null };
+  }
+
+  const [coupangResult, naverResult] = await Promise.allSettled([
+    fetchCoupangBestsellers(q, 10),
+    searchNaverShopping(q, 10),
+  ]);
+
+  return {
+    coupang:
+      coupangResult.status === 'fulfilled'
+        ? coupangResult.value.map((c) => ({
+            name: c.name,
+            price: c.price,
+            reviewCount: c.reviewCount,
+            url: c.url,
+            imageUrl: c.imageUrl,
+          }))
+        : [],
+    naver: naverResult.status === 'fulfilled' ? naverResult.value : [],
+    coupangError: coupangResult.status === 'rejected' ? String(coupangResult.reason?.message || coupangResult.reason) : null,
+    naverError: naverResult.status === 'rejected' ? String(naverResult.reason?.message || naverResult.reason) : null,
+  };
 }
