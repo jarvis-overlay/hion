@@ -42,15 +42,11 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
 
 export default function NavLinks() {
   const pathname = usePathname();
-  // 그룹 안에 현재 활성 링크가 있으면 그 그룹은 강제로 펼쳐서 보여줘야
-  // 하므로, 접힘 상태는 "닫힌 그룹" 집합으로 관리한다 (기본은 전부 열림).
+  // 접힘 상태는 "닫힌 그룹" 집합으로 관리한다 (기본은 전부 열림). 예전엔
+  // 현재 보고 있는 페이지가 속한 그룹을 강제로 펼쳐놨는데, 그러면 그
+  // 페이지를 보는 동안은 접기 버튼을 눌러도 아무 반응이 없는 것처럼
+  // 보이는 버그가 있었다 - 그냥 사용자가 누른 상태를 그대로 따른다.
   const [closedGroups, setClosedGroups] = useState<Set<string>>(new Set());
-
-  function isGroupActive(group: (typeof GROUPS)[number]) {
-    return group.items.some((item) =>
-      item.href === '/dashboard' ? pathname === '/dashboard' : pathname?.startsWith(item.href)
-    );
-  }
 
   function toggleGroup(label: string) {
     setClosedGroups((prev) => {
@@ -64,7 +60,7 @@ export default function NavLinks() {
   return (
     <nav className="flex-1 px-3">
       {GROUPS.map((group, i) => {
-        const isOpen = !group.label || !closedGroups.has(group.label) || isGroupActive(group);
+        const isOpen = !group.label || !closedGroups.has(group.label);
         return (
           <div key={i}>
             {group.label && (

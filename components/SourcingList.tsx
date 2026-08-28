@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useMemo, useRef, useState, useTransition } from 'react';
 import {
   updateSourcingStatus,
   updateSourcingStage,
+  updateSourcingItem,
   deleteSourcingItem,
 } from '@/app/dashboard/sourcing/list/actions';
 
@@ -29,19 +30,26 @@ const STAGE_STYLE: Record<string, string> = {
   confirmed: 'bg-accentBg text-accent ring-1 ring-inset ring-accent/20',
 };
 
-// 마진 계산기(components/MarginCalculator.tsx)와 같은 공식 - 쿠팡
-// 기본 수수료율(10.8%)만 반영한 단순화 버전. 배송비/광고비 등 세부
-// 비용까지 반영한 정확한 계산은 마진 계산기에서 따로 하면 된다.
-const DEFAULT_FEE_RATE = 10.8;
+const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
-function computeMarginPct(price: number | null, cost: number | null): number | null {
-  if (price == null || price <= 0) return null;
-  const c = cost ?? 0;
-  const fee = price * (DEFAULT_FEE_RATE / 100);
-  const outputVat = price * 0.1;
+// 마진 계산기(components/MarginCalculator.tsx)와 완전히 동일한 공식.
+// 쿠폰 할인, 매입원가, 수수료율, 배송비, 광고비, 기타비용까지 전부
+// 반영해서 정확하게 계산한다.
+function computeMargin(it: any) {
+  const lp = it.price ?? 0;
+  const cp = it.coupon ?? 0;
+  const p = Math.max(0, lp - cp);
+  const c = it.cost ?? 0;
+  const fr = it.fee_rate ?? 10.8;
+  const s = it.shipping ?? 0;
+  const a = it.ad_cost ?? 0;
+  const e = it.etc_cost ?? 0;
+  const fee = p * (fr / 100);
+  const outputVat = p * 0.1;
   const importVat = c * 0.1;
-  const profit = price - outputVat - c + importVat - fee;
-  return (profit / price) * 100;
+  const profit = p - outputVat - c + importVat - fee - s - a - e;
+  const marginPct = lp > 0 ? (profit / p) * 100 : null;
+  return { lp, cp, p, c, fr, s, a, e, fee, outputVat, importVat, profit, marginPct };
 }
 
 function marginBadgeClass(pct: number) {
@@ -61,18 +69,137 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'margin_asc', label: '마진율 낮은순' },
 ];
 
+function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [isPending, startTransition] = useTransition();
+
+  return (
+    <form
+      ref={formRef}
+      action={(fd) =>
+        startTransition(async () => {
+          await updateSourcingItem(item.id, fd);
+          onDone();
+        })
+      }
+      className="grid gap-3"
+    >
+      <input
+        name="title"
+        defaultValue={item.title}
+        required
+        className="border border-paperLine bg-white px-3 py-2 text-sm"
+      />
+      <input
+        name="link"
+        defaultValue={item.link || ''}
+        placeholder="소싱 링크"
+        className="border border-paperLine bg-white px-3 py-2 text-sm"
+      />
+      <div className="grid grid-cols-3 gap-3">
+        <input
+          name="price"
+          type="number"
+          step="0.01"
+          defaultValue={item.price ?? ''}
+          placeholder="판매가"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          name="cost"
+          type="number"
+          step="0.01"
+          defaultValue={item.cost ?? ''}
+          placeholder="매입 원가"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          name="moq"
+          defaultValue={item.moq || ''}
+          placeholder="MOQ"
+          className="border border-paperLine bg-white px-3 py-2 text-sm"
+        />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <input
+          name="coupon"
+          type="number"
+          step="0.01"
+          defaultValue={item.coupon ?? ''}
+          placeholder="쿠폰 할인액"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          name="fee_rate"
+          type="number"
+          step="0.01"
+          defaultValue={item.fee_rate ?? 10.8}
+          placeholder="수수료율 %"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          name="shipping"
+          type="number"
+          step="0.01"
+          defaultValue={item.shipping ?? ''}
+          placeholder="배송비"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          name="ad_cost"
+          type="number"
+          step="0.01"
+          defaultValue={item.ad_cost ?? ''}
+          placeholder="광고비"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+      </div>
+      <input
+        name="etc_cost"
+        type="number"
+        step="0.01"
+        defaultValue={item.etc_cost ?? ''}
+        placeholder="기타 비용"
+        className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+      />
+      <textarea
+        name="content"
+        defaultValue={item.content || ''}
+        placeholder="메모"
+        rows={2}
+        className="border border-paperLine bg-white px-3 py-2 text-sm"
+      />
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={isPending}
+          className="btn-primary px-4 py-2 text-xs font-semibold disabled:opacity-50"
+        >
+          {isPending ? '저장 중...' : '저장'}
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="px-4 py-2 text-xs font-semibold text-inkSoft ring-1 ring-paperLine rounded"
+        >
+          취소
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function SourcingList({ items }: { items: any[] }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const rows = useMemo(() => {
-    const withMargin = items.map((it) => ({
-      ...it,
-      marginPct: computeMarginPct(it.price, it.cost),
-    }));
+    const withMargin = items.map((it) => ({ ...it, margin: computeMargin(it) }));
 
     const q = search.trim().toLowerCase();
     const filtered = withMargin.filter((it) => {
@@ -95,9 +222,9 @@ export default function SourcingList({ items }: { items: any[] }) {
         case 'price_asc':
           return (a.price ?? Infinity) - (b.price ?? Infinity);
         case 'margin_desc':
-          return (b.marginPct ?? -Infinity) - (a.marginPct ?? -Infinity);
+          return (b.margin.marginPct ?? -Infinity) - (a.margin.marginPct ?? -Infinity);
         case 'margin_asc':
-          return (a.marginPct ?? Infinity) - (b.marginPct ?? Infinity);
+          return (a.margin.marginPct ?? Infinity) - (b.margin.marginPct ?? Infinity);
         case 'created_desc':
         default:
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -157,6 +284,18 @@ export default function SourcingList({ items }: { items: any[] }) {
           {rows.map((it) => {
             const status = it.status || 'checking';
             const stage = it.stage || 'candidate';
+            const m = it.margin;
+            const isEditing = editingId === it.id;
+            const isMarginExpanded = expandedMarginId === it.id;
+
+            if (isEditing) {
+              return (
+                <div key={it.id} className="p-4">
+                  <EditForm item={it} onDone={() => setEditingId(null)} />
+                </div>
+              );
+            }
+
             return (
               <div key={it.id} className="p-4 flex flex-col gap-2">
                 <div className="flex items-start justify-between gap-2">
@@ -173,12 +312,13 @@ export default function SourcingList({ items }: { items: any[] }) {
                       >
                         {STAGE_LABEL[stage]}
                       </span>
-                      {it.marginPct != null && (
-                        <span
-                          className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${marginBadgeClass(it.marginPct)}`}
+                      {m.marginPct != null && (
+                        <button
+                          onClick={() => setExpandedMarginId(isMarginExpanded ? null : it.id)}
+                          className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${marginBadgeClass(m.marginPct)}`}
                         >
-                          마진 {it.marginPct.toFixed(1)}%
-                        </span>
+                          마진 {m.marginPct.toFixed(1)}% {isMarginExpanded ? '▲' : '▼'}
+                        </button>
                       )}
                     </div>
                     {it.link && (
@@ -200,6 +340,39 @@ export default function SourcingList({ items }: { items: any[] }) {
                   {it.moq && <span>MOQ {it.moq}</span>}
                 </div>
 
+                {isMarginExpanded && m.marginPct != null && (
+                  <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs bg-paper rounded-md px-3 py-2">
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-inkSoft">실판매가</dt>
+                      <dd className="font-mono">{fmt(m.p)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-inkSoft">매입원가</dt>
+                      <dd className="font-mono">{fmt(m.c)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-inkSoft">수수료 ({m.fr}%)</dt>
+                      <dd className="font-mono">-{fmt(m.fee)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-inkSoft">매출부가세</dt>
+                      <dd className="font-mono">-{fmt(m.outputVat)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-inkSoft">매입부가세 환급</dt>
+                      <dd className="font-mono">+{fmt(m.importVat)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-inkSoft">배송·광고·기타</dt>
+                      <dd className="font-mono">-{fmt(m.s + m.a + m.e)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-2 col-span-2 sm:col-span-3 pt-1 border-t border-paperLine font-semibold">
+                      <dt>순이익</dt>
+                      <dd className="font-mono">{fmt(m.profit)}</dd>
+                    </div>
+                  </dl>
+                )}
+
                 {it.content && <p className="text-xs text-ink">{it.content}</p>}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
@@ -207,7 +380,7 @@ export default function SourcingList({ items }: { items: any[] }) {
                     {it.author_email?.split('@')[0]} ·{' '}
                     {new Date(it.created_at).toLocaleDateString('ko-KR')}
                   </span>
-                  <div className="flex gap-2 text-xs">
+                  <div className="flex gap-2 text-xs items-center">
                     <select
                       value={stage}
                       disabled={isPending}
@@ -231,6 +404,9 @@ export default function SourcingList({ items }: { items: any[] }) {
                       <option value="ordered">발주완료</option>
                       <option value="hold">보류</option>
                     </select>
+                    <button onClick={() => setEditingId(it.id)} className="text-inkSoft hover:text-ink">
+                      수정
+                    </button>
                     <button
                       onClick={() => startTransition(() => deleteSourcingItem(it.id))}
                       className="text-inkSoft hover:text-red-700"
