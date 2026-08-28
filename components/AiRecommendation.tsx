@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   runCategoryRecommendation,
   runProductRecommendation,
@@ -60,6 +60,11 @@ export default function AiRecommendation() {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [products, setProducts] = useState<ProductRecommendation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 카테고리를 연달아 클릭하면(예: 잘못 누르고 바로 다른 걸 누름) 두
+  // 요청이 동시에 진행되다가 먼저 누른 요청이 나중에 끝나면 그 결과로
+  // 화면이 덮어써지는 경쟁 상태가 있었다. 클릭마다 토큰을 새로 발급해서
+  // 응답이 왔을 때 여전히 최신 클릭인지 확인 후에만 반영한다.
+  const pickRequestRef = useRef(0);
 
   async function handleCategoryClick() {
     setLoadingCategories(true);
@@ -82,19 +87,22 @@ export default function AiRecommendation() {
   }
 
   async function handlePickCategory(category: string) {
+    const requestId = ++pickRequestRef.current;
     setSelectedCategory(category);
     setLoadingProducts(true);
     setError(null);
     setProducts(null);
     try {
       const res = await runProductRecommendation(category, season);
+      if (pickRequestRef.current !== requestId) return; // 그 사이 다른 카테고리를 클릭함 - 이 응답은 버림
       if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
       else if ('error' in res) setError(res.error);
       else setProducts(res.recommendations);
     } catch (e: any) {
+      if (pickRequestRef.current !== requestId) return;
       setError(e?.message || '오류가 발생했어요. 다시 시도해주세요.');
     } finally {
-      setLoadingProducts(false);
+      if (pickRequestRef.current === requestId) setLoadingProducts(false);
     }
   }
 
