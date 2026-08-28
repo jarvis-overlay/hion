@@ -7,7 +7,9 @@ export async function addMarginEntry(data: {
   name: string;
   price: number;
   cost: number;
-  fee_rate: number;
+  output_vat: number;
+  import_vat: number;
+  coupang_fee: number;
   shipping: number;
   ad_cost: number;
   etc_cost: number;

@@ -83,11 +83,24 @@ export default function SourcingForm() {
                 className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
               />
               <input
-                name="fee_rate"
+                name="output_vat"
                 type="number"
                 step="0.01"
-                defaultValue="10.8"
-                placeholder="수수료율 %"
+                placeholder="매출부가세"
+                className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+              />
+              <input
+                name="import_vat"
+                type="number"
+                step="0.01"
+                placeholder="매입부가세"
+                className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+              />
+              <input
+                name="coupang_fee"
+                type="number"
+                step="0.01"
+                placeholder="쿠팡수수료"
                 className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
               />
               <input
@@ -109,7 +122,7 @@ export default function SourcingForm() {
                 type="number"
                 step="0.01"
                 placeholder="기타 비용"
-                className="border border-paperLine bg-white px-3 py-2 text-sm font-mono col-span-2 sm:col-span-1"
+                className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
               />
             </div>
           )}

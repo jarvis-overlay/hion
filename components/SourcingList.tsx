@@ -33,23 +33,24 @@ const STAGE_STYLE: Record<string, string> = {
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
 // 마진 계산기(components/MarginCalculator.tsx)와 완전히 동일한 공식.
-// 쿠폰 할인, 매입원가, 수수료율, 배송비, 광고비, 기타비용까지 전부
-// 반영해서 정확하게 계산한다.
+// 쿠폰 할인, 매입원가, 배송비, 광고비, 기타비용까지 전부 반영해서
+// 계산한다. 매출부가세/매입부가세/쿠팡수수료는 환차·프로모션·카테고리별
+// 수수료 차이로 실제 정산액이 공식과 다를 수 있어서 자동계산하지 않고
+// 사용자가 직접 입력한 값을 그대로 쓴다.
 function computeMargin(it: any) {
   const lp = it.price ?? 0;
   const cp = it.coupon ?? 0;
   const p = Math.max(0, lp - cp);
   const c = it.cost ?? 0;
-  const fr = it.fee_rate ?? 10.8;
+  const outputVat = it.output_vat ?? 0;
+  const importVat = it.import_vat ?? 0;
+  const fee = it.coupang_fee ?? 0;
   const s = it.shipping ?? 0;
   const a = it.ad_cost ?? 0;
   const e = it.etc_cost ?? 0;
-  const fee = p * (fr / 100);
-  const outputVat = p * 0.1;
-  const importVat = c * 0.1;
   const profit = p - outputVat - c + importVat - fee - s - a - e;
   const marginPct = lp > 0 ? (profit / p) * 100 : null;
-  return { lp, cp, p, c, fr, s, a, e, fee, outputVat, importVat, profit, marginPct };
+  return { lp, cp, p, c, s, a, e, fee, outputVat, importVat, profit, marginPct };
 }
 
 function marginBadgeClass(pct: number) {
@@ -130,11 +131,27 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
         <input
-          name="fee_rate"
+          name="output_vat"
           type="number"
           step="0.01"
-          defaultValue={item.fee_rate ?? 10.8}
-          placeholder="수수료율 %"
+          defaultValue={item.output_vat ?? ''}
+          placeholder="매출부가세"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          name="import_vat"
+          type="number"
+          step="0.01"
+          defaultValue={item.import_vat ?? ''}
+          placeholder="매입부가세"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          name="coupang_fee"
+          type="number"
+          step="0.01"
+          defaultValue={item.coupang_fee ?? ''}
+          placeholder="쿠팡수수료"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
         <input
@@ -351,7 +368,7 @@ export default function SourcingList({ items }: { items: any[] }) {
                       <dd className="font-mono">{fmt(m.c)}</dd>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <dt className="text-inkSoft">수수료 ({m.fr}%)</dt>
+                      <dt className="text-inkSoft">쿠팡수수료</dt>
                       <dd className="font-mono">-{fmt(m.fee)}</dd>
                     </div>
                     <div className="flex justify-between gap-2">
