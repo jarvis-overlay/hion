@@ -76,15 +76,17 @@ function analyzeCoupangResults(
       ? ['작음', 'low', '작은 시장 (니치, 신중 필요)']
       : ['매우 작음', 'very-low', '매우 작은 시장 (수요 거의 없음 - 비추천 가능성 높음)'];
 
-  // 검색 결과 상품 "개수"는 우리가 fetch할 때 지정한 limit(예: 10개)에
-  // 그냥 다 차면 나오는 숫자라 경쟁강도랑 무관하다. 대신 "리뷰 300개
-  // 이상(=니치 시장 상한선) 확보한, 진짜 검증된 경쟁자가 몇 명인지"로
-  // 경쟁강도를 판정한다.
+  // "검증된 경쟁자가 몇 명인지"를 개수로만 재면, fetch할 때 지정한
+  // limit(예: 5개)에 막혀서 절대 "높음"이 안 나오는 경우가 생긴다
+  // (limit=5인데 "높음" 기준이 6명 이상이면 수학적으로 불가능). limit이
+  // 다른 곳마다 달라도 똑같이 통하도록, 목록에서 리뷰 300개 이상(=니치
+  // 시장 상한선) 확보한 상품의 "비율"로 판정한다 - 표본 크기에 안 흔들림.
   const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= 300).length;
+  const meaningfulRatio = meaningfulCompetitorCount / reviewCounts.length;
   const [competitionLabel, competitionTier]: [string, CompetitionTier] =
-    meaningfulCompetitorCount >= 6
+    meaningfulRatio >= 0.5
       ? ['높음', 'high']
-      : meaningfulCompetitorCount >= 3
+      : meaningfulRatio >= 0.2
       ? ['보통', 'mid']
       : ['낮음', 'low'];
 
@@ -97,9 +99,11 @@ function analyzeCoupangResults(
   const top = coupang[0];
   const summary = `판매량 1위 "${top.name}" (리뷰 ${top.reviewCount ?? '0'}개, ${
     top.price ?? '?'
-  }원). 목록 내 리뷰 중앙값 ${medianReviews.toLocaleString()}개(최다는 "${topByReviews.name}" ${maxReviews.toLocaleString()}개) - 시장 규모는 중앙값 기준으로 판정: ${scaleDesc}. 리뷰 300개 이상인 검증된 경쟁자 ${meaningfulCompetitorCount}명 확인 - 경쟁강도 ${competitionLabel}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 총 ${
+  }원). 목록 내 리뷰 중앙값 ${medianReviews.toLocaleString()}개(최다는 "${topByReviews.name}" ${maxReviews.toLocaleString()}개) - 시장 규모는 중앙값 기준으로 판정: ${scaleDesc}. 조회된 ${
     coupang.length
-  }개 상품 확인됨, 가격 분포 ${priceRange}`;
+  }개 중 리뷰 300개 이상인 검증된 경쟁자 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
+    0
+  )}%) - 경쟁강도 ${competitionLabel}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 가격 분포 ${priceRange}`;
 
   const productListText = coupang
     .map(
@@ -215,7 +219,11 @@ export async function runCategoryRecommendation(
   const coupangCategoryResults = await Promise.all(
     candidates.map(async (c) => ({
       category: c.category,
-      coupang: await fetchCoupangBestsellers(c.category, 5).catch(() => []),
+      // limit을 5개가 아니라 40개로 넉넉히 잡는다 - 같은 Bright Data
+      // 응답 안에 이미 60개 넘는 상품이 들어있어서 추가 요청 없이 더
+      // 정확한 시장규모/경쟁강도 표본을 얻을 수 있다 (이 결과는 카드로
+      // 보여주는 게 아니라 analyzeCoupangResults 통계용으로만 씀).
+      coupang: await fetchCoupangBestsellers(c.category, 40).catch(() => []),
     }))
   );
   for (const r of coupangCategoryResults) coupangByCategory.set(r.category, r.coupang);
@@ -236,7 +244,11 @@ export async function runCategoryRecommendation(
     const retryResults = await Promise.all(
       failedCandidates.map(async (c) => ({
         category: c.category,
-        coupang: await fetchCoupangBestsellers(c.category, 5).catch(() => []),
+        // limit을 5개가 아니라 40개로 넉넉히 잡는다 - 같은 Bright Data
+      // 응답 안에 이미 60개 넘는 상품이 들어있어서 추가 요청 없이 더
+      // 정확한 시장규모/경쟁강도 표본을 얻을 수 있다 (이 결과는 카드로
+      // 보여주는 게 아니라 analyzeCoupangResults 통계용으로만 씀).
+      coupang: await fetchCoupangBestsellers(c.category, 40).catch(() => []),
       }))
     );
     for (const r of retryResults) {
@@ -333,8 +345,10 @@ export async function runProductRecommendation(
   // 였다. 버그를 고친 뒤 10개 동시 요청도 60%대로 정상 성공하는 걸
   // 확인했으므로 순차 배치를 없애고 한 번에 병렬로 쏜다 - 총 소요 시간이
   // 배치 수와 무관하게 요청 1건의 최악 시간 수준으로 줄어든다. limit도
-  // 8로 늘려서 검색어당 더 풍부한 실제 상품 풀을 확보 - AI가 이 안에서
-  // "진짜 메인 상품"을 골라야 하기 때문에 후보가 많을수록 좋다.
+  // 20으로 늘려서 검색어당 더 풍부한 실제 상품 풀을 확보 - AI가 이 안에서
+  // "진짜 메인 상품"을 골라야 하고, 경쟁강도 판정도 이 풀 기준이라
+  // 후보가 많을수록 좋다 (같은 응답 안에 이미 더 있어서 추가 요청 없이
+  // 얻을 수 있음 - 8보다 훨씬 크게 늘려도 AI 프롬프트 부담은 크지 않음).
   // 실측 결과 이 단계 이후(finalize/알리바바 조회/번역)까지 포함해서
   // 정상 케이스도 280초 안팎으로 300초 한도에 거의 붙어있어서, 여기서
   // 실패 후 재시도를 넣을 시간 여유가 없다. 재시도는 안 하고 대신
@@ -342,7 +356,7 @@ export async function runProductRecommendation(
   const coupangResults = await Promise.all(
     keywords.map(async ({ ko }) => ({
       keyword: ko,
-      coupang: await fetchCoupangBestsellers(ko, 8).catch(() => []),
+      coupang: await fetchCoupangBestsellers(ko, 20).catch(() => []),
     }))
   );
 
@@ -660,18 +674,22 @@ export async function runProductSearch(keyword: string): Promise<ProductSearchRe
   };
   if (!q) return empty;
 
-  let coupang: CoupangBestseller[];
+  const DISPLAY_COUNT = 10;
+  let coupangFull: CoupangBestseller[];
   try {
     // 이 페이지는 요청 하나만 처리하고 maxDuration도 넉넉해서(280초),
     // 캡차 등으로 실패하면 시간이 남는 한 계속 재시도한다. 뒤에 알리바바
     // 조회(최대 120초)까지 이어지므로 예산을 120초로 잡아서 합계가
-    // maxDuration 안에 들어오게 함.
-    coupang = await fetchCoupangBestsellers(q, 10, { budgetMs: 120000 });
+    // maxDuration 안에 들어오게 함. limit은 40으로 크게 잡아서 시장규모/
+    // 경쟁강도 통계를 더 정확하게 내고(같은 응답 안에 이미 더 있어서
+    // 공짜), 화면에 보여주는 카드는 아래에서 상위 10개만 자른다.
+    coupangFull = await fetchCoupangBestsellers(q, 40, { budgetMs: 120000 });
   } catch (e: any) {
     return { ...empty, coupangError: e?.message || String(e) };
   }
 
-  const analysis = analyzeCoupangResults(coupang);
+  const analysis = analyzeCoupangResults(coupangFull);
+  const coupang = coupangFull.slice(0, DISPLAY_COUNT);
   const coupangItems = coupang.map((c) => ({
     name: c.name,
     price: c.price,

@@ -107,7 +107,7 @@ export function MarketBadgeRow({ badges }: { badges: MarketBadges }) {
         🔥 시장규모 {badges.marketScaleLabel} (리뷰 중앙값 {badges.medianReviewCount.toLocaleString()}개)
       </Badge>
       <Badge tier={COMPETITION_TIER_COLOR[badges.competitionTier]}>
-        ⚔️ 경쟁 {badges.competitionLabel} (검증 경쟁자 {badges.meaningfulCompetitorCount}명)
+        ⚔️ 경쟁 {badges.competitionLabel} (검증 경쟁자 {badges.meaningfulCompetitorCount}/{badges.productCount}개)
       </Badge>
       <Badge tier="neutral">💰 {badges.priceRange}</Badge>
     </div>
