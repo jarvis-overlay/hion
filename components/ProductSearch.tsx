@@ -25,9 +25,8 @@ export default function ProductSearch() {
     <div className="card p-6 sm:p-8 mb-6">
       <h2 className="text-lg font-bold mb-1">상품 검색</h2>
       <p className="text-sm text-inkSoft mb-5">
-        그냥 쿠팡에서 검색하는 것과 다르게, 검색 결과 리뷰수 합계·상품
-        개수·가격 분포를 계산해서 이 키워드의 시장규모·경쟁강도를 바로
-        보여줘요 - 하나하나 눌러보면서 리뷰수를 세지 않아도 돼요.
+        키워드 하나로 이 시장이 소싱해볼 만한지 판단하고, 1위 상품의 실제
+        알리바바 소싱 후보까지 한번에 찾아줘요.
       </p>
 
       <div className="flex gap-2 mb-5">
@@ -47,67 +46,130 @@ export default function ProductSearch() {
         </button>
       </div>
 
+      {loading && (
+        <p className="text-sm text-inkSoft mb-4">
+          쿠팡 실데이터 조회 + 1위 상품 알리바바 소싱 후보 매칭까지 하고
+          있어요. 캡차 재시도가 겹치면 최대 2~3분 정도 걸릴 수 있어요...
+        </p>
+      )}
+
       {result && (
-        <div className="grid gap-6 sm:grid-cols-2">
-          <div>
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <p className="text-xs font-semibold text-inkSoft">쿠팡 검색 결과</p>
-              {result.badges && <MarketBadgeRow badges={result.badges} />}
+        <>
+          {result.badges && result.verdict && (
+            <div className="mb-6 rounded-xl bg-paper p-4">
+              <MarketBadgeRow badges={result.badges} />
+              <p className="text-sm text-ink mt-2 leading-relaxed">📋 {result.verdict}</p>
             </div>
-            {result.coupangError ? (
-              <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">
-                조회 실패: {result.coupangError}
+          )}
+
+          <div className="grid gap-6 sm:grid-cols-2 mb-6">
+            <div>
+              <p className="text-xs font-semibold text-inkSoft mb-2">쿠팡 검색 결과 (판매량순)</p>
+              {result.coupangError ? (
+                <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">
+                  조회 실패: {result.coupangError}
+                </p>
+              ) : result.coupang.length === 0 ? (
+                <p className="text-xs text-inkSoft bg-paper rounded-md px-3 py-2">결과가 없어요.</p>
+              ) : (
+                <div className="grid gap-2">
+                  {result.coupang.map((c, i) => (
+                    <a
+                      key={i}
+                      href={c.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`flex gap-2 ring-1 rounded-xl p-2 hover:ring-accent transition ${
+                        i === 0 ? 'ring-accent bg-accentBg' : 'ring-paperLine'
+                      }`}
+                    >
+                      {c.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={c.imageUrl}
+                          alt={c.name}
+                          className="w-14 h-14 rounded object-cover shrink-0 bg-paperLine"
+                        />
+                      ) : (
+                        <div className="w-14 h-14 rounded shrink-0 bg-paperLine" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-xs text-ink line-clamp-2 leading-snug mb-1">
+                          {i === 0 && <span className="text-accent font-semibold">1위 · </span>}
+                          {c.name}
+                        </p>
+                        <p className="text-xs text-inkSoft">
+                          {c.price ? `${c.price}원` : ''}
+                          {c.reviewCount ? ` · 리뷰 ${c.reviewCount}개` : ''}
+                        </p>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-inkSoft mb-2">네이버쇼핑 검색 결과</p>
+              <p className="text-xs text-inkSoft bg-paper rounded-md px-3 py-2 mb-2">
+                {result.naverUnavailable}
               </p>
-            ) : result.coupang.length === 0 ? (
-              <p className="text-xs text-inkSoft bg-paper rounded-md px-3 py-2">결과가 없어요.</p>
-            ) : (
-              <div className="grid gap-2">
-                {result.coupang.map((c, i) => (
-                  <a
-                    key={i}
-                    href={c.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex gap-2 ring-1 ring-paperLine rounded-xl p-2 hover:ring-accent transition"
-                  >
-                    {c.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={c.imageUrl}
-                        alt={c.name}
-                        className="w-14 h-14 rounded object-cover shrink-0 bg-paperLine"
-                      />
-                    ) : (
-                      <div className="w-14 h-14 rounded shrink-0 bg-paperLine" />
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-xs text-ink line-clamp-2 leading-snug mb-1">{c.name}</p>
-                      <p className="text-xs text-inkSoft">
-                        {c.price ? `${c.price}원` : ''}
-                        {c.reviewCount ? ` · 리뷰 ${c.reviewCount}개` : ''}
-                      </p>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            )}
+              <a
+                href={`https://search.shopping.naver.com/search/all?query=${encodeURIComponent(keyword)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-accent underline"
+              >
+                네이버쇼핑에서 "{keyword}" 직접 검색하기 ↗
+              </a>
+            </div>
           </div>
 
-          <div>
-            <p className="text-xs font-semibold text-inkSoft mb-2">네이버쇼핑 검색 결과</p>
-            <p className="text-xs text-inkSoft bg-paper rounded-md px-3 py-2 mb-2">
-              {result.naverUnavailable}
-            </p>
-            <a
-              href={`https://search.shopping.naver.com/search/all?query=${encodeURIComponent(keyword)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-accent underline"
-            >
-              네이버쇼핑에서 "{keyword}" 직접 검색하기 ↗
-            </a>
-          </div>
-        </div>
+          {result.topProductName && (
+            <div>
+              <p className="text-xs font-semibold text-inkSoft mb-2">
+                알리바바 소싱 후보 (1위 상품 "{result.topProductName}" 기준)
+              </p>
+              {result.sourcingLinks.length === 0 ? (
+                <p className="text-xs text-inkSoft bg-paper rounded-md px-3 py-2">
+                  알리바바 조회에 실패했거나 결과가 없어요. 알리바바 봇 차단
+                  때문일 수 있으니, alibaba.com에서 직접 검색해보시는 걸
+                  추천해요.
+                </p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {result.sourcingLinks.map((s, j) => (
+                    <a
+                      key={j}
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex gap-2 ring-1 ring-paperLine rounded-xl p-2 hover:ring-accent transition"
+                    >
+                      {s.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={s.imageUrl}
+                          alt={s.nameKo}
+                          className="w-14 h-14 rounded object-cover shrink-0 bg-paperLine"
+                        />
+                      ) : (
+                        <div className="w-14 h-14 rounded shrink-0 bg-paperLine" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-xs text-ink line-clamp-2 leading-snug mb-0.5">
+                          {s.nameKo}
+                        </p>
+                        <p className="text-[11px] text-inkSoft line-clamp-1 mb-1">{s.name}</p>
+                        <p className="text-xs text-accent font-medium">{s.price}</p>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

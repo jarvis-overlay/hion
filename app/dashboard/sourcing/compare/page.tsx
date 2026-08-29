@@ -1,9 +1,10 @@
 import ProductSearch from '@/components/ProductSearch';
 import TrendForm from '@/components/TrendForm';
 
-// 쿠팡 실시간 조회는 캡차 재시도 때문에 최대 135초 가까이 걸릴 수 있다.
-// 이 값이 없으면 기본 타임아웃(짧음)에 걸려 조회가 일찍 끊길 수 있음.
-export const maxDuration = 180;
+// 쿠팡 실시간 조회(캡차 재시도 예산 120초) + 1위 상품 알리바바 소싱
+// 후보 조회(최대 120초)까지 이어져서 넉넉하게 잡음. 이 값이 없으면
+// 기본 타임아웃(짧음)에 걸려 조회가 일찍 끊길 수 있음.
+export const maxDuration = 280;
 
 export default function ComparePage() {
   return (

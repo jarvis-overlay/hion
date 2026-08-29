@@ -597,6 +597,20 @@ export interface ProductSearchResult {
   // 실데이터를 근거로 시장규모/경쟁강도/가격대를 계산해서 보여준다
   // (AI 소싱 추천에서 쓰는 것과 동일한 로직).
   badges: MarketBadges | null;
+  // 소싱을 하려면 "지금 뭘 판단해야 하는지" 결론이 필요하다는 지적으로
+  // 추가함 - 뱃지 숫자만 던지지 않고 한 문장으로 해석까지 해준다.
+  verdict: string | null;
+  // 판매량 1위 상품을 실제로 어디서 소싱할 수 있는지 - "쿠팡에서 뭐가
+  // 잘팔리는지 봤으면, 그럼 어디서 사입하지?"에 대한 답. AI 소싱 추천의
+  // 알리바바 매칭 로직을 그대로 재사용.
+  topProductName: string | null;
+  sourcingLinks: {
+    name: string;
+    nameKo: string;
+    price: string | null;
+    url: string;
+    imageUrl: string | null;
+  }[];
   // 네이버 쇼핑 상품 검색 API(v1/search/shop.json)는 2026-07-31부로
   // 완전히 종료되고 공식 대체 API가 없다 (데이터랩 트렌드만 NAVER API
   // HUB로 이관됨, 실제 상품 목록 검색은 이관 대상이 아니었음). 코드로
@@ -604,36 +618,96 @@ export interface ProductSearchResult {
   naverUnavailable: string;
 }
 
+// 뱃지 숫자(시장규모 x 경쟁강도 조합)를 보고 뭘 판단해야 하는지 한 문장
+// 결론을 내려준다. 별도 AI 호출 없이 이미 계산된 뱃지만으로 즉시 판단.
+function marketVerdict(badges: MarketBadges): string {
+  const bigMarket = badges.marketScaleTier === 'very-high' || badges.marketScaleTier === 'high';
+  const smallMarket = badges.marketScaleTier === 'low' || badges.marketScaleTier === 'very-low';
+  const highComp = badges.competitionTier === 'high';
+  const lowComp = badges.competitionTier === 'low';
+
+  if (smallMarket) {
+    return '시장 자체가 작아서 신중해야 해요. 더 넓은 키워드로 다시 검색해보는 걸 추천해요.';
+  }
+  if (bigMarket && highComp) {
+    return '수요는 확실하지만 이미 검증된 경쟁자가 많아요. 가격/디자인 차별화 없이는 진입이 어려울 수 있어요.';
+  }
+  if (bigMarket && lowComp) {
+    return '수요는 확실한데 아직 경쟁자가 많지 않아요 - 지금이 진입 적기일 수 있어요.';
+  }
+  if (!bigMarket && lowComp) {
+    return '중간 규모 시장에 경쟁이 적어요. 니치로 노려볼 만해요.';
+  }
+  return '적당한 규모, 적당한 경쟁이에요. 가격 경쟁력이나 상품 디테일이 성패를 가를 것 같아요.';
+}
+
 // 키워드 하나로 쿠팡에서 실제 판매중인 유사 상품을 찾아준다 (트렌드
 // 추이가 아니라 지금 팔리고 있는 진짜 상품 목록). 그냥 쿠팡에서 검색해
-// 보는 것과 다른 점: 리뷰수 합계/상품 개수/가격 분포를 계산해서
-// 시장규모·경쟁강도·가격대를 뱃지로 보여준다.
+// 보는 것과 다른 점: 시장규모·경쟁강도·가격대를 뱃지+한줄 결론으로
+// 보여주고, 1위 상품의 실제 알리바바 소싱 후보까지 매칭해준다.
 export async function runProductSearch(keyword: string): Promise<ProductSearchResult> {
   const q = keyword.trim();
   const naverUnavailable =
     '네이버 쇼핑 상품 검색 API는 2026년 7월 31일부로 종료되어 더 이상 조회할 수 없어요 (네이버 측 공식 대체 API 없음). 네이버쇼핑은 직접 검색해서 확인해주세요.';
-  if (!q) {
-    return { coupang: [], coupangError: null, badges: null, naverUnavailable };
+  const empty: ProductSearchResult = {
+    coupang: [],
+    coupangError: null,
+    badges: null,
+    verdict: null,
+    topProductName: null,
+    sourcingLinks: [],
+    naverUnavailable,
+  };
+  if (!q) return empty;
+
+  let coupang: CoupangBestseller[];
+  try {
+    // 이 페이지는 요청 하나만 처리하고 maxDuration도 넉넉해서(280초),
+    // 캡차 등으로 실패하면 시간이 남는 한 계속 재시도한다. 뒤에 알리바바
+    // 조회(최대 120초)까지 이어지므로 예산을 120초로 잡아서 합계가
+    // maxDuration 안에 들어오게 함.
+    coupang = await fetchCoupangBestsellers(q, 10, { budgetMs: 120000 });
+  } catch (e: any) {
+    return { ...empty, coupangError: e?.message || String(e) };
   }
 
-  try {
-    // 이 페이지는 요청 하나만 처리하고 maxDuration도 넉넉해서(180초),
-    // 캡차 등으로 실패하면 시간이 남는 한 계속 재시도한다.
-    const coupang = await fetchCoupangBestsellers(q, 10, { budgetMs: 150000 });
-    const analysis = analyzeCoupangResults(coupang);
-    return {
-      coupang: coupang.map((c) => ({
-        name: c.name,
-        price: c.price,
-        reviewCount: c.reviewCount,
-        url: c.url,
-        imageUrl: c.imageUrl,
-      })),
-      coupangError: null,
-      badges: analysis?.badges ?? null,
-      naverUnavailable,
-    };
-  } catch (e: any) {
-    return { coupang: [], coupangError: e?.message || String(e), badges: null, naverUnavailable };
+  const analysis = analyzeCoupangResults(coupang);
+  const coupangItems = coupang.map((c) => ({
+    name: c.name,
+    price: c.price,
+    reviewCount: c.reviewCount,
+    url: c.url,
+    imageUrl: c.imageUrl,
+  }));
+
+  if (coupang.length === 0) {
+    return { ...empty, coupang: coupangItems };
   }
+
+  const topProduct = coupang[0];
+  const refinedTerms = await refineAlibabaSearchTerms([
+    { keyword: q, topCoupangProductName: topProduct.name },
+  ]).catch((): Record<string, string> => ({}));
+  const searchTerm = refinedTerms[q];
+
+  const alibaba = searchTerm ? await fetchAlibabaProducts(searchTerm, 5).catch(() => []) : [];
+  const names = alibaba.map((a) => a.name);
+  const translations = await translateProductNames(names).catch(() => names);
+  const translationMap = new Map(names.map((name, i) => [name, translations[i]]));
+
+  return {
+    coupang: coupangItems,
+    coupangError: null,
+    badges: analysis?.badges ?? null,
+    verdict: analysis ? marketVerdict(analysis.badges) : null,
+    topProductName: topProduct.name,
+    sourcingLinks: alibaba.map((a) => ({
+      name: a.name,
+      nameKo: translationMap.get(a.name) || a.name,
+      price: a.price,
+      url: a.url,
+      imageUrl: a.imageUrl,
+    })),
+    naverUnavailable,
+  };
 }
