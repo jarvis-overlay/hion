@@ -8,7 +8,7 @@ import {
   type CategoryRecommendation,
 } from '@/app/dashboard/sourcing/trends/actions';
 import type { Season } from '@/lib/ai';
-import { Badge, MARKET_TIER_COLOR, COMPETITION_TIER_COLOR } from '@/components/MarketBadge';
+import { MarketBadgeRow } from '@/components/MarketBadge';
 
 const SEASON_OPTIONS: { value: Season; label: string }[] = [
   { value: 'summer', label: '여름 시즌' },
@@ -137,13 +137,8 @@ export default function AiRecommendation() {
                   )}
                 </div>
                 {c.badges && (
-                  <div className="flex flex-wrap gap-1 mb-1.5">
-                    <Badge tier={MARKET_TIER_COLOR[c.badges.marketScaleTier]}>
-                      🔥 {c.badges.marketScaleLabel} (리뷰 {c.badges.topReviewCount.toLocaleString()})
-                    </Badge>
-                    <Badge tier={COMPETITION_TIER_COLOR[c.badges.competitionTier]}>
-                      ⚔️ 경쟁 {c.badges.competitionLabel}
-                    </Badge>
+                  <div className="mb-1.5">
+                    <MarketBadgeRow badges={c.badges} />
                   </div>
                 )}
                 <p className="text-xs text-inkSoft leading-relaxed">{c.reason}</p>
@@ -181,14 +176,8 @@ export default function AiRecommendation() {
               )}
 
               {p.badges && (
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  <Badge tier={MARKET_TIER_COLOR[p.badges.marketScaleTier]}>
-                    🔥 시장규모 {p.badges.marketScaleLabel} (리뷰 {p.badges.topReviewCount.toLocaleString()}개)
-                  </Badge>
-                  <Badge tier={COMPETITION_TIER_COLOR[p.badges.competitionTier]}>
-                    ⚔️ 경쟁강도 {p.badges.competitionLabel} (상품 {p.badges.productCount}개)
-                  </Badge>
-                  <Badge tier="neutral">💰 {p.badges.priceRange}</Badge>
+                <div className="mb-3">
+                  <MarketBadgeRow badges={p.badges} />
                 </div>
               )}
 

@@ -29,11 +29,20 @@ export type { MarketScaleTier, CompetitionTier };
 export interface MarketBadges {
   marketScaleLabel: string; // "매우 큼" / "큼" / "중간" / "작음" / "매우 작음"
   marketScaleTier: MarketScaleTier;
-  topReviewCount: number;
+  medianReviewCount: number; // 시장규모 판정 기준값
+  topReviewCount: number; // 참고용 (목록 내 최다 리뷰)
   competitionLabel: string; // "낮음" / "보통" / "높음"
   competitionTier: CompetitionTier;
-  productCount: number;
+  meaningfulCompetitorCount: number; // 경쟁강도 판정 기준값
+  productCount: number; // 참고용 (조회된 상품 수 - fetch 제한값이라 경쟁강도 근거로 안 씀)
   priceRange: string;
+}
+
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 // 실제 쿠팡 검색 결과 목록 하나를 받아서 시장규모/경쟁강도 뱃지 + AI에게
@@ -47,28 +56,37 @@ function analyzeCoupangResults(
   const reviewCounts = coupang.map(
     (c) => Number((c.reviewCount || '0').replace(/,/g, '')) || 0
   );
-  // 쿠팡 "판매량순" 정렬은 최근 판매 속도 기준이라, 1위 상품이 꼭 리뷰가
-  // 가장 많은 상품은 아니다. 시장 "규모"는 목록 전체에서 리뷰가 가장
-  // 많은 상품 기준으로 봐야 왜곡이 없다.
+  // 예전엔 "목록 내 리뷰 최다 상품"(max) 하나로 시장규모를 판정했는데,
+  // 상품 하나만 튀어도(단일 히트상품) 전체 시장이 "매우 큼"으로 잘못
+  // 판정되는 문제가 있었다. 중앙값을 쓰면 "이 목록의 상품들이 대체로
+  // 어느 정도 팔리는지"를 더 왜곡 없이 반영한다.
   const maxReviews = Math.max(...reviewCounts);
+  const medianReviews = median(reviewCounts);
   const totalReviews = reviewCounts.reduce((a, b) => a + b, 0);
   const topByReviews = coupang[reviewCounts.indexOf(maxReviews)];
 
   const [marketScaleLabel, marketScaleTier, scaleDesc]: [string, MarketScaleTier, string] =
-    maxReviews >= 3000
+    medianReviews >= 3000
       ? ['매우 큼', 'very-high', '매우 큰 시장 (검증된 강한 수요)']
-      : maxReviews >= 1000
+      : medianReviews >= 1000
       ? ['큼', 'high', '큰 시장 (수요 확실)']
-      : maxReviews >= 300
+      : medianReviews >= 300
       ? ['중간', 'mid', '중간 규모 시장']
-      : maxReviews >= 50
+      : medianReviews >= 50
       ? ['작음', 'low', '작은 시장 (니치, 신중 필요)']
       : ['매우 작음', 'very-low', '매우 작은 시장 (수요 거의 없음 - 비추천 가능성 높음)'];
 
-  // 검색 결과 상품 개수가 많을수록 이미 셀러가 많이 들어와 있다는 뜻 -
-  // 경쟁 강도의 단순 근사치로 사용
+  // 검색 결과 상품 "개수"는 우리가 fetch할 때 지정한 limit(예: 10개)에
+  // 그냥 다 차면 나오는 숫자라 경쟁강도랑 무관하다. 대신 "리뷰 300개
+  // 이상(=니치 시장 상한선) 확보한, 진짜 검증된 경쟁자가 몇 명인지"로
+  // 경쟁강도를 판정한다.
+  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= 300).length;
   const [competitionLabel, competitionTier]: [string, CompetitionTier] =
-    coupang.length >= 5 ? ['높음', 'high'] : coupang.length >= 3 ? ['보통', 'mid'] : ['낮음', 'low'];
+    meaningfulCompetitorCount >= 6
+      ? ['높음', 'high']
+      : meaningfulCompetitorCount >= 3
+      ? ['보통', 'mid']
+      : ['낮음', 'low'];
 
   const prices = coupang.map((c) => Number((c.price || '').replace(/,/g, ''))).filter((p) => p > 0);
   const priceRange =
@@ -79,7 +97,7 @@ function analyzeCoupangResults(
   const top = coupang[0];
   const summary = `판매량 1위 "${top.name}" (리뷰 ${top.reviewCount ?? '0'}개, ${
     top.price ?? '?'
-  }원). 목록 내 리뷰 최다 상품은 "${topByReviews.name}" (리뷰 ${maxReviews.toLocaleString()}개) - 시장 규모는 이 최댓값 기준으로 판정: ${scaleDesc}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 총 ${
+  }원). 목록 내 리뷰 중앙값 ${medianReviews.toLocaleString()}개(최다는 "${topByReviews.name}" ${maxReviews.toLocaleString()}개) - 시장 규모는 중앙값 기준으로 판정: ${scaleDesc}. 리뷰 300개 이상인 검증된 경쟁자 ${meaningfulCompetitorCount}명 확인 - 경쟁강도 ${competitionLabel}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 총 ${
     coupang.length
   }개 상품 확인됨, 가격 분포 ${priceRange}`;
 
@@ -94,9 +112,11 @@ function analyzeCoupangResults(
     badges: {
       marketScaleLabel,
       marketScaleTier,
+      medianReviewCount: medianReviews,
       topReviewCount: maxReviews,
       competitionLabel,
       competitionTier,
+      meaningfulCompetitorCount,
       productCount: coupang.length,
       priceRange,
     },
