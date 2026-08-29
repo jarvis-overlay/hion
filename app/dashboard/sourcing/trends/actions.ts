@@ -79,9 +79,14 @@ function analyzeCoupangResults(
   // "검증된 경쟁자가 몇 명인지"를 개수로만 재면, fetch할 때 지정한
   // limit(예: 5개)에 막혀서 절대 "높음"이 안 나오는 경우가 생긴다
   // (limit=5인데 "높음" 기준이 6명 이상이면 수학적으로 불가능). limit이
-  // 다른 곳마다 달라도 똑같이 통하도록, 목록에서 리뷰 300개 이상(=니치
-  // 시장 상한선) 확보한 상품의 "비율"로 판정한다 - 표본 크기에 안 흔들림.
-  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= 300).length;
+  // 다른 곳마다 달라도 똑같이 통하도록, 목록에서 "비율"로 판정한다.
+  //
+  // 기준 리뷰수는 300개가 아니라 1,000개(=시장규모 "큼" 경계선)를 쓴다.
+  // 판매량순으로 40개를 뽑으면 웬만큼 팔리는 카테고리는 거의 다 300개는
+  // 쉽게 넘겨서(실측: 니치에 가까운 카테고리도 40~50%가 300개 넘음)
+  // 구분력이 없었다. 1,000개 기준으로 실측했더니 레드오션 카테고리는
+  // 45%, 상대적으로 니치인 카테고리는 18% 수준으로 확실히 갈렸다.
+  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= 1000).length;
   const meaningfulRatio = meaningfulCompetitorCount / reviewCounts.length;
   const [competitionLabel, competitionTier]: [string, CompetitionTier] =
     meaningfulRatio >= 0.5
@@ -101,7 +106,7 @@ function analyzeCoupangResults(
     top.price ?? '?'
   }원). 목록 내 리뷰 중앙값 ${medianReviews.toLocaleString()}개(최다는 "${topByReviews.name}" ${maxReviews.toLocaleString()}개) - 시장 규모는 중앙값 기준으로 판정: ${scaleDesc}. 조회된 ${
     coupang.length
-  }개 중 리뷰 300개 이상인 검증된 경쟁자 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
+  }개 중 리뷰 1,000개 이상인 검증된 경쟁자 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
     0
   )}%) - 경쟁강도 ${competitionLabel}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 가격 분포 ${priceRange}`;
 
