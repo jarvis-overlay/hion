@@ -8,6 +8,38 @@ function requireEnv(name: string): string {
   return v;
 }
 
+// Bright Data 계정이 최근 성공률 저하로 자동 스로틀링되는 걸 실측으로
+// 확인함 (응답 헤더 x-brd-error-code: sr_rate_limit, "분당 10건으로
+// 낮춰라"는 메시지). 여러 건을 한꺼번에 병렬로 쏘면 그 즉시 전부
+// 429(게이트웨이 자체는 200으로 감싸서 응답하고 본문에 스로틀 메시지를
+// 텍스트로 담아 보냄 - 캡차 문구가 없어서 예전 코드는 이걸 "성공"으로
+// 오판했다)로 거부된다. 요청 시작 시점을 전역으로 관리해서 최근 60초
+// 동안 시작한 요청이 이 한도를 넘지 않을 때까지 대기시킨다 - 실제
+// 응답을 기다리는 게 아니라 "새 요청을 시작해도 되는 타이밍"만 조절
+// 하는 것이라, 동시에 여러 건이 응답 대기 중인 것 자체는 괜찮다.
+const RATE_LIMIT_PER_MINUTE = 8; // 계정 한도(10)보다 여유를 둠
+const RATE_WINDOW_MS = 60000;
+const requestStartTimes: number[] = [];
+
+async function waitForRateLimitSlot(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    while (requestStartTimes.length > 0 && now - requestStartTimes[0] >= RATE_WINDOW_MS) {
+      requestStartTimes.shift();
+    }
+    if (requestStartTimes.length < RATE_LIMIT_PER_MINUTE) {
+      requestStartTimes.push(now);
+      return;
+    }
+    const waitMs = RATE_WINDOW_MS - (now - requestStartTimes[0]) + 50;
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+}
+
+function isThrottleResponse(text: string): boolean {
+  return /auto-throttled|decrease your request rate|rate.?limit/i.test(text.slice(0, 300));
+}
+
 // 서버리스 함수 전체 타임아웃(120초) 안에서 여러 키워드를 병렬 조회해야
 // 하므로, 개별 요청 하나가 무한정 오래 걸려서 전체를 물고 가지 않도록
 // 요청당 타임아웃을 짧게 건다.
@@ -21,6 +53,7 @@ async function unlockerMarkdown(
   const timeoutMs = options.timeoutMs ?? 30000;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
+    await waitForRateLimitSlot();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -42,11 +75,16 @@ async function unlockerMarkdown(
 
       if (res.ok) {
         const text = await res.text();
-        // 빈 응답(HTTP 200인데 바디가 없거나 너무 짧음)도 캡차/차단 페이지와
-        // 동일하게 실패로 취급해서 재시도한다. 예전엔 이 케이스를 놓쳐서
-        // "성공"으로 처리한 뒤 빈 마크다운을 그대로 반환 -> 파싱 결과가
+        // 빈 응답(HTTP 200인데 바디가 없거나 너무 짧음), 캡차/차단
+        // 페이지, 스로틀 메시지(게이트웨이가 200으로 감싸서 보냄) 모두
+        // 실패로 취급해서 재시도한다. 예전엔 이런 케이스를 놓쳐서
+        // "성공"으로 처리한 뒤 그 텍스트를 그대로 반환 -> 파싱 결과가
         // 항상 0건이 되는 버그가 있었다.
-        if (text.length >= 50 && !/captcha|protection page/i.test(text.slice(0, 200))) {
+        if (
+          text.length >= 50 &&
+          !/captcha|protection page/i.test(text.slice(0, 200)) &&
+          !isThrottleResponse(text)
+        ) {
           return text;
         }
       }
