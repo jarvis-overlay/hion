@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState } from 'react';
 import {
   runCategoryRecommendation,
   runProductRecommendation,
@@ -8,48 +8,13 @@ import {
   type CategoryRecommendation,
 } from '@/app/dashboard/sourcing/trends/actions';
 import type { Season } from '@/lib/ai';
+import { Badge, MARKET_TIER_COLOR, COMPETITION_TIER_COLOR } from '@/components/MarketBadge';
 
 const SEASON_OPTIONS: { value: Season; label: string }[] = [
   { value: 'summer', label: '여름 시즌' },
   { value: 'winter', label: '겨울 시즌' },
   { value: 'all', label: '사계절' },
 ];
-
-// 시장규모/경쟁강도 뱃지 색상 (RP-AI StatusBadge 패턴 참고 - dot + ring-inset pill)
-type BadgeTier = 'good' | 'ok' | 'bad' | 'neutral';
-
-type Badges = NonNullable<ProductRecommendation['badges']>;
-
-const MARKET_TIER_COLOR: Record<Badges['marketScaleTier'], BadgeTier> = {
-  'very-high': 'good',
-  high: 'good',
-  mid: 'ok',
-  low: 'bad',
-  'very-low': 'bad',
-};
-
-const COMPETITION_TIER_COLOR: Record<Badges['competitionTier'], BadgeTier> = {
-  low: 'good',
-  mid: 'ok',
-  high: 'bad',
-};
-
-const BADGE_STYLE: Record<BadgeTier, string> = {
-  good: 'bg-profitBg text-profit ring-1 ring-inset ring-profit/20',
-  ok: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
-  bad: 'bg-warnBg text-warn ring-1 ring-inset ring-warn/20',
-  neutral: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
-};
-
-function Badge({ tier, children }: { tier: BadgeTier; children: ReactNode }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap ${BADGE_STYLE[tier]}`}
-    >
-      {children}
-    </span>
-  );
-}
 
 export default function AiRecommendation() {
   const [season, setSeason] = useState<Season>('summer');

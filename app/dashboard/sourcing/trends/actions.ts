@@ -573,6 +573,10 @@ export async function runCoupangSnapshot(
 export interface ProductSearchResult {
   coupang: CoupangSnapshotItem[];
   coupangError: string | null;
+  // 그냥 쿠팡에서 검색해보는 것과 차별화하기 위한 부분 - 리뷰수 합계 등
+  // 실데이터를 근거로 시장규모/경쟁강도/가격대를 계산해서 보여준다
+  // (AI 소싱 추천에서 쓰는 것과 동일한 로직).
+  badges: MarketBadges | null;
   // 네이버 쇼핑 상품 검색 API(v1/search/shop.json)는 2026-07-31부로
   // 완전히 종료되고 공식 대체 API가 없다 (데이터랩 트렌드만 NAVER API
   // HUB로 이관됨, 실제 상품 목록 검색은 이관 대상이 아니었음). 코드로
@@ -581,19 +585,22 @@ export interface ProductSearchResult {
 }
 
 // 키워드 하나로 쿠팡에서 실제 판매중인 유사 상품을 찾아준다 (트렌드
-// 추이가 아니라 지금 팔리고 있는 진짜 상품 목록).
+// 추이가 아니라 지금 팔리고 있는 진짜 상품 목록). 그냥 쿠팡에서 검색해
+// 보는 것과 다른 점: 리뷰수 합계/상품 개수/가격 분포를 계산해서
+// 시장규모·경쟁강도·가격대를 뱃지로 보여준다.
 export async function runProductSearch(keyword: string): Promise<ProductSearchResult> {
   const q = keyword.trim();
   const naverUnavailable =
     '네이버 쇼핑 상품 검색 API는 2026년 7월 31일부로 종료되어 더 이상 조회할 수 없어요 (네이버 측 공식 대체 API 없음). 네이버쇼핑은 직접 검색해서 확인해주세요.';
   if (!q) {
-    return { coupang: [], coupangError: null, naverUnavailable };
+    return { coupang: [], coupangError: null, badges: null, naverUnavailable };
   }
 
   try {
     // 이 페이지는 요청 하나만 처리하고 maxDuration도 넉넉해서(180초),
     // 캡차 등으로 실패하면 시간이 남는 한 계속 재시도한다.
     const coupang = await fetchCoupangBestsellers(q, 10, { budgetMs: 150000 });
+    const analysis = analyzeCoupangResults(coupang);
     return {
       coupang: coupang.map((c) => ({
         name: c.name,
@@ -603,9 +610,10 @@ export async function runProductSearch(keyword: string): Promise<ProductSearchRe
         imageUrl: c.imageUrl,
       })),
       coupangError: null,
+      badges: analysis?.badges ?? null,
       naverUnavailable,
     };
   } catch (e: any) {
-    return { coupang: [], coupangError: e?.message || String(e), naverUnavailable };
+    return { coupang: [], coupangError: e?.message || String(e), badges: null, naverUnavailable };
   }
 }

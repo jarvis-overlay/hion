@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { runProductSearch, type ProductSearchResult } from '@/app/dashboard/sourcing/trends/actions';
+import { MarketBadgeRow } from '@/components/MarketBadge';
 
 export default function ProductSearch() {
   const [keyword, setKeyword] = useState('');
@@ -24,7 +25,9 @@ export default function ProductSearch() {
     <div className="card p-6 sm:p-8 mb-6">
       <h2 className="text-lg font-bold mb-1">상품 검색</h2>
       <p className="text-sm text-inkSoft mb-5">
-        키워드 하나로 쿠팡에서 지금 실제로 팔리고 있는 비슷한 상품을 찾아줘요.
+        그냥 쿠팡에서 검색하는 것과 다르게, 검색 결과 리뷰수 합계·상품
+        개수·가격 분포를 계산해서 이 키워드의 시장규모·경쟁강도를 바로
+        보여줘요 - 하나하나 눌러보면서 리뷰수를 세지 않아도 돼요.
       </p>
 
       <div className="flex gap-2 mb-5">
@@ -47,7 +50,10 @@ export default function ProductSearch() {
       {result && (
         <div className="grid gap-6 sm:grid-cols-2">
           <div>
-            <p className="text-xs font-semibold text-inkSoft mb-2">쿠팡 검색 결과</p>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <p className="text-xs font-semibold text-inkSoft">쿠팡 검색 결과</p>
+              {result.badges && <MarketBadgeRow badges={result.badges} />}
+            </div>
             {result.coupangError ? (
               <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">
                 조회 실패: {result.coupangError}
