@@ -6,9 +6,10 @@ import {
   runProductRecommendation,
   type ProductRecommendation,
   type CategoryRecommendation,
+  type StrategyKey,
 } from '@/app/dashboard/sourcing/trends/actions';
 import type { Season } from '@/lib/ai';
-import { MarketBadgeRow, strategyBucket, type StrategyBucket } from '@/components/MarketBadge';
+import { MarketBadgeRow, strategyBucket, type StrategyBucket, STRATEGY_OPTIONS } from '@/components/MarketBadge';
 
 const SEASON_OPTIONS: { value: Season; label: string }[] = [
   { value: 'summer', label: '여름 시즌' },
@@ -18,9 +19,14 @@ const SEASON_OPTIONS: { value: Season; label: string }[] = [
 
 export default function AiRecommendation() {
   const [season, setSeason] = useState<Season>('all');
+  const [strategy, setStrategy] = useState<StrategyKey | 'all'>('all');
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [categories, setCategories] = useState<CategoryRecommendation[] | null>(null);
+  // "더 보기"를 눌렀을 때 AI가 방금 전략 필터링으로 걸러진 후보를 또
+  // 내놓지 않도록, 화면에 보여준 것뿐 아니라 서버가 훑어본 후보 전체를
+  // 제외 목록으로 누적한다.
   const [seenCategories, setSeenCategories] = useState<string[]>([]);
+  const [hasSearchedCategories, setHasSearchedCategories] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [products, setProducts] = useState<ProductRecommendation[] | null>(null);
@@ -31,10 +37,8 @@ export default function AiRecommendation() {
   // 응답이 왔을 때 여전히 최신 클릭인지 확인 후에만 반영한다.
   const pickRequestRef = useRef(0);
 
-  // 카테고리를 평면으로 나열하지 않고, 이미 계산된 시장규모x경쟁강도
-  // 뱃지로 전략 그룹(골든타임/니치 리더/레드오션/신중 필요)을 나눠서
-  // 보여준다 - "카테고리 추천 다음엔 뭘 봐야 하는지" 길안내를 해주기
-  // 위함. 미검증(badges 없음) 카테고리는 별도 그룹으로 마지막에 모음.
+  // "전체 보기"를 골랐을 때만 의미 있는 그룹화 - 특정 전략을 이미
+  // 골랐으면 결과가 전부 그 전략 하나뿐이라 그룹 나눌 필요가 없다.
   const groupedCategories = useMemo(() => {
     if (!categories) return [];
     const buckets = new Map<string, { bucket: StrategyBucket | null; items: CategoryRecommendation[] }>();
@@ -47,18 +51,21 @@ export default function AiRecommendation() {
     return [...buckets.values()].sort((a, b) => (a.bucket?.order ?? 99) - (b.bucket?.order ?? 99));
   }, [categories]);
 
-  async function handleCategoryClick() {
+  const selectedStrategyOption = STRATEGY_OPTIONS.find((o) => o.value === strategy)!;
+
+  async function fetchCategories() {
     setLoadingCategories(true);
     setError(null);
     setProducts(null);
     setSelectedCategory(null);
     try {
-      const res = await runCategoryRecommendation(season, seenCategories);
+      const res = await runCategoryRecommendation(season, seenCategories, strategy);
       if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
       else if ('error' in res) setError(res.error);
       else {
         setCategories((prev) => [...(prev || []), ...res.categories]);
-        setSeenCategories((prev) => [...prev, ...res.categories.map((c) => c.category)]);
+        setSeenCategories((prev) => [...prev, ...res.consideredCategories]);
+        setHasSearchedCategories(true);
       }
     } catch (e: any) {
       setError(e?.message || '오류가 발생했어요. 다시 시도해주세요.');
@@ -91,87 +98,135 @@ export default function AiRecommendation() {
     <div className="card p-6 sm:p-8">
       <h2 className="text-lg font-bold mb-1">AI 소싱 추천</h2>
       <p className="text-sm text-inkSoft mb-5">
-        쿠팡 전체 판매 랭킹(다른 셀러 포함, 실시간 조회)을 근거로 카테고리 →
-        구체 상품 → 알리바바 소싱 후보까지 순서대로 추천해줘요.
+        쿠팡 전체 판매 랭킹(다른 셀러 포함, 실시간 조회)을 근거로 시즌 →
+        전략 → 카테고리 → 구체 상품 → 알리바바 소싱 후보까지 단계별로
+        길을 안내해드려요.
       </p>
 
-      <div className="flex flex-wrap items-center gap-2 mb-5">
-        {SEASON_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => {
-              setSeason(opt.value);
-              setSeenCategories([]);
-            }}
-            className={`rounded-full px-3.5 py-1.5 text-[14px] font-semibold transition ${
-              season === opt.value
-                ? 'bg-accent text-white shadow-glow'
-                : 'bg-white text-inkSoft ring-1 ring-paperLine hover:bg-paper'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-        <button
-          onClick={handleCategoryClick}
-          disabled={loadingCategories}
-          className="btn-primary px-5 py-2.5 text-sm sm:ml-auto disabled:opacity-50"
-        >
-          {loadingCategories
-            ? '분석 중...'
-            : seenCategories.length > 0
-            ? '다른 카테고리 더 보기'
-            : '카테고리 추천받기'}
-        </button>
+      <div className="mb-4">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-inkSoft mb-2">
+          1단계 · 시즌
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {SEASON_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => {
+                setSeason(opt.value);
+                setSeenCategories([]);
+                setCategories(null);
+                setHasSearchedCategories(false);
+              }}
+              className={`rounded-full px-3.5 py-1.5 text-[14px] font-semibold transition ${
+                season === opt.value
+                  ? 'bg-accent text-white shadow-glow'
+                  : 'bg-white text-inkSoft ring-1 ring-paperLine hover:bg-paper'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      <div className="mb-5">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-inkSoft mb-2">
+          2단계 · 소싱 전략
+        </p>
+        <div className="grid gap-2 sm:grid-cols-4">
+          {STRATEGY_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => {
+                setStrategy(opt.value);
+                setSeenCategories([]);
+                setCategories(null);
+                setHasSearchedCategories(false);
+              }}
+              className={`text-left rounded-xl p-3 transition ${
+                strategy === opt.value
+                  ? 'bg-accentBg ring-2 ring-accent'
+                  : 'bg-white ring-1 ring-paperLine hover:ring-accent'
+              }`}
+            >
+              <div className="text-sm font-bold mb-0.5">
+                {opt.icon} {opt.label}
+              </div>
+              <p className="text-[11px] text-inkSoft leading-snug">{opt.description}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <button
+        onClick={() => fetchCategories()}
+        disabled={loadingCategories}
+        className="btn-primary px-5 py-2.5 text-sm w-full sm:w-auto disabled:opacity-50 mb-5"
+      >
+        {loadingCategories
+          ? '분석 중...'
+          : seenCategories.length > 0
+          ? `${selectedStrategyOption.icon} 다른 카테고리 더 보기`
+          : `${selectedStrategyOption.icon} 카테고리 추천받기`}
+      </button>
 
       {error && (
         <p className="text-sm text-warn bg-warnBg rounded-md px-4 py-3 mb-4">{error}</p>
       )}
 
+      {hasSearchedCategories && categories && categories.length === 0 && !loadingCategories && (
+        <p className="text-sm text-inkSoft bg-paper rounded-md px-4 py-3 mb-4">
+          이번엔 "{selectedStrategyOption.label}" 전략에 맞는 카테고리를 실데이터로
+          찾지 못했어요. 위 버튼을 다시 눌러서 더 찾아보거나, 다른 전략을
+          선택해보세요.
+        </p>
+      )}
+
       {categories && categories.length > 0 && (
         <div className="mb-6">
           <p className="text-xs font-semibold text-inkSoft mb-3">
-            쿠팡 실제 검색 데이터로 검증된 카테고리를 전략별로 묶었어요.
+            {strategy === 'all'
+              ? '쿠팡 실제 검색 데이터로 검증된 카테고리를 전략별로 묶었어요.'
+              : `"${selectedStrategyOption.label}" 전략에 맞는, 쿠팡 실제 검색 데이터로 검증된 카테고리예요.`}{' '}
             선택하면 구체 상품을 추천해드려요.
           </p>
-          {groupedCategories.map((group, gi) => (
-            <div key={gi} className="mb-5 last:mb-0">
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="text-sm font-bold">
-                  {group.bucket ? `${group.bucket.icon} ${group.bucket.label}` : '❔ 미검증'}
-                </span>
+          {strategy === 'all' ? (
+            groupedCategories.map((group, gi) => (
+              <div key={gi} className="mb-5 last:mb-0">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-sm font-bold">
+                    {group.bucket ? `${group.bucket.icon} ${group.bucket.label}` : '❔ 미검증'}
+                  </span>
+                </div>
+                <p className="text-xs text-inkSoft leading-relaxed mb-2">
+                  {group.bucket
+                    ? group.bucket.blurb
+                    : '실시간 쿠팡 데이터 조회에 실패해서 검증이 안 됐어요. 참고용으로만 봐주세요.'}
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {group.items.map((c) => (
+                    <CategoryCard
+                      key={c.category}
+                      category={c}
+                      selected={selectedCategory === c.category}
+                      onClick={() => handlePickCategory(c.category)}
+                    />
+                  ))}
+                </div>
               </div>
-              <p className="text-xs text-inkSoft leading-relaxed mb-2">
-                {group.bucket
-                  ? group.bucket.blurb
-                  : '실시간 쿠팡 데이터 조회에 실패해서 검증이 안 됐어요. 참고용으로만 봐주세요.'}
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {group.items.map((c) => (
-                  <button
-                    key={c.category}
-                    onClick={() => handlePickCategory(c.category)}
-                    className={`text-left rounded-xl p-3 transition ${
-                      selectedCategory === c.category
-                        ? 'bg-accentBg ring-2 ring-accent'
-                        : 'bg-white ring-1 ring-paperLine hover:ring-accent'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <span className="text-sm font-bold">{c.category}</span>
-                    </div>
-                    {c.badges && (
-                      <div className="mb-1.5">
-                        <MarketBadgeRow badges={c.badges} />
-                      </div>
-                    )}
-                    <p className="text-xs text-inkSoft leading-relaxed">{c.reason}</p>
-                  </button>
-                ))}
-              </div>
+            ))
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {categories.map((c) => (
+                <CategoryCard
+                  key={c.category}
+                  category={c}
+                  selected={selectedCategory === c.category}
+                  onClick={() => handlePickCategory(c.category)}
+                />
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -321,5 +376,34 @@ export default function AiRecommendation() {
         </div>
       )}
     </div>
+  );
+}
+
+function CategoryCard({
+  category: c,
+  selected,
+  onClick,
+}: {
+  category: CategoryRecommendation;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-left rounded-xl p-3 transition ${
+        selected ? 'bg-accentBg ring-2 ring-accent' : 'bg-white ring-1 ring-paperLine hover:ring-accent'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <span className="text-sm font-bold">{c.category}</span>
+      </div>
+      {c.badges && (
+        <div className="mb-1.5">
+          <MarketBadgeRow badges={c.badges} />
+        </div>
+      )}
+      <p className="text-xs text-inkSoft leading-relaxed">{c.reason}</p>
+    </button>
   );
 }

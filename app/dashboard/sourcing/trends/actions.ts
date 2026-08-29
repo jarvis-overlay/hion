@@ -23,8 +23,10 @@ import {
   type CompetitionTier,
 } from '@/lib/ai';
 import { fetchCoupangBestsellers, fetchAlibabaProducts, type CoupangBestseller } from '@/lib/brightdata';
+import { strategyBucket, type StrategyKey } from '@/lib/strategy';
 
 export type { MarketScaleTier, CompetitionTier };
+export type { StrategyKey };
 
 export interface MarketBadges {
   marketScaleLabel: string; // "매우 큼" / "큼" / "중간" / "작음" / "매우 작음"
@@ -81,12 +83,15 @@ function analyzeCoupangResults(
   // (limit=5인데 "높음" 기준이 6명 이상이면 수학적으로 불가능). limit이
   // 다른 곳마다 달라도 똑같이 통하도록, 목록에서 "비율"로 판정한다.
   //
-  // 기준 리뷰수는 300개가 아니라 1,000개(=시장규모 "큼" 경계선)를 쓴다.
-  // 판매량순으로 40개를 뽑으면 웬만큼 팔리는 카테고리는 거의 다 300개는
-  // 쉽게 넘겨서(실측: 니치에 가까운 카테고리도 40~50%가 300개 넘음)
-  // 구분력이 없었다. 1,000개 기준으로 실측했더니 레드오션 카테고리는
-  // 45%, 상대적으로 니치인 카테고리는 18% 수준으로 확실히 갈렸다.
-  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= 1000).length;
+  // 중요: 이 기준 리뷰수는 반드시 시장규모 "큼" 경계선(1,000)보다 커야
+  // 한다. 중앙값의 정의상, 중앙값이 1,000 이상이면 목록의 최소 절반은
+  // 이미 1,000 이상이라는 게 수학적으로 보장된다 - 그래서 예전에 여길
+  // 1,000으로 맞췄더니 "시장 크면(중앙값>=1,000) 무조건 경쟁도 높음
+  // (비율>=50%)"이 되어버려서 "시장 크고 경쟁 낮음"(골든타임) 조합이
+  // 원천적으로 나올 수 없는 버그가 있었다(실측: 16개 후보 중 골든타임
+  // 0개). 시장규모 "매우 큼" 경계선(3,000)을 써야 두 지표가 실제로
+  // 독립적으로 갈린다.
+  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= 3000).length;
   const meaningfulRatio = meaningfulCompetitorCount / reviewCounts.length;
   const [competitionLabel, competitionTier]: [string, CompetitionTier] =
     meaningfulRatio >= 0.5
@@ -106,7 +111,7 @@ function analyzeCoupangResults(
     top.price ?? '?'
   }원). 목록 내 리뷰 중앙값 ${medianReviews.toLocaleString()}개(최다는 "${topByReviews.name}" ${maxReviews.toLocaleString()}개) - 시장 규모는 중앙값 기준으로 판정: ${scaleDesc}. 조회된 ${
     coupang.length
-  }개 중 리뷰 1,000개 이상인 검증된 경쟁자 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
+  }개 중 리뷰 3,000개 이상인 검증된 경쟁자 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
     0
   )}%) - 경쟁강도 ${competitionLabel}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 가격 분포 ${priceRange}`;
 
@@ -196,8 +201,12 @@ export interface CategoryRecommendation {
 // 되기 때문.
 export async function runCategoryRecommendation(
   season: Season,
-  excludeCategories: string[] = []
-): Promise<{ categories: CategoryRecommendation[] } | { error: string }> {
+  excludeCategories: string[] = [],
+  strategy: StrategyKey | 'all' = 'all'
+): Promise<
+  | { categories: CategoryRecommendation[]; consideredCategories: string[] }
+  | { error: string }
+> {
   const stageStart = Date.now();
   const naverSummary = await fetchNaverTrendSummary();
   const contextSummary = naverSummary
@@ -212,8 +221,12 @@ export async function runCategoryRecommendation(
   }
 
   if (candidates.length === 0) {
-    return { categories: [] };
+    return { categories: [], consideredCategories: [] };
   }
+  // 전략 필터링으로 걸러진 후보까지 포함해서 "이미 본 후보" 전체를
+  // 클라이언트에 알려준다 - "더 보기"를 눌렀을 때 AI가 방금 필터링으로
+  // 탈락한 후보를 또 브레인스토밍해서 시간을 낭비하지 않도록.
+  const consideredCategories = candidates.map((c) => c.category);
 
   // 후보 카테고리 이름 그대로 쿠팡에서 실제 검색해서 시장규모/경쟁강도를
   // 실측한다. 예전엔 4개씩 배치로 순차 처리했는데, 캡차 실패율이 높다
@@ -249,11 +262,7 @@ export async function runCategoryRecommendation(
     const retryResults = await Promise.all(
       failedCandidates.map(async (c) => ({
         category: c.category,
-        // limit을 5개가 아니라 40개로 넉넉히 잡는다 - 같은 Bright Data
-      // 응답 안에 이미 60개 넘는 상품이 들어있어서 추가 요청 없이 더
-      // 정확한 시장규모/경쟁강도 표본을 얻을 수 있다 (이 결과는 카드로
-      // 보여주는 게 아니라 analyzeCoupangResults 통계용으로만 씀).
-      coupang: await fetchCoupangBestsellers(c.category, 40).catch(() => []),
+        coupang: await fetchCoupangBestsellers(c.category, 40).catch(() => []),
       }))
     );
     for (const r of retryResults) {
@@ -280,6 +289,7 @@ export async function runCategoryRecommendation(
         verified: false,
         badges: null,
       })),
+      consideredCategories,
     };
   }
 
@@ -290,7 +300,7 @@ export async function runCategoryRecommendation(
     return { error: e?.message || String(e) };
   }
 
-  const categories: CategoryRecommendation[] = finalized
+  let categories: CategoryRecommendation[] = finalized
     .map((f): CategoryRecommendation | null => {
       const badges = badgesByCategory.get(f.category);
       if (!badges) return null; // 실데이터 없는 카테고리는 검증 실패로 보고 제외
@@ -298,7 +308,16 @@ export async function runCategoryRecommendation(
     })
     .filter((c): c is CategoryRecommendation => c !== null);
 
-  return { categories };
+  // 사용자가 처음부터 특정 전략(골든타임/니치/레드오션)을 선택했으면,
+  // "우연히 나온 카테고리 중에 골라라"가 아니라 실데이터로 검증된
+  // 카테고리 중 그 전략에 해당하는 것만 걸러서 보여준다. 하나도 없으면
+  // (AI 추측이 아니라) 정직하게 빈 배열을 반환 - 클라이언트에서 "이번엔
+  // 없었어요, 더 찾아볼까요?" 안내로 이어짐.
+  if (strategy !== 'all') {
+    categories = categories.filter((c) => c.badges && strategyBucket(c.badges).key === strategy);
+  }
+
+  return { categories, consideredCategories };
 }
 
 export interface ProductRecommendation {
