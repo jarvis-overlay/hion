@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   runCategoryRecommendation,
   runProductRecommendation,
@@ -8,7 +8,7 @@ import {
   type CategoryRecommendation,
 } from '@/app/dashboard/sourcing/trends/actions';
 import type { Season } from '@/lib/ai';
-import { MarketBadgeRow } from '@/components/MarketBadge';
+import { MarketBadgeRow, strategyBucket, type StrategyBucket } from '@/components/MarketBadge';
 
 const SEASON_OPTIONS: { value: Season; label: string }[] = [
   { value: 'summer', label: '여름 시즌' },
@@ -17,7 +17,7 @@ const SEASON_OPTIONS: { value: Season; label: string }[] = [
 ];
 
 export default function AiRecommendation() {
-  const [season, setSeason] = useState<Season>('summer');
+  const [season, setSeason] = useState<Season>('all');
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [categories, setCategories] = useState<CategoryRecommendation[] | null>(null);
   const [seenCategories, setSeenCategories] = useState<string[]>([]);
@@ -30,6 +30,22 @@ export default function AiRecommendation() {
   // 화면이 덮어써지는 경쟁 상태가 있었다. 클릭마다 토큰을 새로 발급해서
   // 응답이 왔을 때 여전히 최신 클릭인지 확인 후에만 반영한다.
   const pickRequestRef = useRef(0);
+
+  // 카테고리를 평면으로 나열하지 않고, 이미 계산된 시장규모x경쟁강도
+  // 뱃지로 전략 그룹(골든타임/니치 리더/레드오션/신중 필요)을 나눠서
+  // 보여준다 - "카테고리 추천 다음엔 뭘 봐야 하는지" 길안내를 해주기
+  // 위함. 미검증(badges 없음) 카테고리는 별도 그룹으로 마지막에 모음.
+  const groupedCategories = useMemo(() => {
+    if (!categories) return [];
+    const buckets = new Map<string, { bucket: StrategyBucket | null; items: CategoryRecommendation[] }>();
+    for (const c of categories) {
+      const bucket = c.badges ? strategyBucket(c.badges) : null;
+      const key = bucket ? bucket.key : 'unverified';
+      if (!buckets.has(key)) buckets.set(key, { bucket, items: [] });
+      buckets.get(key)!.items.push(c);
+    }
+    return [...buckets.values()].sort((a, b) => (a.bucket?.order ?? 99) - (b.bucket?.order ?? 99));
+  }, [categories]);
 
   async function handleCategoryClick() {
     setLoadingCategories(true);
@@ -115,36 +131,47 @@ export default function AiRecommendation() {
 
       {categories && categories.length > 0 && (
         <div className="mb-6">
-          <p className="text-xs font-semibold text-inkSoft mb-2">
-            쿠팡 실제 검색 데이터로 검증된 카테고리예요. 선택하면 구체 상품을
-            추천해드려요.
+          <p className="text-xs font-semibold text-inkSoft mb-3">
+            쿠팡 실제 검색 데이터로 검증된 카테고리를 전략별로 묶었어요.
+            선택하면 구체 상품을 추천해드려요.
           </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {categories.map((c, i) => (
-              <button
-                key={i}
-                onClick={() => handlePickCategory(c.category)}
-                className={`text-left rounded-xl p-3 transition ${
-                  selectedCategory === c.category
-                    ? 'bg-accentBg ring-2 ring-accent'
-                    : 'bg-white ring-1 ring-paperLine hover:ring-accent'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <span className="text-sm font-bold">{c.category}</span>
-                  {!c.verified && (
-                    <span className="text-[10px] text-inkSoft shrink-0">미검증</span>
-                  )}
-                </div>
-                {c.badges && (
-                  <div className="mb-1.5">
-                    <MarketBadgeRow badges={c.badges} />
-                  </div>
-                )}
-                <p className="text-xs text-inkSoft leading-relaxed">{c.reason}</p>
-              </button>
-            ))}
-          </div>
+          {groupedCategories.map((group, gi) => (
+            <div key={gi} className="mb-5 last:mb-0">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-sm font-bold">
+                  {group.bucket ? `${group.bucket.icon} ${group.bucket.label}` : '❔ 미검증'}
+                </span>
+              </div>
+              <p className="text-xs text-inkSoft leading-relaxed mb-2">
+                {group.bucket
+                  ? group.bucket.blurb
+                  : '실시간 쿠팡 데이터 조회에 실패해서 검증이 안 됐어요. 참고용으로만 봐주세요.'}
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {group.items.map((c) => (
+                  <button
+                    key={c.category}
+                    onClick={() => handlePickCategory(c.category)}
+                    className={`text-left rounded-xl p-3 transition ${
+                      selectedCategory === c.category
+                        ? 'bg-accentBg ring-2 ring-accent'
+                        : 'bg-white ring-1 ring-paperLine hover:ring-accent'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="text-sm font-bold">{c.category}</span>
+                    </div>
+                    {c.badges && (
+                      <div className="mb-1.5">
+                        <MarketBadgeRow badges={c.badges} />
+                      </div>
+                    )}
+                    <p className="text-xs text-inkSoft leading-relaxed">{c.reason}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
