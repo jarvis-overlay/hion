@@ -1,6 +1,10 @@
 import ProductSearch from '@/components/ProductSearch';
 import TrendForm from '@/components/TrendForm';
 
+// 쿠팡 실시간 조회는 캡차 재시도 때문에 최대 135초 가까이 걸릴 수 있다.
+// 이 값이 없으면 기본 타임아웃(짧음)에 걸려 조회가 일찍 끊길 수 있음.
+export const maxDuration = 180;
+
 export default function ComparePage() {
   return (
     <div>
