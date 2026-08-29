@@ -75,9 +75,37 @@ export interface CoupangBestseller {
 
 // 쿠팡 검색 결과를 판매량순으로 정렬해서 가져온다 - 우리 판매 데이터가
 // 아니라 쿠팡 전체(다른 셀러 포함) 시장에서 실제로 잘 팔리는 상품 신호.
+//
+// budgetMs를 주면, 응답은 왔지만(캡차 텍스트 없음) 페이지 형태가 달라
+// 파싱 결과가 0건인 경우까지 포함해서 그 시간 안에서 통째로 재시도한다
+// (unlockerMarkdown 내부 재시도는 명시적 캡차/빈 응답만 잡아내고, 이
+// "성공했지만 파싱 결과 0건"인 케이스는 못 잡기 때문). budgetMs를 안 주면
+// 예전과 동일하게 딱 1번만 시도한다 - AI 추천처럼 여러 건을 병렬로 조회할
+// 땐 이미 시간 예산이 빠듯해서 여기서 추가로 재시도하면 안 됨.
 export async function fetchCoupangBestsellers(
   keyword: string,
-  limit = 8
+  limit = 8,
+  options: { budgetMs?: number } = {}
+): Promise<CoupangBestseller[]> {
+  const deadline = Date.now() + (options.budgetMs ?? 0);
+  let lastError: unknown = null;
+
+  do {
+    try {
+      const results = await fetchCoupangBestsellersOnce(keyword, limit);
+      if (results.length > 0) return results;
+    } catch (e) {
+      lastError = e;
+    }
+  } while (Date.now() < deadline);
+
+  if (lastError) throw lastError;
+  return [];
+}
+
+async function fetchCoupangBestsellersOnce(
+  keyword: string,
+  limit: number
 ): Promise<CoupangBestseller[]> {
   // 실측 결과 실패 원인은 타임아웃보다 캡차 차단이 더 많았다 (14~20초
   // 만에 캡차로 막혀서 끝나는 패턴). 재시도를 2회로 늘려서 캡차를

@@ -591,7 +591,9 @@ export async function runProductSearch(keyword: string): Promise<ProductSearchRe
   }
 
   try {
-    const coupang = await fetchCoupangBestsellers(q, 10);
+    // 이 페이지는 요청 하나만 처리하고 maxDuration도 넉넉해서(180초),
+    // 캡차 등으로 실패하면 시간이 남는 한 계속 재시도한다.
+    const coupang = await fetchCoupangBestsellers(q, 10, { budgetMs: 150000 });
     return {
       coupang: coupang.map((c) => ({
         name: c.name,
