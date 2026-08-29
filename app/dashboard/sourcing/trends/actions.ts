@@ -4,10 +4,8 @@ import {
   fetchSearchTrend,
   fetchShoppingCategoryTrend,
   fetchShoppingKeywordTrend,
-  searchNaverShopping,
   SHOPPING_CATEGORIES,
   type TimeUnit,
-  type NaverShoppingItem,
 } from '@/lib/naver';
 import {
   recommendCategories,
@@ -574,38 +572,38 @@ export async function runCoupangSnapshot(
 
 export interface ProductSearchResult {
   coupang: CoupangSnapshotItem[];
-  naver: NaverShoppingItem[];
   coupangError: string | null;
-  naverError: string | null;
+  // 네이버 쇼핑 상품 검색 API(v1/search/shop.json)는 2026-07-31부로
+  // 완전히 종료되고 공식 대체 API가 없다 (데이터랩 트렌드만 NAVER API
+  // HUB로 이관됨, 실제 상품 목록 검색은 이관 대상이 아니었음). 코드로
+  // 고칠 수 있는 문제가 아니라서 항상 이 메시지를 고정으로 준다.
+  naverUnavailable: string;
 }
 
-// 키워드 하나로 쿠팡/네이버 각각에서 실제 판매중인 유사 상품을 따로
-// 찾아준다 (트렌드 추이가 아니라 지금 팔리고 있는 진짜 상품 목록).
-// 둘 중 하나가 실패해도(캡차/네이버 권한 이슈 등) 나머지 결과는 보여준다.
+// 키워드 하나로 쿠팡에서 실제 판매중인 유사 상품을 찾아준다 (트렌드
+// 추이가 아니라 지금 팔리고 있는 진짜 상품 목록).
 export async function runProductSearch(keyword: string): Promise<ProductSearchResult> {
   const q = keyword.trim();
+  const naverUnavailable =
+    '네이버 쇼핑 상품 검색 API는 2026년 7월 31일부로 종료되어 더 이상 조회할 수 없어요 (네이버 측 공식 대체 API 없음). 네이버쇼핑은 직접 검색해서 확인해주세요.';
   if (!q) {
-    return { coupang: [], naver: [], coupangError: null, naverError: null };
+    return { coupang: [], coupangError: null, naverUnavailable };
   }
 
-  const [coupangResult, naverResult] = await Promise.allSettled([
-    fetchCoupangBestsellers(q, 10),
-    searchNaverShopping(q, 10),
-  ]);
-
-  return {
-    coupang:
-      coupangResult.status === 'fulfilled'
-        ? coupangResult.value.map((c) => ({
-            name: c.name,
-            price: c.price,
-            reviewCount: c.reviewCount,
-            url: c.url,
-            imageUrl: c.imageUrl,
-          }))
-        : [],
-    naver: naverResult.status === 'fulfilled' ? naverResult.value : [],
-    coupangError: coupangResult.status === 'rejected' ? String(coupangResult.reason?.message || coupangResult.reason) : null,
-    naverError: naverResult.status === 'rejected' ? String(naverResult.reason?.message || naverResult.reason) : null,
-  };
+  try {
+    const coupang = await fetchCoupangBestsellers(q, 10);
+    return {
+      coupang: coupang.map((c) => ({
+        name: c.name,
+        price: c.price,
+        reviewCount: c.reviewCount,
+        url: c.url,
+        imageUrl: c.imageUrl,
+      })),
+      coupangError: null,
+      naverUnavailable,
+    };
+  } catch (e: any) {
+    return { coupang: [], coupangError: e?.message || String(e), naverUnavailable };
+  }
 }

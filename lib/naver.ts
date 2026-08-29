@@ -1,8 +1,13 @@
-// 네이버 데이터랩 오픈API 클라이언트 - 소싱할 아이템 발굴용.
-// 키워드/카테고리별 검색·쇼핑 클릭 추이를 가져와서 뜨는 아이템을 찾는 데 쓴다.
-// 공식 문서: https://developers.naver.com/docs/serviceapi/datalab/
+// 네이버 데이터랩 API 클라이언트 - 소싱할 아이템 발굴용.
+// 2026-07-31부로 openapi.naver.com 개발자센터 체계가 NAVER API HUB로
+// 이전됐다 (주소/인증 헤더가 완전히 바뀜). 데이터랩(트렌드)은 HUB로
+// 이관됐지만, 쇼핑 상품 검색(v1/search/shop.json)은 이관 없이 완전히
+// 종료돼서 대체 API가 없다 - 실제 상품 목록이 필요하면 쿠팡처럼 별도
+// 스크래핑 수단을 써야 한다.
+// 참고: https://guide.ncloud-docs.com/docs/naveropenapiv3-application
 
-const BASE = 'https://openapi.naver.com/v1/datalab';
+const TREND_URL = 'https://naverapihub.apigw.ntruss.com/search-trend/v1/search';
+const SHOPPING_BASE = 'https://naverapihub.apigw.ntruss.com/shopping/v1';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -10,15 +15,15 @@ function requireEnv(name: string): string {
   return v;
 }
 
-async function postDatalab(path: string, body: any) {
+async function postNaverHub(url: string, body: any) {
   const clientId = requireEnv('NAVER_CLIENT_ID');
   const clientSecret = requireEnv('NAVER_CLIENT_SECRET');
 
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
-      'X-Naver-Client-Id': clientId,
-      'X-Naver-Client-Secret': clientSecret,
+      'X-NCP-APIGW-API-KEY-ID': clientId,
+      'X-NCP-APIGW-API-KEY': clientSecret,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -60,7 +65,7 @@ export async function fetchSearchTrend({
   timeUnit: TimeUnit;
   keywordGroups: { groupName: string; keywords: string[] }[];
 }): Promise<DatalabResponse> {
-  return postDatalab('/search', {
+  return postNaverHub(TREND_URL, {
     startDate,
     endDate,
     timeUnit,
@@ -81,7 +86,7 @@ export async function fetchShoppingCategoryTrend({
   timeUnit: TimeUnit;
   categories: { name: string; param: string[] }[];
 }): Promise<DatalabResponse> {
-  return postDatalab('/shopping/categories', {
+  return postNaverHub(`${SHOPPING_BASE}/categories`, {
     startDate,
     endDate,
     timeUnit,
@@ -104,58 +109,13 @@ export async function fetchShoppingKeywordTrend({
   categoryCode: string;
   keywords: { name: string; param: string[] }[];
 }): Promise<DatalabResponse> {
-  return postDatalab('/shopping/category/keywords', {
+  return postNaverHub(`${SHOPPING_BASE}/category/keywords`, {
     startDate,
     endDate,
     timeUnit,
     category: categoryCode,
     keyword: keywords,
   });
-}
-
-export interface NaverShoppingItem {
-  title: string;
-  link: string;
-  image: string | null;
-  lprice: string | null; // 최저가
-  mallName: string | null;
-  productType: string | null;
-}
-
-// 네이버쇼핑 검색 API (데이터랩과는 다른 API - 같은 애플리케이션의 별도
-// 권한이라 데이터랩이 막혀있어도 이건 될 수 있고, 반대도 가능함). 실제
-// 판매중인 상품 목록을 준다 - 키워드 하나로 유사 상품을 찾을 때 씀.
-export async function searchNaverShopping(
-  query: string,
-  display = 10
-): Promise<NaverShoppingItem[]> {
-  const clientId = requireEnv('NAVER_CLIENT_ID');
-  const clientSecret = requireEnv('NAVER_CLIENT_SECRET');
-
-  const res = await fetch(
-    `https://openapi.naver.com/v1/search/shop.json?query=${encodeURIComponent(query)}&display=${display}&sort=sim`,
-    {
-      headers: {
-        'X-Naver-Client-Id': clientId,
-        'X-Naver-Client-Secret': clientSecret,
-      },
-      cache: 'no-store',
-    }
-  );
-
-  const json = await res.json();
-  if (!res.ok) {
-    throw new Error(json?.errorMessage || `네이버 쇼핑 검색 오류 (HTTP ${res.status})`);
-  }
-
-  return (json.items || []).map((it: any) => ({
-    title: String(it.title || '').replace(/<\/?b>/g, ''),
-    link: it.link,
-    image: it.image || null,
-    lprice: it.lprice || null,
-    mallName: it.mallName || null,
-    productType: it.productType || null,
-  }));
 }
 
 // 자주 쓰는 네이버쇼핑 대분류 카테고리 코드 (쇼핑인사이트 API용)
