@@ -32,6 +32,7 @@ export interface MarketBadges {
   marketScaleLabel: string; // "매우 큼" / "큼" / "중간" / "작음" / "매우 작음"
   marketScaleTier: MarketScaleTier;
   medianReviewCount: number; // 시장규모 판정 기준값
+  totalReviewCount: number; // 참고용 (목록 전체 리뷰 합계 - 전체 규모 가늠용)
   topReviewCount: number; // 참고용 (목록 내 최다 리뷰)
   competitionLabel: string; // "낮음" / "보통" / "높음"
   competitionTier: CompetitionTier;
@@ -127,6 +128,7 @@ function analyzeCoupangResults(
       marketScaleLabel,
       marketScaleTier,
       medianReviewCount: medianReviews,
+      totalReviewCount: totalReviews,
       topReviewCount: maxReviews,
       competitionLabel,
       competitionTier,
@@ -324,6 +326,10 @@ export interface ProductRecommendation {
   item: string;
   reason: string;
   verified: boolean; // false면 실시간 데이터 없이 AI 일반 지식만으로 추천된 것
+  // 이 상품의 badges가 어느 검색어로 조회한 데이터인지 - 카테고리
+  // 전체 검색이 아니라 이 좁은 검색어 기준이라는 걸 화면에 명시하기
+  // 위함(카테고리 단계 뱃지와 숫자가 달라 보여도 오류가 아님을 알림).
+  searchKeyword: string | null;
   criteria: { demand: string; competition: string; seasonality: string } | null;
   badges: MarketBadges | null;
   coupangReferences: {
@@ -395,6 +401,7 @@ export async function runProductRecommendation(
           item: f.item,
           reason: f.reason,
           verified: false,
+          searchKeyword: null,
           criteria: null,
           badges: null,
           coupangReferences: [],
@@ -472,6 +479,7 @@ export async function runProductRecommendation(
         item: d.displayName,
         reason: d.reason,
         verified: true,
+        searchKeyword: d.keyword,
         criteria: d.criteria,
         badges,
         coupangReferences: [rep, ...pool.filter((c) => c !== rep)].slice(0, 5).map((c) => ({

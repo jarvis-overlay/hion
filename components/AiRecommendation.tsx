@@ -259,7 +259,14 @@ export default function AiRecommendation() {
 
               {p.badges && (
                 <div className="mb-3">
-                  <MarketBadgeRow badges={p.badges} />
+                  <MarketBadgeRow
+                    badges={p.badges}
+                    scopeNote={
+                      p.searchKeyword
+                        ? `"${p.searchKeyword}" 검색어 기준 데이터예요 - 카테고리 전체 뱃지와 숫자가 다를 수 있어요.`
+                        : undefined
+                    }
+                  />
                 </div>
               )}
 
