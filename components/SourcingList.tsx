@@ -7,6 +7,7 @@ import {
   updateSourcingItem,
   deleteSourcingItem,
 } from '@/app/dashboard/sourcing/list/actions';
+import { computeMargin as computeMarginShared } from '@/lib/marginCalc';
 
 const STATUS_LABEL: Record<string, string> = {
   checking: '검토중',
@@ -32,25 +33,34 @@ const STAGE_STYLE: Record<string, string> = {
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
-// 마진 계산기(components/MarginCalculator.tsx)와 완전히 동일한 공식.
-// 쿠폰 할인, 매입원가, 배송비, 광고비, 기타비용까지 전부 반영해서
-// 계산한다. 매출부가세/매입부가세/쿠팡수수료는 환차·프로모션·카테고리별
-// 수수료 차이로 실제 정산액이 공식과 다를 수 있어서 자동계산하지 않고
-// 사용자가 직접 입력한 값을 그대로 쓴다.
+// 마진 계산기 페이지와 완전히 동일한 공식(lib/marginCalc.ts 공용).
+// 매출부가세/매입부가세/쿠팡수수료는 환차·프로모션·카테고리별 수수료
+// 차이로 실제 정산액이 공식과 다를 수 있어서 자동계산하지 않고 사용자가
+// 직접 입력한 값을 그대로 쓴다.
 function computeMargin(it: any) {
-  const lp = it.price ?? 0;
-  const cp = it.coupon ?? 0;
-  const p = Math.max(0, lp - cp);
-  const c = it.cost ?? 0;
-  const outputVat = it.output_vat ?? 0;
-  const importVat = it.import_vat ?? 0;
-  const fee = it.coupang_fee ?? 0;
-  const s = it.shipping ?? 0;
-  const a = it.ad_cost ?? 0;
-  const e = it.etc_cost ?? 0;
-  const profit = p - outputVat - c + importVat - fee - s - a - e;
-  const marginPct = lp > 0 ? (profit / p) * 100 : null;
-  return { lp, cp, p, c, s, a, e, fee, outputVat, importVat, profit, marginPct };
+  const result = computeMarginShared({
+    price: it.price ?? null,
+    coupon: it.coupon ?? null,
+    cost: it.cost ?? null,
+    outputVat: it.output_vat ?? null,
+    importVat: it.import_vat ?? null,
+    coupangFee: it.coupang_fee ?? null,
+    shipping: it.shipping ?? null,
+    adCost: it.ad_cost ?? null,
+    etcCost: it.etc_cost ?? null,
+  });
+  return {
+    p: result.actualPrice,
+    c: it.cost ?? 0,
+    fee: it.coupang_fee ?? 0,
+    outputVat: it.output_vat ?? 0,
+    importVat: it.import_vat ?? 0,
+    s: it.shipping ?? 0,
+    a: it.ad_cost ?? 0,
+    e: it.etc_cost ?? 0,
+    profit: result.profit,
+    marginPct: result.marginPct,
+  };
 }
 
 function marginBadgeClass(pct: number) {
@@ -70,10 +80,48 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'margin_asc', label: '마진율 낮은순' },
 ];
 
+function num(v: string): number | null {
+  if (v === '') return null;
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  const [price, setPrice] = useState(item.price != null ? String(item.price) : '');
+  const [cost, setCost] = useState(item.cost != null ? String(item.cost) : '');
+  const [coupon, setCoupon] = useState(item.coupon != null ? String(item.coupon) : '');
+  const [outputVat, setOutputVat] = useState(item.output_vat != null ? String(item.output_vat) : '');
+  const [importVat, setImportVat] = useState(item.import_vat != null ? String(item.import_vat) : '');
+  const [coupangFee, setCoupangFee] = useState(item.coupang_fee != null ? String(item.coupang_fee) : '');
+  const [shipping, setShipping] = useState(item.shipping != null ? String(item.shipping) : '');
+  const [adCost, setAdCost] = useState(item.ad_cost != null ? String(item.ad_cost) : '');
+  const [etcCost, setEtcCost] = useState(item.etc_cost != null ? String(item.etc_cost) : '');
+
+  const [showFxCalc, setShowFxCalc] = useState(false);
+  const [fxCurrency, setFxCurrency] = useState<'CNY' | 'USD'>('CNY');
+  const [fxAmount, setFxAmount] = useState('');
+  const [fxRate, setFxRate] = useState('');
+  const fxResult = (parseFloat(fxAmount) || 0) * (parseFloat(fxRate) || 0);
+
+  const margin = useMemo(
+    () =>
+      computeMarginShared({
+        price: num(price),
+        coupon: num(coupon),
+        cost: num(cost),
+        outputVat: num(outputVat),
+        importVat: num(importVat),
+        coupangFee: num(coupangFee),
+        shipping: num(shipping),
+        adCost: num(adCost),
+        etcCost: num(etcCost),
+      }),
+    [price, cost, coupon, outputVat, importVat, coupangFee, shipping, adCost, etcCost]
+  );
 
   return (
     <form
@@ -106,17 +154,19 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
       <div className="grid grid-cols-3 gap-3">
         <input
           name="price"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
           type="number"
           step="0.01"
-          defaultValue={item.price ?? ''}
           placeholder="판매가"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
         <input
           name="cost"
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
           type="number"
           step="0.01"
-          defaultValue={item.cost ?? ''}
           placeholder="매입 원가"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
@@ -127,64 +177,128 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
           className="border border-paperLine bg-white px-3 py-2 text-sm"
         />
       </div>
+
+      <button
+        type="button"
+        onClick={() => setShowFxCalc((v) => !v)}
+        className="text-left text-xs font-semibold text-inkSoft hover:text-ink flex items-center gap-1"
+      >
+        <span className={`transition-transform ${showFxCalc ? 'rotate-90' : ''}`}>▸</span>
+        환율로 매입 원가 계산하기
+      </button>
+      {showFxCalc && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-center">
+          <select
+            value={fxCurrency}
+            onChange={(e) => setFxCurrency(e.target.value as 'CNY' | 'USD')}
+            className="border border-paperLine bg-white px-2 py-2 text-sm"
+          >
+            <option value="CNY">위안 (CNY)</option>
+            <option value="USD">달러 (USD)</option>
+          </select>
+          <input
+            value={fxAmount}
+            onChange={(e) => setFxAmount(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="현지 금액"
+            className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+          />
+          <input
+            value={fxRate}
+            onChange={(e) => setFxRate(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="적용 환율 (예: 190)"
+            className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+          />
+          <button
+            type="button"
+            onClick={() => setCost(fxResult ? String(Math.round(fxResult)) : '')}
+            disabled={!fxResult}
+            className="btn-primary px-3 py-2 text-xs font-semibold disabled:opacity-40"
+          >
+            {fxResult ? `${fmt(fxResult)} 적용` : '금액/환율 입력'}
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <input
           name="coupon"
+          value={coupon}
+          onChange={(e) => setCoupon(e.target.value)}
           type="number"
           step="0.01"
-          defaultValue={item.coupon ?? ''}
-          placeholder="쿠폰 할인액"
+          placeholder="쿠폰 할인액 (선택)"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
         <input
           name="output_vat"
+          value={outputVat}
+          onChange={(e) => setOutputVat(e.target.value)}
           type="number"
           step="0.01"
-          defaultValue={item.output_vat ?? ''}
           placeholder="매출부가세"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
         <input
           name="import_vat"
+          value={importVat}
+          onChange={(e) => setImportVat(e.target.value)}
           type="number"
           step="0.01"
-          defaultValue={item.import_vat ?? ''}
           placeholder="매입부가세"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
         <input
           name="coupang_fee"
+          value={coupangFee}
+          onChange={(e) => setCoupangFee(e.target.value)}
           type="number"
           step="0.01"
-          defaultValue={item.coupang_fee ?? ''}
           placeholder="쿠팡수수료"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
         <input
           name="shipping"
+          value={shipping}
+          onChange={(e) => setShipping(e.target.value)}
           type="number"
           step="0.01"
-          defaultValue={item.shipping ?? ''}
           placeholder="배송비"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
         <input
           name="ad_cost"
+          value={adCost}
+          onChange={(e) => setAdCost(e.target.value)}
           type="number"
           step="0.01"
-          defaultValue={item.ad_cost ?? ''}
-          placeholder="광고비"
+          placeholder="광고비 (선택)"
+          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          name="etc_cost"
+          value={etcCost}
+          onChange={(e) => setEtcCost(e.target.value)}
+          type="number"
+          step="0.01"
+          placeholder="기타 비용"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
         />
       </div>
-      <input
-        name="etc_cost"
-        type="number"
-        step="0.01"
-        defaultValue={item.etc_cost ?? ''}
-        placeholder="기타 비용"
-        className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-      />
+
+      {price && (
+        <div className="flex items-center justify-between rounded-md bg-paper px-3 py-2 text-sm">
+          <span className="text-inkSoft">예상 마진</span>
+          <span className={`font-mono font-semibold ${margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
+            {(margin.profit < 0 ? '-' : '') + fmt(Math.abs(margin.profit))}
+            {margin.marginPct != null && ` (${margin.marginPct.toFixed(1)}%)`}
+          </span>
+        </div>
+      )}
+
       <textarea
         name="content"
         defaultValue={item.content || ''}
@@ -343,7 +457,7 @@ export default function SourcingList({ items }: { items: any[] }) {
                           onClick={() => setExpandedMarginId(isMarginExpanded ? null : it.id)}
                           className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${marginBadgeClass(m.marginPct)}`}
                         >
-                          마진 {m.marginPct.toFixed(1)}% {isMarginExpanded ? '▲' : '▼'}
+                          마진 {fmt(m.profit)} ({m.marginPct.toFixed(1)}%) {isMarginExpanded ? '▲' : '▼'}
                         </button>
                       )}
                     </div>
