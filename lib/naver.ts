@@ -131,3 +131,51 @@ export const SHOPPING_CATEGORIES = [
   { code: '50000008', name: '생활/건강' },
   { code: '50000009', name: '여가/생활편의' },
 ];
+
+export interface KeywordTrendSignal {
+  direction: 'up' | 'down' | 'flat';
+  changePct: number; // 최근 절반 대비 이전 절반 관심도 변화율
+  recentRatio: number; // 최근 관심도 평균 (0~100 상대값)
+}
+
+// 카테고리/상품 후보 이름 하나로 최근 3개월 네이버 검색 관심도 추이를
+// 본다. 쿠팡은 실제 판매/리뷰 데이터가 있지만 네이버 쇼핑 상품 검색
+// API는 종료돼서 그런 절대 수치가 없다 - 대신 "관심도가 오르는
+// 중인지"는 데이터랩으로 알 수 있어서, 이걸 쿠팡 데이터의 보조
+// 지표로 같이 보여준다. 실패하면(권한/네트워크 등) null - 이 신호
+// 없이도 쿠팡 기반 판단은 그대로 유효해야 하므로 호출부에서 무시
+// 가능해야 함.
+export async function fetchKeywordTrendSignal(keyword: string): Promise<KeywordTrendSignal | null> {
+  try {
+    const end = new Date();
+    const start = new Date();
+    start.setMonth(start.getMonth() - 3);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+    const res = await fetchSearchTrend({
+      startDate: fmt(start),
+      endDate: fmt(end),
+      timeUnit: 'week',
+      keywordGroups: [{ groupName: keyword, keywords: [keyword] }],
+    });
+
+    const data = res.results[0]?.data;
+    if (!data || data.length < 2) return null;
+
+    const half = Math.floor(data.length / 2);
+    const first = data.slice(0, half);
+    const second = data.slice(half);
+    const avg = (arr: { ratio: number }[]) => arr.reduce((s, d) => s + d.ratio, 0) / arr.length;
+    const a1 = avg(first);
+    const a2 = avg(second);
+    const changePct = a1 === 0 ? 0 : ((a2 - a1) / a1) * 100;
+
+    return {
+      direction: changePct >= 10 ? 'up' : changePct <= -10 ? 'down' : 'flat',
+      changePct,
+      recentRatio: a2,
+    };
+  } catch {
+    return null;
+  }
+}

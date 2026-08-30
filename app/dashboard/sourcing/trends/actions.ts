@@ -4,6 +4,7 @@ import {
   fetchSearchTrend,
   fetchShoppingCategoryTrend,
   fetchShoppingKeywordTrend,
+  fetchKeywordTrendSignal,
   SHOPPING_CATEGORIES,
   type TimeUnit,
 } from '@/lib/naver';
@@ -192,6 +193,18 @@ export interface CategoryRecommendation {
   reason: string;
   verified: boolean; // false면 실데이터 검증 없이 AI 브레인스토밍 그대로
   badges: MarketBadges | null;
+  // 우리는 쿠팡뿐 아니라 네이버에서도 판매하기 때문에, 쿠팡 실데이터와
+  // 별개로 네이버 검색 관심도 추이도 참고 신호로 같이 보여준다. 네이버
+  // 쇼핑 상품 검색 API가 종료돼서 쿠팡처럼 리뷰/판매량 절대치는 못
+  // 구하지만, 데이터랩 검색어 트렌드로 "관심도가 오르는 중인지"는 알 수
+  // 있음. 데이터가 아예 없거나(예: 검색량이 너무 적은 복합 키워드) API
+  // 실패시 null.
+  naverTrend: NaverKeywordTrend | null;
+}
+
+export interface NaverKeywordTrend {
+  direction: 'up' | 'down' | 'flat';
+  changePct: number;
 }
 
 // 1단계: 시즌 선택 + 네이버 트렌드(되면)로 카테고리 후보를 먼저
@@ -290,6 +303,7 @@ export async function runCategoryRecommendation(
         reason: c.reason,
         verified: false,
         badges: null,
+        naverTrend: null,
       })),
       consideredCategories,
     };
@@ -306,7 +320,7 @@ export async function runCategoryRecommendation(
     .map((f): CategoryRecommendation | null => {
       const badges = badgesByCategory.get(f.category);
       if (!badges) return null; // 실데이터 없는 카테고리는 검증 실패로 보고 제외
-      return { category: f.category, reason: f.reason, verified: true, badges };
+      return { category: f.category, reason: f.reason, verified: true, badges, naverTrend: null };
     })
     .filter((c): c is CategoryRecommendation => c !== null);
 
@@ -318,6 +332,19 @@ export async function runCategoryRecommendation(
   if (strategy !== 'all') {
     categories = categories.filter((c) => c.badges && strategyBucket(c.badges).key === strategy);
   }
+
+  // 쿠팡뿐 아니라 네이버에서도 판매하므로, 최종 확정된 카테고리에는
+  // 네이버 검색 관심도 추이도 참고 신호로 붙여준다. 최종 후보만
+  // 조회해서(브레인스토밍 전체가 아니라) 불필요한 API 호출을 줄임.
+  // AI가 만든 복합 카테고리명은 데이터랩에 검색량 데이터가 거의 없어서
+  // (실측 확인), 공백/슬래시/가운뎃점으로 자른 첫 단어만 조회한다.
+  const naverTrends = await Promise.all(
+    categories.map((c) => {
+      const coreKeyword = c.category.split(/[\s/·]+/)[0];
+      return fetchKeywordTrendSignal(coreKeyword).catch(() => null);
+    })
+  );
+  categories = categories.map((c, i) => ({ ...c, naverTrend: naverTrends[i] }));
 
   return { categories, consideredCategories };
 }

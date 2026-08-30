@@ -43,7 +43,15 @@ export function Badge({ tier, children }: { tier: BadgeTier; children: ReactNode
 // - 카테고리 단계 뱃지와 상품 단계 뱃지는 서로 다른 검색어를 조회한
 // 결과라 숫자가 달라 보일 수 있는데, 그게 오류가 아니라는 걸 명확히
 // 하기 위함.
-export function MarketBadgeRow({ badges, scopeNote }: { badges: MarketBadges; scopeNote?: string }) {
+export function MarketBadgeRow({
+  badges,
+  scopeNote,
+  extra,
+}: {
+  badges: MarketBadges;
+  scopeNote?: string;
+  extra?: ReactNode;
+}) {
   return (
     <div>
       <div className="flex flex-wrap gap-1.5">
@@ -55,6 +63,7 @@ export function MarketBadgeRow({ badges, scopeNote }: { badges: MarketBadges; sc
           ⚔️ 경쟁 {badges.competitionLabel} (검증 경쟁자 {badges.meaningfulCompetitorCount}/{badges.productCount}개)
         </Badge>
         <Badge tier="neutral">💰 {badges.priceRange}</Badge>
+        {extra}
       </div>
       {scopeNote && <p className="text-[10px] text-inkSoft mt-1">{scopeNote}</p>}
     </div>

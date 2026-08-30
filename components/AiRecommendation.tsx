@@ -9,7 +9,7 @@ import {
   type StrategyKey,
 } from '@/app/dashboard/sourcing/trends/actions';
 import type { Season } from '@/lib/ai';
-import { MarketBadgeRow, strategyBucket, type StrategyBucket, STRATEGY_OPTIONS } from '@/components/MarketBadge';
+import { Badge, MarketBadgeRow, strategyBucket, type StrategyBucket, STRATEGY_OPTIONS } from '@/components/MarketBadge';
 
 const SEASON_OPTIONS: { value: Season; label: string }[] = [
   { value: 'summer', label: '여름 시즌' },
@@ -407,7 +407,26 @@ function CategoryCard({
       </div>
       {c.badges && (
         <div className="mb-1.5">
-          <MarketBadgeRow badges={c.badges} />
+          <MarketBadgeRow
+            badges={c.badges}
+            extra={
+              c.naverTrend && (
+                <Badge
+                  tier={
+                    c.naverTrend.direction === 'up'
+                      ? 'good'
+                      : c.naverTrend.direction === 'down'
+                      ? 'bad'
+                      : 'neutral'
+                  }
+                >
+                  {c.naverTrend.direction === 'up' ? '📈' : c.naverTrend.direction === 'down' ? '📉' : '➖'} 네이버
+                  관심도 {c.naverTrend.changePct >= 0 ? '+' : ''}
+                  {c.naverTrend.changePct.toFixed(0)}%
+                </Badge>
+              )
+            }
+          />
         </div>
       )}
       <p className="text-xs text-inkSoft leading-relaxed">{c.reason}</p>
