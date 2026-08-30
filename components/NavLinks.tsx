@@ -74,7 +74,7 @@ export default function NavLinks() {
               </button>
             )}
             {isOpen && (
-              <div className="flex flex-col gap-0.5">
+              <div className={`flex flex-col gap-0.5 ${group.label ? 'nav-group-items' : ''}`}>
                 {group.items.map((item) => {
                   const isActive =
                     item.href === '/dashboard'

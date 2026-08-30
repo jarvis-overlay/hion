@@ -67,27 +67,32 @@ h1, h2, h3, .font-display {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 800;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: #9CA3AF;
-  padding: 0 12px;
-  margin-top: 26px;
-  margin-bottom: 10px;
-  padding-top: 14px;
-  border-top: 1px solid #F1F1F4;
+  letter-spacing: 0.02em;
+  color: #4B5563;
+  background: #EEF0F4;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-top: 22px;
+  margin-bottom: 6px;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .nav-section-label:hover {
-  color: #6B7280;
+  background: #E4E7EC;
+  color: #1F2430;
 }
 .nav-section-chevron {
   font-size: 10px;
-  color: #C1C4CC;
+  color: #9CA3AF;
   transition: transform 0.15s ease;
 }
 .nav-section-chevron.open {
   transform: rotate(90deg);
+}
+.nav-group-items {
+  margin-left: 12px;
+  padding-left: 10px;
+  border-left: 2px solid #EEF0F4;
 }
