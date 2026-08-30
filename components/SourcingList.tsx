@@ -448,8 +448,8 @@ function SuppliersSection({ item }: { item: any }) {
             >
               <div className="min-w-0 flex-1">
                 {s.link ? (
-                  <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline break-all">
-                    {s.link}
+                  <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline">
+                    [링크]
                   </a>
                 ) : (
                   <span className="text-inkSoft">링크 없음</span>
@@ -624,9 +624,9 @@ export default function SourcingList({ items }: { items: any[] }) {
                         href={it.link}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-xs text-profit underline break-all"
+                        className="text-xs text-profit underline"
                       >
-                        {it.link}
+                        [링크]
                       </a>
                     )}
                   </div>
