@@ -4,10 +4,21 @@ import SourcingList from '@/components/SourcingList';
 
 export default async function SourcingPage() {
   const supabase = createClient();
-  const { data: items } = await supabase
+  // 옵션/공급처 테이블 마이그레이션을 아직 안 돌렸으면 이 조인 쿼리
+  // 자체가 실패한다 - 그런 경우에도 기존 소싱 리스트는 그대로 보이도록
+  // (옵션/공급처 없이) 예전 방식으로 한 번 더 시도한다.
+  let { data: items, error } = await supabase
     .from('sourcing_items')
     .select('*, sourcing_item_options(*), sourcing_item_suppliers(*)')
     .order('created_at', { ascending: false });
+
+  if (error) {
+    const fallback = await supabase
+      .from('sourcing_items')
+      .select('*')
+      .order('created_at', { ascending: false });
+    items = fallback.data;
+  }
 
   return (
     <div>
