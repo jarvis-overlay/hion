@@ -8,6 +8,7 @@ export default function SourcingForm() {
   const [isPending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [showMarginDetail, setShowMarginDetail] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="card p-5 mb-6">
@@ -24,7 +25,12 @@ export default function SourcingForm() {
           ref={formRef}
           action={(fd) =>
             startTransition(async () => {
-              await addSourcingItem(fd);
+              setError(null);
+              const res = await addSourcingItem(fd);
+              if ('error' in res) {
+                setError(res.error);
+                return;
+              }
               formRef.current?.reset();
               setOpen(false);
               setShowMarginDetail(false);
@@ -133,6 +139,11 @@ export default function SourcingForm() {
             rows={2}
             className="border border-paperLine bg-white px-3 py-2 text-sm"
           />
+          {error && (
+            <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">
+              등록 실패: {error}
+            </p>
+          )}
           <button
             type="submit"
             disabled={isPending}

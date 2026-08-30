@@ -73,13 +73,19 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <form
       ref={formRef}
       action={(fd) =>
         startTransition(async () => {
-          await updateSourcingItem(item.id, fd);
+          setError(null);
+          const res = await updateSourcingItem(item.id, fd);
+          if ('error' in res) {
+            setError(res.error);
+            return;
+          }
           onDone();
         })
       }
@@ -186,6 +192,9 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
         rows={2}
         className="border border-paperLine bg-white px-3 py-2 text-sm"
       />
+      {error && (
+        <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">저장 실패: {error}</p>
+      )}
       <div className="flex gap-2">
         <button
           type="submit"

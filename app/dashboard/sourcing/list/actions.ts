@@ -10,21 +10,23 @@ function numOrNull(fd: FormData, key: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function addSourcingItem(formData: FormData) {
+export async function addSourcingItem(
+  formData: FormData
+): Promise<{ error: string } | { success: true }> {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return;
+  if (!user) return { error: '로그인이 필요해요.' };
 
   const title = String(formData.get('title') || '').trim();
   const link = String(formData.get('link') || '').trim();
   const content = String(formData.get('content') || '').trim();
   const moq = String(formData.get('moq') || '').trim();
 
-  if (!title) return;
+  if (!title) return { error: '상품명을 입력해주세요.' };
 
-  await supabase.from('sourcing_items').insert({
+  const { error } = await supabase.from('sourcing_items').insert({
     title,
     link: link || null,
     content: content || null,
@@ -41,18 +43,24 @@ export async function addSourcingItem(formData: FormData) {
     author_email: user.email,
   });
 
+  if (error) return { error: error.message };
+
   revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
 }
 
 // 카드 인라인 수정 - 상태/후보-확정 말고 나머지 항목(상품명, 링크,
 // 메모, 마진 관련 수치 전체)까지 한번에 고칠 수 있어야 한다는 요청으로
 // 추가함.
-export async function updateSourcingItem(id: string, formData: FormData) {
+export async function updateSourcingItem(
+  id: string,
+  formData: FormData
+): Promise<{ error: string } | { success: true }> {
   const supabase = createClient();
   const title = String(formData.get('title') || '').trim();
-  if (!title) return;
+  if (!title) return { error: '상품명을 입력해주세요.' };
 
-  await supabase
+  const { error } = await supabase
     .from('sourcing_items')
     .update({
       title,
@@ -71,23 +79,29 @@ export async function updateSourcingItem(id: string, formData: FormData) {
     })
     .eq('id', id);
 
+  if (error) return { error: error.message };
+
   revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
 }
 
 export async function updateSourcingStatus(id: string, status: string) {
   const supabase = createClient();
-  await supabase.from('sourcing_items').update({ status }).eq('id', id);
+  const { error } = await supabase.from('sourcing_items').update({ status }).eq('id', id);
+  if (error) console.error('[sourcing] updateSourcingStatus 실패:', error.message);
   revalidatePath('/dashboard/sourcing/list');
 }
 
 export async function updateSourcingStage(id: string, stage: string) {
   const supabase = createClient();
-  await supabase.from('sourcing_items').update({ stage }).eq('id', id);
+  const { error } = await supabase.from('sourcing_items').update({ stage }).eq('id', id);
+  if (error) console.error('[sourcing] updateSourcingStage 실패:', error.message);
   revalidatePath('/dashboard/sourcing/list');
 }
 
 export async function deleteSourcingItem(id: string) {
   const supabase = createClient();
-  await supabase.from('sourcing_items').delete().eq('id', id);
+  const { error } = await supabase.from('sourcing_items').delete().eq('id', id);
+  if (error) console.error('[sourcing] deleteSourcingItem 실패:', error.message);
   revalidatePath('/dashboard/sourcing/list');
 }
