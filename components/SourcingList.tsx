@@ -6,8 +6,13 @@ import {
   updateSourcingStage,
   updateSourcingItem,
   deleteSourcingItem,
+  addSourcingOption,
+  deleteSourcingOption,
+  addSourcingSupplier,
+  deleteSourcingSupplier,
 } from '@/app/dashboard/sourcing/list/actions';
 import { computeMargin as computeMarginShared } from '@/lib/marginCalc';
+import FxCalculator from '@/components/FxCalculator';
 
 const STATUS_LABEL: Record<string, string> = {
   checking: '검토중',
@@ -101,12 +106,6 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
   const [adCost, setAdCost] = useState(item.ad_cost != null ? String(item.ad_cost) : '');
   const [etcCost, setEtcCost] = useState(item.etc_cost != null ? String(item.etc_cost) : '');
 
-  const [showFxCalc, setShowFxCalc] = useState(false);
-  const [fxCurrency, setFxCurrency] = useState<'CNY' | 'USD'>('CNY');
-  const [fxAmount, setFxAmount] = useState('');
-  const [fxRate, setFxRate] = useState('');
-  const fxResult = (parseFloat(fxAmount) || 0) * (parseFloat(fxRate) || 0);
-
   const margin = useMemo(
     () =>
       computeMarginShared({
@@ -178,50 +177,7 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
         />
       </div>
 
-      <button
-        type="button"
-        onClick={() => setShowFxCalc((v) => !v)}
-        className="text-left text-xs font-semibold text-inkSoft hover:text-ink flex items-center gap-1"
-      >
-        <span className={`transition-transform ${showFxCalc ? 'rotate-90' : ''}`}>▸</span>
-        환율로 매입 원가 계산하기
-      </button>
-      {showFxCalc && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-center">
-          <select
-            value={fxCurrency}
-            onChange={(e) => setFxCurrency(e.target.value as 'CNY' | 'USD')}
-            className="border border-paperLine bg-white px-2 py-2 text-sm"
-          >
-            <option value="CNY">위안 (CNY)</option>
-            <option value="USD">달러 (USD)</option>
-          </select>
-          <input
-            value={fxAmount}
-            onChange={(e) => setFxAmount(e.target.value)}
-            type="number"
-            step="0.01"
-            placeholder="현지 금액"
-            className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-          />
-          <input
-            value={fxRate}
-            onChange={(e) => setFxRate(e.target.value)}
-            type="number"
-            step="0.01"
-            placeholder="적용 환율 (예: 190)"
-            className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-          />
-          <button
-            type="button"
-            onClick={() => setCost(fxResult ? String(Math.round(fxResult)) : '')}
-            disabled={!fxResult}
-            className="btn-primary px-3 py-2 text-xs font-semibold disabled:opacity-40"
-          >
-            {fxResult ? `${fmt(fxResult)} 적용` : '금액/환율 입력'}
-          </button>
-        </div>
-      )}
+      <FxCalculator onApply={(krw) => setCost(String(Math.round(krw)))} />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <input
@@ -329,6 +285,378 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
   );
 }
 
+// 같은 상품이라도 색상/사이즈 등 옵션마다 가격·원가가 달라서 마진을
+// 따로 계산해야 한다는 요청으로 추가함.
+function OptionAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onDone: () => void }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [price, setPrice] = useState('');
+  const [cost, setCost] = useState('');
+  const [showDetail, setShowDetail] = useState(false);
+  const [coupon, setCoupon] = useState('');
+  const [outputVat, setOutputVat] = useState('');
+  const [importVat, setImportVat] = useState('');
+  const [coupangFee, setCoupangFee] = useState('');
+  const [shipping, setShipping] = useState('');
+  const [adCost, setAdCost] = useState('');
+  const [etcCost, setEtcCost] = useState('');
+
+  const margin = useMemo(
+    () =>
+      computeMarginShared({
+        price: num(price),
+        coupon: num(coupon),
+        cost: num(cost),
+        outputVat: num(outputVat),
+        importVat: num(importVat),
+        coupangFee: num(coupangFee),
+        shipping: num(shipping),
+        adCost: num(adCost),
+        etcCost: num(etcCost),
+      }),
+    [price, cost, coupon, outputVat, importVat, coupangFee, shipping, adCost, etcCost]
+  );
+
+  return (
+    <form
+      ref={formRef}
+      action={(fd) =>
+        startTransition(async () => {
+          setError(null);
+          const res = await addSourcingOption(sourcingItemId, fd);
+          if ('error' in res) {
+            setError(res.error);
+            return;
+          }
+          formRef.current?.reset();
+          setPrice('');
+          setCost('');
+          setCoupon('');
+          setOutputVat('');
+          setImportVat('');
+          setCoupangFee('');
+          setShipping('');
+          setAdCost('');
+          setEtcCost('');
+          onDone();
+        })
+      }
+      className="grid gap-2 bg-paper rounded-md p-3"
+    >
+      <div className="grid grid-cols-3 gap-2">
+        <input
+          name="name"
+          placeholder="옵션명 (예: 블랙/L)"
+          required
+          className="border border-paperLine bg-white px-2 py-1.5 text-xs col-span-1"
+        />
+        <input
+          name="price"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          type="number"
+          step="0.01"
+          placeholder="판매가"
+          className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+        />
+        <input
+          name="cost"
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
+          type="number"
+          step="0.01"
+          placeholder="매입 원가"
+          className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+        />
+      </div>
+
+      <FxCalculator onApply={(krw) => setCost(String(Math.round(krw)))} />
+
+      <button
+        type="button"
+        onClick={() => setShowDetail((v) => !v)}
+        className="text-left text-[11px] font-semibold text-inkSoft hover:text-ink flex items-center gap-1"
+      >
+        <span className={`transition-transform ${showDetail ? 'rotate-90' : ''}`}>▸</span>
+        마진 상세 항목
+      </button>
+      {showDetail && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <input
+            name="coupon"
+            value={coupon}
+            onChange={(e) => setCoupon(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="쿠폰 (선택)"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+          />
+          <input
+            name="output_vat"
+            value={outputVat}
+            onChange={(e) => setOutputVat(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="매출부가세"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+          />
+          <input
+            name="import_vat"
+            value={importVat}
+            onChange={(e) => setImportVat(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="매입부가세"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+          />
+          <input
+            name="coupang_fee"
+            value={coupangFee}
+            onChange={(e) => setCoupangFee(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="쿠팡수수료"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+          />
+          <input
+            name="shipping"
+            value={shipping}
+            onChange={(e) => setShipping(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="배송비"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+          />
+          <input
+            name="ad_cost"
+            value={adCost}
+            onChange={(e) => setAdCost(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="광고비 (선택)"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+          />
+          <input
+            name="etc_cost"
+            value={etcCost}
+            onChange={(e) => setEtcCost(e.target.value)}
+            type="number"
+            step="0.01"
+            placeholder="기타 비용"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+          />
+        </div>
+      )}
+
+      {price && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-inkSoft">예상 마진</span>
+          <span className={`font-mono font-semibold ${margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
+            {(margin.profit < 0 ? '-' : '') + fmt(Math.abs(margin.profit))}
+            {margin.marginPct != null && ` (${margin.marginPct.toFixed(1)}%)`}
+          </span>
+        </div>
+      )}
+
+      {error && <p className="text-[11px] text-warn bg-warnBg rounded px-2 py-1">{error}</p>}
+      <button
+        type="submit"
+        disabled={isPending}
+        className="btn-primary py-1.5 text-xs font-semibold disabled:opacity-50"
+      >
+        {isPending ? '추가 중...' : '옵션 추가'}
+      </button>
+    </form>
+  );
+}
+
+function OptionsSection({ item }: { item: any }) {
+  const [adding, setAdding] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const options: any[] = item.sourcing_item_options || [];
+
+  return (
+    <div className="rounded-md ring-1 ring-paperLine p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-inkSoft">옵션 구성 ({options.length})</span>
+        <button
+          onClick={() => setAdding((v) => !v)}
+          className="text-xs text-accent font-semibold"
+        >
+          {adding ? '닫기' : '+ 옵션 추가'}
+        </button>
+      </div>
+
+      {options.length > 0 && (
+        <div className="grid gap-1.5 mb-2">
+          {options.map((o) => {
+            const m = computeMarginShared({
+              price: o.price ?? null,
+              coupon: o.coupon ?? null,
+              cost: o.cost ?? null,
+              outputVat: o.output_vat ?? null,
+              importVat: o.import_vat ?? null,
+              coupangFee: o.coupang_fee ?? null,
+              shipping: o.shipping ?? null,
+              adCost: o.ad_cost ?? null,
+              etcCost: o.etc_cost ?? null,
+            });
+            return (
+              <div key={o.id} className="flex items-center justify-between gap-2 text-xs bg-paper rounded px-2 py-1.5">
+                <span className="font-medium truncate">{o.name}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {o.price != null && <span className="font-mono text-inkSoft">{o.price.toLocaleString()}원</span>}
+                  {m.marginPct != null && (
+                    <span className={`px-1.5 py-0.5 rounded-full ${marginBadgeClass(m.marginPct)}`}>
+                      {fmt(m.profit)} ({m.marginPct.toFixed(1)}%)
+                    </span>
+                  )}
+                  <button
+                    onClick={() => startTransition(() => deleteSourcingOption(o.id))}
+                    disabled={isPending}
+                    className="text-inkSoft hover:text-red-700"
+                  >
+                    삭제
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {adding && <OptionAddForm sourcingItemId={item.id} onDone={() => setAdding(false)} />}
+    </div>
+  );
+}
+
+const CURRENCY_LABEL: Record<string, string> = { CNY: '¥', USD: '$', KRW: '₩' };
+
+// 하나의 상품을 소싱할 때 여러 1688/알리바바 공급처를 비교하면서
+// 찾는 경우가 있다는 요청으로 추가함 - 링크+가격을 여러 개 저장.
+function SupplierAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onDone: () => void }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <form
+      ref={formRef}
+      action={(fd) =>
+        startTransition(async () => {
+          setError(null);
+          const res = await addSourcingSupplier(sourcingItemId, fd);
+          if ('error' in res) {
+            setError(res.error);
+            return;
+          }
+          formRef.current?.reset();
+          onDone();
+        })
+      }
+      className="grid gap-2 bg-paper rounded-md p-3"
+    >
+      <input
+        name="link"
+        placeholder="공급처 링크 (1688, 알리바바 등)"
+        className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+      />
+      <div className="grid grid-cols-3 gap-2">
+        <select name="currency" defaultValue="CNY" className="border border-paperLine bg-white px-2 py-1.5 text-xs">
+          <option value="CNY">위안 (CNY)</option>
+          <option value="USD">달러 (USD)</option>
+          <option value="KRW">원 (KRW)</option>
+        </select>
+        <input
+          name="price"
+          type="number"
+          step="0.01"
+          placeholder="가격"
+          className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono col-span-2"
+        />
+      </div>
+      <input
+        name="notes"
+        placeholder="메모 (MOQ, 품질 등, 선택)"
+        className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+      />
+      {error && <p className="text-[11px] text-warn bg-warnBg rounded px-2 py-1">{error}</p>}
+      <button
+        type="submit"
+        disabled={isPending}
+        className="btn-primary py-1.5 text-xs font-semibold disabled:opacity-50"
+      >
+        {isPending ? '추가 중...' : '공급처 추가'}
+      </button>
+    </form>
+  );
+}
+
+function SuppliersSection({ item }: { item: any }) {
+  const [adding, setAdding] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const suppliers: any[] = item.sourcing_item_suppliers || [];
+  // 가격 비교가 목적이니 싼 순으로 정렬 (가격 없는 건 뒤로)
+  const sorted = [...suppliers].sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+  const minPrice = sorted.find((s) => s.price != null)?.price;
+
+  return (
+    <div className="rounded-md ring-1 ring-paperLine p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-inkSoft">공급처 비교 ({suppliers.length})</span>
+        <button
+          onClick={() => setAdding((v) => !v)}
+          className="text-xs text-accent font-semibold"
+        >
+          {adding ? '닫기' : '+ 공급처 추가'}
+        </button>
+      </div>
+
+      {sorted.length > 0 && (
+        <div className="grid gap-1.5 mb-2">
+          {sorted.map((s) => (
+            <div
+              key={s.id}
+              className={`flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 ${
+                s.price != null && s.price === minPrice ? 'bg-accentBg' : 'bg-paper'
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                {s.link ? (
+                  <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline break-all">
+                    {s.link}
+                  </a>
+                ) : (
+                  <span className="text-inkSoft">링크 없음</span>
+                )}
+                {s.notes && <p className="text-inkSoft mt-0.5">{s.notes}</p>}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {s.price != null && (
+                  <span className="font-mono">
+                    {CURRENCY_LABEL[s.currency] || ''}
+                    {s.price.toLocaleString()}
+                  </span>
+                )}
+                <button
+                  onClick={() => startTransition(() => deleteSourcingSupplier(s.id))}
+                  disabled={isPending}
+                  className="text-inkSoft hover:text-red-700"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding && <SupplierAddForm sourcingItemId={item.id} onDone={() => setAdding(false)} />}
+    </div>
+  );
+}
+
 export default function SourcingList({ items }: { items: any[] }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -336,6 +664,8 @@ export default function SourcingList({ items }: { items: any[] }) {
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
+  const [expandedOptionsId, setExpandedOptionsId] = useState<string | null>(null);
+  const [expandedSuppliersId, setExpandedSuppliersId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const rows = useMemo(() => {
@@ -427,6 +757,10 @@ export default function SourcingList({ items }: { items: any[] }) {
             const m = it.margin;
             const isEditing = editingId === it.id;
             const isMarginExpanded = expandedMarginId === it.id;
+            const isOptionsExpanded = expandedOptionsId === it.id;
+            const isSuppliersExpanded = expandedSuppliersId === it.id;
+            const optionCount = (it.sourcing_item_options || []).length;
+            const supplierCount = (it.sourcing_item_suppliers || []).length;
 
             if (isEditing) {
               return (
@@ -514,6 +848,24 @@ export default function SourcingList({ items }: { items: any[] }) {
                 )}
 
                 {it.content && <p className="text-xs text-ink">{it.content}</p>}
+
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <button
+                    onClick={() => setExpandedOptionsId(isOptionsExpanded ? null : it.id)}
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                  >
+                    옵션 구성 {optionCount > 0 && `(${optionCount})`} {isOptionsExpanded ? '▲' : '▼'}
+                  </button>
+                  <button
+                    onClick={() => setExpandedSuppliersId(isSuppliersExpanded ? null : it.id)}
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                  >
+                    공급처 비교 {supplierCount > 0 && `(${supplierCount})`} {isSuppliersExpanded ? '▲' : '▼'}
+                  </button>
+                </div>
+
+                {isOptionsExpanded && <OptionsSection item={it} />}
+                {isSuppliersExpanded && <SuppliersSection item={it} />}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
                   <span className="text-[11px] text-inkSoft">

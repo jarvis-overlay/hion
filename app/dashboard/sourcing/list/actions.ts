@@ -105,3 +105,74 @@ export async function deleteSourcingItem(id: string) {
   if (error) console.error('[sourcing] deleteSourcingItem 실패:', error.message);
   revalidatePath('/dashboard/sourcing/list');
 }
+
+// 같은 상품이라도 색상/사이즈 등 옵션마다 가격·원가가 달라서 마진을
+// 따로 계산해야 한다는 요청으로 추가함 - sourcing_items 1건에 여러
+// 옵션을 붙일 수 있음.
+export async function addSourcingOption(
+  sourcingItemId: string,
+  formData: FormData
+): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const name = String(formData.get('name') || '').trim();
+  if (!name) return { error: '옵션명을 입력해주세요.' };
+
+  const { error } = await supabase.from('sourcing_item_options').insert({
+    sourcing_item_id: sourcingItemId,
+    name,
+    price: numOrNull(formData, 'price'),
+    cost: numOrNull(formData, 'cost'),
+    coupon: numOrNull(formData, 'coupon'),
+    output_vat: numOrNull(formData, 'output_vat'),
+    import_vat: numOrNull(formData, 'import_vat'),
+    coupang_fee: numOrNull(formData, 'coupang_fee'),
+    shipping: numOrNull(formData, 'shipping'),
+    ad_cost: numOrNull(formData, 'ad_cost'),
+    etc_cost: numOrNull(formData, 'etc_cost'),
+  });
+
+  if (error) return { error: error.message };
+
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
+export async function deleteSourcingOption(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from('sourcing_item_options').delete().eq('id', id);
+  if (error) console.error('[sourcing] deleteSourcingOption 실패:', error.message);
+  revalidatePath('/dashboard/sourcing/list');
+}
+
+// 하나의 상품을 소싱할 때 여러 1688/알리바바 공급처를 가격 비교하면서
+// 찾는 경우가 있다는 요청으로 추가함 - sourcing_items 1건에 여러
+// 공급처 후보(링크+가격)를 붙일 수 있음.
+export async function addSourcingSupplier(
+  sourcingItemId: string,
+  formData: FormData
+): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const link = String(formData.get('link') || '').trim();
+  const price = numOrNull(formData, 'price');
+  if (!link && price == null) return { error: '링크나 가격 중 하나는 입력해주세요.' };
+
+  const { error } = await supabase.from('sourcing_item_suppliers').insert({
+    sourcing_item_id: sourcingItemId,
+    link: link || null,
+    price,
+    currency: String(formData.get('currency') || 'CNY'),
+    notes: String(formData.get('notes') || '').trim() || null,
+  });
+
+  if (error) return { error: error.message };
+
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
+export async function deleteSourcingSupplier(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from('sourcing_item_suppliers').delete().eq('id', id);
+  if (error) console.error('[sourcing] deleteSourcingSupplier 실패:', error.message);
+  revalidatePath('/dashboard/sourcing/list');
+}

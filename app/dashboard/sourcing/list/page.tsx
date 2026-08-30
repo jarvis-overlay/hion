@@ -6,7 +6,7 @@ export default async function SourcingPage() {
   const supabase = createClient();
   const { data: items } = await supabase
     .from('sourcing_items')
-    .select('*')
+    .select('*, sourcing_item_options(*), sourcing_item_suppliers(*)')
     .order('created_at', { ascending: false });
 
   return (

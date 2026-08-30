@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useTransition } from 'react';
 import { addSourcingItem } from '@/app/dashboard/sourcing/list/actions';
 import { computeMargin } from '@/lib/marginCalc';
+import FxCalculator from '@/components/FxCalculator';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
@@ -29,14 +30,6 @@ export default function SourcingForm() {
   const [shipping, setShipping] = useState('');
   const [adCost, setAdCost] = useState('');
   const [etcCost, setEtcCost] = useState('');
-
-  // 환율로 매입가 계산 - 1688/알리바바는 위안/달러로 가격이 나오니,
-  // 현지 금액과 환율을 넣으면 원화로 환산해서 매입 원가 칸에 채워준다.
-  const [showFxCalc, setShowFxCalc] = useState(false);
-  const [fxCurrency, setFxCurrency] = useState<'CNY' | 'USD'>('CNY');
-  const [fxAmount, setFxAmount] = useState('');
-  const [fxRate, setFxRate] = useState('');
-  const fxResult = (parseFloat(fxAmount) || 0) * (parseFloat(fxRate) || 0);
 
   const margin = useMemo(
     () =>
@@ -65,8 +58,6 @@ export default function SourcingForm() {
     setShipping('');
     setAdCost('');
     setEtcCost('');
-    setFxAmount('');
-    setFxRate('');
   }
 
   return (
@@ -93,7 +84,6 @@ export default function SourcingForm() {
               resetAll();
               setOpen(false);
               setShowMarginDetail(false);
-              setShowFxCalc(false);
             })
           }
           className="grid gap-3 mt-4"
@@ -135,50 +125,7 @@ export default function SourcingForm() {
             />
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowFxCalc((v) => !v)}
-            className="text-left text-xs font-semibold text-inkSoft hover:text-ink flex items-center gap-1"
-          >
-            <span className={`transition-transform ${showFxCalc ? 'rotate-90' : ''}`}>▸</span>
-            환율로 매입 원가 계산하기
-          </button>
-          {showFxCalc && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-center">
-              <select
-                value={fxCurrency}
-                onChange={(e) => setFxCurrency(e.target.value as 'CNY' | 'USD')}
-                className="border border-paperLine bg-white px-2 py-2 text-sm"
-              >
-                <option value="CNY">위안 (CNY)</option>
-                <option value="USD">달러 (USD)</option>
-              </select>
-              <input
-                value={fxAmount}
-                onChange={(e) => setFxAmount(e.target.value)}
-                type="number"
-                step="0.01"
-                placeholder="현지 금액"
-                className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-              />
-              <input
-                value={fxRate}
-                onChange={(e) => setFxRate(e.target.value)}
-                type="number"
-                step="0.01"
-                placeholder="적용 환율 (예: 190)"
-                className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => setCost(fxResult ? String(Math.round(fxResult)) : '')}
-                disabled={!fxResult}
-                className="btn-primary px-3 py-2 text-xs font-semibold disabled:opacity-40"
-              >
-                {fxResult ? `${fmt(fxResult)} 적용` : '금액/환율 입력'}
-              </button>
-            </div>
-          )}
+          <FxCalculator onApply={(krw) => setCost(String(Math.round(krw)))} />
 
           <button
             type="button"
