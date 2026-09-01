@@ -10,7 +10,7 @@ export default function FxCalculator({ onApply }: { onApply: (krw: number) => vo
   const [show, setShow] = useState(false);
   const [currency, setCurrency] = useState<'CNY' | 'USD'>('CNY');
   const [amount, setAmount] = useState('');
-  const [rate, setRate] = useState('');
+  const [rate, setRate] = useState('300');
   const result = (parseFloat(amount) || 0) * (parseFloat(rate) || 0);
 
   return (

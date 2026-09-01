@@ -57,7 +57,7 @@ export default function SourcingForm() {
             placeholder="소싱 링크 (1688, 알리바바 등)"
             className="border border-paperLine bg-white px-3 py-2 text-sm"
           />
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <input
               name="price"
               value={f.price}
@@ -66,6 +66,14 @@ export default function SourcingForm() {
               step="0.01"
               placeholder="판매가"
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+            />
+            <input
+              readOnly
+              name="output_vat"
+              value={f.price !== '' ? Math.round(f.outputVat) : ''}
+              placeholder="매출부가세 (자동)"
+              title="판매가 / 11로 자동 계산돼요"
+              className="border border-paperLine bg-paper text-inkSoft px-3 py-2 text-sm font-mono cursor-not-allowed"
             />
             <input
               name="cost"
@@ -96,12 +104,21 @@ export default function SourcingForm() {
           {showMarginDetail && <MarginDetailFields fields={f} />}
 
           {f.price && (
-            <div className="flex items-center justify-between rounded-md bg-paper px-3 py-2 text-sm">
-              <span className="text-inkSoft">예상 마진</span>
-              <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
-                {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
-                {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
-              </span>
+            <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1">
+              <div className="flex items-center justify-between">
+                <span className="text-inkSoft">예상 마진</span>
+                <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
+                  {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
+                  {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-inkSoft text-xs">순수 마진 (광고비 제외)</span>
+                <span className="font-mono text-xs text-inkSoft">
+                  {(f.pureProfit < 0 ? '-' : '') + fmt(Math.abs(f.pureProfit))}
+                  {f.pureMarginPct != null && ` (${f.pureMarginPct.toFixed(1)}%)`}
+                </span>
+              </div>
             </div>
           )}
 

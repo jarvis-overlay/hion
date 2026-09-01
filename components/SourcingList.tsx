@@ -97,14 +97,18 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
     cost: item.cost,
     coupon: item.coupon,
     importVat: item.import_vat,
-    // 기존에 저장된 쿠팡수수료 금액으로부터 역산한 비율을 기본값으로
-    // 보여준다 - 실제 판매가가 있어야 역산 가능, 없으면 기본 8.6%.
+    // 기존에 저장된 쿠팡수수료/광고비 금액으로부터 역산한 비율을
+    // 기본값으로 보여준다 - 실제 판매가가 있어야 역산 가능, 없으면 각각
+    // 기본 8.6%/10%.
     feeRatePct:
       item.price && item.coupang_fee != null
         ? Number(((item.coupang_fee / (item.price - (item.coupon || 0))) * 100).toFixed(2))
         : null,
+    adRatePct:
+      item.price && item.ad_cost != null
+        ? Number(((item.ad_cost / (item.price - (item.coupon || 0))) * 100).toFixed(2))
+        : null,
     shipping: item.shipping,
-    adCost: item.ad_cost,
     etcCost: item.etc_cost,
   });
 
@@ -136,7 +140,7 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
         placeholder="소싱 링크"
         className="border border-paperLine bg-white px-3 py-2 text-sm"
       />
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <input
           name="price"
           value={f.price}
@@ -145,6 +149,14 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
           step="0.01"
           placeholder="판매가"
           className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+        />
+        <input
+          readOnly
+          name="output_vat"
+          value={f.price !== '' ? Math.round(f.outputVat) : ''}
+          placeholder="매출부가세 (자동)"
+          title="판매가 / 11로 자동 계산돼요"
+          className="border border-paperLine bg-paper text-inkSoft px-3 py-2 text-sm font-mono cursor-not-allowed"
         />
         <input
           name="cost"
@@ -168,12 +180,21 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
       <MarginDetailFields fields={f} />
 
       {f.price && (
-        <div className="flex items-center justify-between rounded-md bg-paper px-3 py-2 text-sm">
-          <span className="text-inkSoft">예상 마진</span>
-          <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
-            {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
-            {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
-          </span>
+        <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1">
+          <div className="flex items-center justify-between">
+            <span className="text-inkSoft">예상 마진</span>
+            <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
+              {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
+              {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-inkSoft text-xs">순수 마진 (광고비 제외)</span>
+            <span className="font-mono text-xs text-inkSoft">
+              {(f.pureProfit < 0 ? '-' : '') + fmt(Math.abs(f.pureProfit))}
+              {f.pureMarginPct != null && ` (${f.pureMarginPct.toFixed(1)}%)`}
+            </span>
+          </div>
         </div>
       )}
 
@@ -234,13 +255,13 @@ function OptionAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onD
       }
       className="grid gap-2 bg-paper rounded-md p-3"
     >
+      <input
+        name="name"
+        placeholder="옵션명 (예: 블랙/L)"
+        required
+        className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+      />
       <div className="grid grid-cols-3 gap-2">
-        <input
-          name="name"
-          placeholder="옵션명 (예: 블랙/L)"
-          required
-          className="border border-paperLine bg-white px-2 py-1.5 text-xs col-span-1"
-        />
         <input
           name="price"
           value={f.price}
@@ -249,6 +270,14 @@ function OptionAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onD
           step="0.01"
           placeholder="판매가"
           className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+        />
+        <input
+          readOnly
+          name="output_vat"
+          value={f.price !== '' ? Math.round(f.outputVat) : ''}
+          placeholder="매출부가세(자동)"
+          title="판매가 / 11로 자동 계산돼요"
+          className="border border-paperLine bg-paper text-inkSoft px-2 py-1.5 text-xs font-mono cursor-not-allowed"
         />
         <input
           name="cost"
@@ -274,12 +303,21 @@ function OptionAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onD
       {showDetail && <MarginDetailFields fields={f} compact />}
 
       {f.price && (
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-inkSoft">예상 마진</span>
-          <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
-            {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
-            {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
-          </span>
+        <div className="text-xs grid gap-0.5">
+          <div className="flex items-center justify-between">
+            <span className="text-inkSoft">예상 마진</span>
+            <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
+              {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
+              {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-inkSoft text-[11px]">순수 마진 (광고비 제외)</span>
+            <span className="font-mono text-[11px] text-inkSoft">
+              {(f.pureProfit < 0 ? '-' : '') + fmt(Math.abs(f.pureProfit))}
+              {f.pureMarginPct != null && ` (${f.pureMarginPct.toFixed(1)}%)`}
+            </span>
+          </div>
         </div>
       )}
 
