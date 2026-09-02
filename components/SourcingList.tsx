@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useTransition } from 'react';
 import {
   updateSourcingStatus,
   updateSourcingStage,
+  updateSourcingInputStatus,
   updateSourcingItem,
   deleteSourcingItem,
   addSourcingOption,
@@ -688,6 +689,7 @@ export default function SourcingList({ items }: { items: any[] }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
+  const [enteredFilter, setEnteredFilter] = useState('all');
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
@@ -702,13 +704,8 @@ export default function SourcingList({ items }: { items: any[] }) {
     const q = search.trim().toLowerCase();
     const filtered = withMargin.filter((it) => {
       if (statusFilter !== 'all' && (it.status || 'checking') !== statusFilter) return false;
-      if (stageFilter === 'candidate' || stageFilter === 'confirmed') {
-        if ((it.stage || 'candidate') !== stageFilter) return false;
-      } else if (stageFilter === 'entered' || stageFilter === 'not_entered') {
-        const entered = it.price != null && it.cost != null;
-        if (stageFilter === 'entered' && !entered) return false;
-        if (stageFilter === 'not_entered' && entered) return false;
-      }
+      if (stageFilter !== 'all' && (it.stage || 'candidate') !== stageFilter) return false;
+      if (enteredFilter !== 'all' && (it.input_status || 'not_entered') !== enteredFilter) return false;
       if (!q) return true;
       return (
         it.title?.toLowerCase().includes(q) ||
@@ -736,7 +733,7 @@ export default function SourcingList({ items }: { items: any[] }) {
     });
 
     return sorted;
-  }, [items, search, statusFilter, stageFilter, sortKey]);
+  }, [items, search, statusFilter, stageFilter, enteredFilter, sortKey]);
 
   return (
     <div>
@@ -748,6 +745,15 @@ export default function SourcingList({ items }: { items: any[] }) {
           className="border border-paperLine bg-white px-3 py-2 text-sm flex-1 min-w-[180px]"
         />
         <select
+          value={enteredFilter}
+          onChange={(e) => setEnteredFilter(e.target.value)}
+          className="border border-paperLine bg-white px-2 py-2 text-sm"
+        >
+          <option value="all">입력/미입력 전체</option>
+          <option value="entered">입력</option>
+          <option value="not_entered">미입력</option>
+        </select>
+        <select
           value={stageFilter}
           onChange={(e) => setStageFilter(e.target.value)}
           className="border border-paperLine bg-white px-2 py-2 text-sm"
@@ -755,8 +761,6 @@ export default function SourcingList({ items }: { items: any[] }) {
           <option value="all">후보/확정 전체</option>
           <option value="candidate">후보</option>
           <option value="confirmed">확정</option>
-          <option value="not_entered">미입력</option>
-          <option value="entered">입력</option>
         </select>
         <select
           value={statusFilter}
@@ -790,10 +794,11 @@ export default function SourcingList({ items }: { items: any[] }) {
           {rows.map((it) => {
             const status = it.status || 'checking';
             const stage = it.stage || 'candidate';
-            // 판매가·원가를 아직 안 넣은 후보인지 - 상품 등록 직후엔
-            // "미입력"으로 시작하고, 둘 다 채우면 자동으로 "입력"으로
-            // 바뀐다 (수동 선택이 아니라 실제 입력 여부로 자동 판정).
-            const entered = it.price != null && it.cost != null;
+            // 등록 시점엔 판매가·원가가 둘 다 있으면 "입력"으로
+            // 시작하지만, 그 뒤로는 카드에서 직접 바꿀 수 있는 독립적인
+            // 값이다 (input_status 컬럼 - 가격을 나중에 고쳐도 자동으로
+            // 안 바뀜).
+            const entered = (it.input_status || 'not_entered') === 'entered';
             const m = it.margin;
             const isEditing = editingId === it.id;
             const isMarginExpanded = expandedMarginId === it.id;
@@ -935,8 +940,10 @@ export default function SourcingList({ items }: { items: any[] }) {
                   <div className="flex gap-2 text-xs items-center">
                     <select
                       value={entered ? 'entered' : 'not_entered'}
-                      disabled
-                      title="판매가·원가를 둘 다 채우면 자동으로 '입력'으로 바뀌어요"
+                      disabled={isPending}
+                      onChange={(e) =>
+                        startTransition(() => updateSourcingInputStatus(it.id, e.target.value))
+                      }
                       className="border border-paperLine bg-white text-xs px-1 py-0.5"
                     >
                       <option value="not_entered">미입력</option>

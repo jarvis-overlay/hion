@@ -69,6 +69,9 @@ export async function addSourcingItem(
 
   if (!title) return { error: '상품명을 입력해주세요.' };
 
+  const priceNum = numOrNull(formData, 'price');
+  const costNum = numOrNull(formData, 'cost');
+
   const { data: item, error } = await supabase
     .from('sourcing_items')
     .insert({
@@ -76,8 +79,12 @@ export async function addSourcingItem(
       link: link || null,
       content: content || null,
       moq: moq || null,
-      price: numOrNull(formData, 'price'),
-      cost: numOrNull(formData, 'cost'),
+      price: priceNum,
+      cost: costNum,
+      // 등록 시점엔 판매가·원가가 둘 다 있으면 '입력'으로 시작하고,
+      // 이후로는 카드에서 수동으로 바꿀 수 있는 독립적인 값이다 (가격을
+      // 나중에 고쳐도 이 값이 자동으로 따라 바뀌진 않음).
+      input_status: priceNum != null && costNum != null ? 'entered' : 'not_entered',
       coupon: numOrNull(formData, 'coupon'),
       output_vat: numOrNull(formData, 'output_vat'),
       import_vat: numOrNull(formData, 'import_vat'),
@@ -206,6 +213,16 @@ export async function updateSourcingStage(id: string, stage: string) {
   const supabase = createClient();
   const { error } = await supabase.from('sourcing_items').update({ stage }).eq('id', id);
   if (error) console.error('[sourcing] updateSourcingStage 실패:', error.message);
+  revalidatePath('/dashboard/sourcing/list');
+}
+
+export async function updateSourcingInputStatus(id: string, inputStatus: string) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('sourcing_items')
+    .update({ input_status: inputStatus })
+    .eq('id', id);
+  if (error) console.error('[sourcing] updateSourcingInputStatus 실패:', error.message);
   revalidatePath('/dashboard/sourcing/list');
 }
 
