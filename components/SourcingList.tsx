@@ -109,16 +109,52 @@ function marginBadgeClass(pct: number) {
   return 'bg-profitBg text-profit';
 }
 
-type SortKey = 'created_desc' | 'created_asc' | 'price_desc' | 'price_asc' | 'margin_desc' | 'margin_asc';
+type SortKey =
+  | 'created_desc'
+  | 'created_asc'
+  | 'price_desc'
+  | 'price_asc'
+  | 'cost_desc'
+  | 'cost_asc'
+  | 'margin_desc'
+  | 'margin_asc'
+  | 'market_desc'
+  | 'market_asc';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'created_desc', label: '최신 등록순' },
   { value: 'created_asc', label: '오래된 등록순' },
   { value: 'price_desc', label: '판매가 높은순' },
   { value: 'price_asc', label: '판매가 낮은순' },
+  { value: 'cost_desc', label: '원가 높은순' },
+  { value: 'cost_asc', label: '원가 낮은순' },
   { value: 'margin_desc', label: '마진율 높은순' },
   { value: 'margin_asc', label: '마진율 낮은순' },
+  { value: 'market_desc', label: '시장규모 큰순' },
+  { value: 'market_asc', label: '시장규모 작은순' },
 ];
+
+// 상품마다 시장규모를 직접 조사해서 넣진 않고, 이미 입력해둔 "비교
+// 상품군"의 시장규모(상/중/하) 값들 중 가장 큰 등급을 대표값으로 쓴다 -
+// 실시간 쿠팡 조회 없이 이미 갖고 있는 데이터를 재활용.
+const MARKET_SIZE_RANK: Record<string, number> = { high: 3, mid: 2, low: 1 };
+
+function aggregateMarketSize(item: any): 'high' | 'mid' | 'low' | null {
+  const comparisons: any[] = item.sourcing_item_comparisons || [];
+  let best: 'high' | 'mid' | 'low' | null = null;
+  let bestRank = 0;
+  for (const c of comparisons) {
+    const prices: any[] = c.sourcing_comparison_prices || [];
+    for (const p of prices) {
+      const rank = MARKET_SIZE_RANK[p.market_size];
+      if (rank && rank > bestRank) {
+        bestRank = rank;
+        best = p.market_size;
+      }
+    }
+  }
+  return best;
+}
 
 function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -705,7 +741,11 @@ export default function SourcingList({ items }: { items: any[] }) {
   const [isPending, startTransition] = useTransition();
 
   const rows = useMemo(() => {
-    const withMargin = items.map((it) => ({ ...it, margin: computeMargin(it) }));
+    const withMargin = items.map((it) => ({
+      ...it,
+      margin: computeMargin(it),
+      marketSize: aggregateMarketSize(it),
+    }));
 
     const q = search.trim().toLowerCase();
     const filtered = withMargin.filter((it) => {
@@ -728,10 +768,18 @@ export default function SourcingList({ items }: { items: any[] }) {
           return (b.price ?? -Infinity) - (a.price ?? -Infinity);
         case 'price_asc':
           return (a.price ?? Infinity) - (b.price ?? Infinity);
+        case 'cost_desc':
+          return (b.cost ?? -Infinity) - (a.cost ?? -Infinity);
+        case 'cost_asc':
+          return (a.cost ?? Infinity) - (b.cost ?? Infinity);
         case 'margin_desc':
           return (b.margin.marginPct ?? -Infinity) - (a.margin.marginPct ?? -Infinity);
         case 'margin_asc':
           return (a.margin.marginPct ?? Infinity) - (b.margin.marginPct ?? Infinity);
+        case 'market_desc':
+          return (MARKET_SIZE_RANK[b.marketSize ?? ''] ?? 0) - (MARKET_SIZE_RANK[a.marketSize ?? ''] ?? 0);
+        case 'market_asc':
+          return (MARKET_SIZE_RANK[a.marketSize ?? ''] ?? 4) - (MARKET_SIZE_RANK[b.marketSize ?? ''] ?? 4);
         case 'created_desc':
         default:
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -846,6 +894,20 @@ export default function SourcingList({ items }: { items: any[] }) {
                       >
                         {entered ? '입력' : '미입력'}
                       </span>
+                      {it.marketSize && (
+                        <span
+                          title="비교 상품군에 입력한 시장규모 중 가장 큰 등급"
+                          className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
+                            it.marketSize === 'high'
+                              ? 'bg-profitBg text-profit'
+                              : it.marketSize === 'low'
+                              ? 'bg-warnBg text-warn'
+                              : 'bg-paperLine text-inkSoft'
+                          }`}
+                        >
+                          시장 {MARKET_SIZE_LABEL[it.marketSize]}
+                        </span>
+                      )}
                       {m.marginPct != null && (
                         <button
                           onClick={() => setExpandedMarginId(isMarginExpanded ? null : it.id)}
