@@ -298,6 +298,32 @@ export async function addSourcingSupplier(
   return { success: true };
 }
 
+export async function updateSourcingSupplier(
+  id: string,
+  formData: FormData
+): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const link = String(formData.get('link') || '').trim();
+  const price = numOrNull(formData, 'price');
+  if (!link && price == null) return { error: '링크나 가격 중 하나는 입력해주세요.' };
+
+  const { error } = await supabase
+    .from('sourcing_item_suppliers')
+    .update({
+      title: String(formData.get('title') || '').trim() || null,
+      link: link || null,
+      price,
+      currency: String(formData.get('currency') || 'CNY'),
+      notes: String(formData.get('notes') || '').trim() || null,
+    })
+    .eq('id', id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
 export async function deleteSourcingSupplier(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from('sourcing_item_suppliers').delete().eq('id', id);

@@ -10,6 +10,7 @@ import {
   addSourcingOption,
   deleteSourcingOption,
   addSourcingSupplier,
+  updateSourcingSupplier,
   deleteSourcingSupplier,
   addSourcingComparison,
   updateSourcingComparison,
@@ -466,7 +467,19 @@ const CURRENCY_LABEL: Record<string, string> = { CNY: '¥', USD: '$', KRW: '₩'
 
 // 하나의 상품을 소싱할 때 여러 1688/알리바바 공급처를 비교하면서
 // 찾는 경우가 있다는 요청으로 추가함 - 링크+가격을 여러 개 저장.
-function SupplierAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onDone: () => void }) {
+function SupplierAddForm({
+  sourcingItemId,
+  initial,
+  saveLabel = '공급처 추가',
+  onDone,
+  onCancel,
+}: {
+  sourcingItemId: string;
+  initial?: any;
+  saveLabel?: string;
+  onDone: () => void;
+  onCancel?: () => void;
+}) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -477,7 +490,9 @@ function SupplierAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; o
       action={(fd) =>
         startTransition(async () => {
           setError(null);
-          const res = await addSourcingSupplier(sourcingItemId, fd);
+          const res = initial
+            ? await updateSourcingSupplier(initial.id, fd)
+            : await addSourcingSupplier(sourcingItemId, fd);
           if ('error' in res) {
             setError(res.error);
             return;
@@ -490,16 +505,22 @@ function SupplierAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; o
     >
       <input
         name="title"
+        defaultValue={initial?.title || ''}
         placeholder="상품명 (구분용)"
         className="border border-paperLine bg-white px-2 py-1.5 text-xs"
       />
       <input
         name="link"
+        defaultValue={initial?.link || ''}
         placeholder="공급처 링크 (1688, 알리바바 등)"
         className="border border-paperLine bg-white px-2 py-1.5 text-xs"
       />
       <div className="grid grid-cols-3 gap-2">
-        <select name="currency" defaultValue="CNY" className="border border-paperLine bg-white px-2 py-1.5 text-xs">
+        <select
+          name="currency"
+          defaultValue={initial?.currency || 'CNY'}
+          className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+        >
           <option value="CNY">위안 (CNY)</option>
           <option value="USD">달러 (USD)</option>
           <option value="KRW">원 (KRW)</option>
@@ -508,29 +529,43 @@ function SupplierAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; o
           name="price"
           type="number"
           step="0.01"
+          defaultValue={initial?.price ?? ''}
           placeholder="가격"
           className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono col-span-2"
         />
       </div>
       <input
         name="notes"
+        defaultValue={initial?.notes || ''}
         placeholder="메모 (MOQ, 품질 등, 선택)"
         className="border border-paperLine bg-white px-2 py-1.5 text-xs"
       />
       {error && <p className="text-[11px] text-warn bg-warnBg rounded px-2 py-1">{error}</p>}
-      <button
-        type="submit"
-        disabled={isPending}
-        className="btn-primary py-1.5 text-xs font-semibold disabled:opacity-50"
-      >
-        {isPending ? '추가 중...' : '공급처 추가'}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={isPending}
+          className="btn-primary py-1.5 text-xs font-semibold disabled:opacity-50"
+        >
+          {isPending ? '저장 중...' : saveLabel}
+        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="py-1.5 text-xs font-semibold text-inkSoft ring-1 ring-paperLine rounded px-4"
+          >
+            취소
+          </button>
+        )}
+      </div>
     </form>
   );
 }
 
 function SuppliersSection({ item }: { item: any }) {
   const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const suppliers: any[] = item.sourcing_item_suppliers || [];
   // 가격 비교가 목적이니 싼 순으로 정렬 (가격 없는 건 뒤로)
@@ -542,7 +577,10 @@ function SuppliersSection({ item }: { item: any }) {
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-inkSoft">공급처 비교 ({suppliers.length})</span>
         <button
-          onClick={() => setAdding((v) => !v)}
+          onClick={() => {
+            setAdding((v) => !v);
+            setEditingId(null);
+          }}
           className="text-xs text-accent font-semibold"
         >
           {adding ? '닫기' : '+ 공급처 추가'}
@@ -551,41 +589,64 @@ function SuppliersSection({ item }: { item: any }) {
 
       {sorted.length > 0 && (
         <div className="grid gap-1.5 mb-2">
-          {sorted.map((s) => (
-            <div
-              key={s.id}
-              className={`flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 ${
-                s.price != null && s.price === minPrice ? 'bg-accentBg' : 'bg-paper'
-              }`}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-medium text-ink truncate">{s.title || '(이름 없음)'}</span>
-                  {s.link && (
-                    <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline shrink-0">
-                      [링크]
-                    </a>
-                  )}
+          {sorted.map((s) => {
+            if (editingId === s.id) {
+              return (
+                <SupplierAddForm
+                  key={s.id}
+                  sourcingItemId={item.id}
+                  initial={s}
+                  saveLabel="저장"
+                  onCancel={() => setEditingId(null)}
+                  onDone={() => setEditingId(null)}
+                />
+              );
+            }
+            return (
+              <div
+                key={s.id}
+                className={`flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 ${
+                  s.price != null && s.price === minPrice ? 'bg-accentBg' : 'bg-paper'
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-ink truncate">{s.title || '(이름 없음)'}</span>
+                    {s.link && (
+                      <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline shrink-0">
+                        [링크]
+                      </a>
+                    )}
+                  </div>
+                  {s.notes && <p className="text-inkSoft mt-0.5">{s.notes}</p>}
                 </div>
-                {s.notes && <p className="text-inkSoft mt-0.5">{s.notes}</p>}
+                <div className="flex items-center gap-2 shrink-0">
+                  {s.price != null && (
+                    <span className="font-mono">
+                      {CURRENCY_LABEL[s.currency] || ''}
+                      {s.price.toLocaleString()}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => {
+                      setEditingId(s.id);
+                      setAdding(false);
+                    }}
+                    className="text-inkSoft hover:text-ink"
+                  >
+                    수정
+                  </button>
+                  <button
+                    onClick={() => startTransition(() => deleteSourcingSupplier(s.id))}
+                    disabled={isPending}
+                    className="text-inkSoft hover:text-red-700"
+                  >
+                    삭제
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {s.price != null && (
-                  <span className="font-mono">
-                    {CURRENCY_LABEL[s.currency] || ''}
-                    {s.price.toLocaleString()}
-                  </span>
-                )}
-                <button
-                  onClick={() => startTransition(() => deleteSourcingSupplier(s.id))}
-                  disabled={isPending}
-                  className="text-inkSoft hover:text-red-700"
-                >
-                  삭제
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
