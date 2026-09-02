@@ -688,7 +688,6 @@ export default function SourcingList({ items }: { items: any[] }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
-  const [enteredFilter, setEnteredFilter] = useState('all');
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
@@ -703,11 +702,12 @@ export default function SourcingList({ items }: { items: any[] }) {
     const q = search.trim().toLowerCase();
     const filtered = withMargin.filter((it) => {
       if (statusFilter !== 'all' && (it.status || 'checking') !== statusFilter) return false;
-      if (stageFilter !== 'all' && (it.stage || 'candidate') !== stageFilter) return false;
-      if (enteredFilter !== 'all') {
+      if (stageFilter === 'candidate' || stageFilter === 'confirmed') {
+        if ((it.stage || 'candidate') !== stageFilter) return false;
+      } else if (stageFilter === 'entered' || stageFilter === 'not_entered') {
         const entered = it.price != null && it.cost != null;
-        if (enteredFilter === 'entered' && !entered) return false;
-        if (enteredFilter === 'not_entered' && entered) return false;
+        if (stageFilter === 'entered' && !entered) return false;
+        if (stageFilter === 'not_entered' && entered) return false;
       }
       if (!q) return true;
       return (
@@ -736,7 +736,7 @@ export default function SourcingList({ items }: { items: any[] }) {
     });
 
     return sorted;
-  }, [items, search, statusFilter, stageFilter, enteredFilter, sortKey]);
+  }, [items, search, statusFilter, stageFilter, sortKey]);
 
   return (
     <div>
@@ -748,15 +748,6 @@ export default function SourcingList({ items }: { items: any[] }) {
           className="border border-paperLine bg-white px-3 py-2 text-sm flex-1 min-w-[180px]"
         />
         <select
-          value={enteredFilter}
-          onChange={(e) => setEnteredFilter(e.target.value)}
-          className="border border-paperLine bg-white px-2 py-2 text-sm"
-        >
-          <option value="all">입력/미입력 전체</option>
-          <option value="entered">입력</option>
-          <option value="not_entered">미입력</option>
-        </select>
-        <select
           value={stageFilter}
           onChange={(e) => setStageFilter(e.target.value)}
           className="border border-paperLine bg-white px-2 py-2 text-sm"
@@ -764,6 +755,8 @@ export default function SourcingList({ items }: { items: any[] }) {
           <option value="all">후보/확정 전체</option>
           <option value="candidate">후보</option>
           <option value="confirmed">확정</option>
+          <option value="not_entered">미입력</option>
+          <option value="entered">입력</option>
         </select>
         <select
           value={statusFilter}
