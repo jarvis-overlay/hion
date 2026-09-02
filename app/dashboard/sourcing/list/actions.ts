@@ -19,6 +19,7 @@ export interface ComparisonPriceInput {
   marketSize: 'high' | 'mid' | 'low' | '';
 }
 export interface ComparisonInput {
+  title: string;
   link: string;
   prices: ComparisonPriceInput[];
 }
@@ -31,7 +32,7 @@ async function insertComparisons(
   for (const c of comparisons) {
     const { data: comp, error: compErr } = await supabase
       .from('sourcing_item_comparisons')
-      .insert({ sourcing_item_id: sourcingItemId, link: c.link || null })
+      .insert({ sourcing_item_id: sourcingItemId, title: c.title || null, link: c.link || null })
       .select('id')
       .single();
     if (compErr) return compErr.message;
@@ -109,6 +110,43 @@ export async function addSourcingComparison(
   const supabase = createClient();
   const err = await insertComparisons(supabase, sourcingItemId, [comparison]);
   if (err) return { error: err };
+
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
+// 비교 상품 하나를 수정 - 가격/시장규모 관측치는 개별로 diff하지 않고
+// 통째로 지우고 새로 넣는 게 단순하고 안전하다 (편집 중 추가/삭제/수정이
+// 뒤섞여도 항상 최종 상태만 반영하면 됨).
+export async function updateSourcingComparison(
+  comparisonId: string,
+  comparison: ComparisonInput
+): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+
+  const { error: updateErr } = await supabase
+    .from('sourcing_item_comparisons')
+    .update({ title: comparison.title || null, link: comparison.link || null })
+    .eq('id', comparisonId);
+  if (updateErr) return { error: updateErr.message };
+
+  const { error: delErr } = await supabase
+    .from('sourcing_comparison_prices')
+    .delete()
+    .eq('comparison_id', comparisonId);
+  if (delErr) return { error: delErr.message };
+
+  if (comparison.prices.length > 0) {
+    const { error: insErr } = await supabase.from('sourcing_comparison_prices').insert(
+      comparison.prices.map((p) => ({
+        comparison_id: comparisonId,
+        platform: p.platform,
+        price_range: p.priceRange || null,
+        market_size: p.marketSize || null,
+      }))
+    );
+    if (insErr) return { error: insErr.message };
+  }
 
   revalidatePath('/dashboard/sourcing/list');
   return { success: true };

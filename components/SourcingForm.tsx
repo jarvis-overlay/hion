@@ -147,7 +147,10 @@ export default function SourcingForm() {
                 {comparisons.map((c, i) => (
                   <div key={i} className="flex items-start justify-between gap-2 text-xs bg-paper rounded px-2 py-1.5">
                     <div className="min-w-0">
-                      {c.link && <p className="text-profit truncate">{c.link}</p>}
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-ink truncate">{c.title || '(이름 없음)'}</span>
+                        {c.link && <span className="text-profit truncate shrink-0">[링크]</span>}
+                      </div>
                       {c.prices.length > 0 && (
                         <p className="text-inkSoft mt-0.5">
                           {c.prices

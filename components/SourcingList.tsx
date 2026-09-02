@@ -11,6 +11,7 @@ import {
   addSourcingSupplier,
   deleteSourcingSupplier,
   addSourcingComparison,
+  updateSourcingComparison,
   deleteSourcingComparison,
 } from '@/app/dashboard/sourcing/list/actions';
 import { computeMargin as computeMarginShared } from '@/lib/marginCalc';
@@ -77,14 +78,18 @@ function computeMargin(it: any) {
 
 // 메모에 링크를 같이 적어두는 경우가 많은데, 긴 URL이 공백 없는 한
 // 덩어리라 줄바꿈 없이 카드 밖으로 넘쳐서 잘려 보이고 클릭도 안 됐다 -
-// URL 부분만 잘라서 실제 <a> 링크로 바꿔준다.
+// URL 부분만 잘라서 실제 <a> 링크로 바꿔준다. "coupang.com/vp/..."처럼
+// http(s):// 없이 붙여넣는 경우도 많아서 스킴 없는 도메인도 인식한다.
+const URL_SPLIT_RE = /((?:https?:\/\/)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/[^\s]*)?)/g;
+const URL_TEST_RE = /^(?:https?:\/\/)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/[^\s]*)?$/;
+
 function linkifyText(text: string) {
-  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  const parts = text.split(URL_SPLIT_RE);
   return parts.map((part, i) =>
-    /^https?:\/\//.test(part) ? (
+    URL_TEST_RE.test(part) ? (
       <a
         key={i}
-        href={part}
+        href={part.startsWith('http') ? part : `https://${part}`}
         target="_blank"
         rel="noreferrer"
         className="text-profit underline break-all"
@@ -550,6 +555,7 @@ function SuppliersSection({ item }: { item: any }) {
 // 남겨서 이 후보가 시장에서 어느 위치인지 참고하려는 목적으로 추가함.
 function ComparisonsSection({ item }: { item: any }) {
   const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const comparisons: any[] = item.sourcing_item_comparisons || [];
@@ -558,7 +564,13 @@ function ComparisonsSection({ item }: { item: any }) {
     <div className="rounded-md ring-1 ring-paperLine p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-inkSoft">비교 상품군 ({comparisons.length})</span>
-        <button onClick={() => setAdding((v) => !v)} className="text-xs text-accent font-semibold">
+        <button
+          onClick={() => {
+            setAdding((v) => !v);
+            setEditingId(null);
+          }}
+          className="text-xs text-accent font-semibold"
+        >
           {adding ? '닫기' : '+ 비교 상품 추가'}
         </button>
       </div>
@@ -567,16 +579,53 @@ function ComparisonsSection({ item }: { item: any }) {
         <div className="grid gap-1.5 mb-2">
           {comparisons.map((c) => {
             const prices: any[] = c.sourcing_comparison_prices || [];
+
+            if (editingId === c.id) {
+              return (
+                <ComparisonEntryEditor
+                  key={c.id}
+                  saveLabel="저장"
+                  initial={{
+                    title: c.title || '',
+                    link: c.link || '',
+                    prices: prices.map((p) => ({
+                      platform: p.platform,
+                      priceRange: p.price_range || '',
+                      marketSize: p.market_size || '',
+                    })),
+                  }}
+                  onCancel={() => setEditingId(null)}
+                  onSave={(updated) =>
+                    startTransition(async () => {
+                      setError(null);
+                      const res = await updateSourcingComparison(c.id, updated);
+                      if ('error' in res) {
+                        setError(res.error);
+                        return;
+                      }
+                      setEditingId(null);
+                    })
+                  }
+                />
+              );
+            }
+
             return (
               <div key={c.id} className="flex items-start justify-between gap-2 text-xs bg-paper rounded px-2 py-1.5">
                 <div className="min-w-0">
-                  {c.link ? (
-                    <a href={c.link} target="_blank" rel="noreferrer" className="text-profit underline">
-                      [링크]
-                    </a>
-                  ) : (
-                    <span className="text-inkSoft">링크 없음</span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-ink truncate">{c.title || '(이름 없음)'}</span>
+                    {c.link && (
+                      <a
+                        href={c.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-profit underline shrink-0"
+                      >
+                        [링크]
+                      </a>
+                    )}
+                  </div>
                   {prices.length > 0 && (
                     <p className="text-inkSoft mt-0.5">
                       {prices
@@ -590,13 +639,24 @@ function ComparisonsSection({ item }: { item: any }) {
                     </p>
                   )}
                 </div>
-                <button
-                  onClick={() => startTransition(() => deleteSourcingComparison(c.id))}
-                  disabled={isPending}
-                  className="text-inkSoft hover:text-red-700 shrink-0"
-                >
-                  삭제
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      setEditingId(c.id);
+                      setAdding(false);
+                    }}
+                    className="text-inkSoft hover:text-ink"
+                  >
+                    수정
+                  </button>
+                  <button
+                    onClick={() => startTransition(() => deleteSourcingComparison(c.id))}
+                    disabled={isPending}
+                    className="text-inkSoft hover:text-red-700"
+                  >
+                    삭제
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -628,6 +688,7 @@ export default function SourcingList({ items }: { items: any[] }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
+  const [enteredFilter, setEnteredFilter] = useState('all');
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
@@ -643,6 +704,11 @@ export default function SourcingList({ items }: { items: any[] }) {
     const filtered = withMargin.filter((it) => {
       if (statusFilter !== 'all' && (it.status || 'checking') !== statusFilter) return false;
       if (stageFilter !== 'all' && (it.stage || 'candidate') !== stageFilter) return false;
+      if (enteredFilter !== 'all') {
+        const entered = it.price != null && it.cost != null;
+        if (enteredFilter === 'entered' && !entered) return false;
+        if (enteredFilter === 'not_entered' && entered) return false;
+      }
       if (!q) return true;
       return (
         it.title?.toLowerCase().includes(q) ||
@@ -670,7 +736,7 @@ export default function SourcingList({ items }: { items: any[] }) {
     });
 
     return sorted;
-  }, [items, search, statusFilter, stageFilter, sortKey]);
+  }, [items, search, statusFilter, stageFilter, enteredFilter, sortKey]);
 
   return (
     <div>
@@ -681,6 +747,15 @@ export default function SourcingList({ items }: { items: any[] }) {
           placeholder="상품명 · 메모 · 링크 검색"
           className="border border-paperLine bg-white px-3 py-2 text-sm flex-1 min-w-[180px]"
         />
+        <select
+          value={enteredFilter}
+          onChange={(e) => setEnteredFilter(e.target.value)}
+          className="border border-paperLine bg-white px-2 py-2 text-sm"
+        >
+          <option value="all">입력/미입력 전체</option>
+          <option value="entered">입력</option>
+          <option value="not_entered">미입력</option>
+        </select>
         <select
           value={stageFilter}
           onChange={(e) => setStageFilter(e.target.value)}
@@ -718,7 +793,7 @@ export default function SourcingList({ items }: { items: any[] }) {
           {items.length === 0 ? '아직 등록된 소싱 후보가 없어요.' : '조건에 맞는 항목이 없어요.'}
         </p>
       ) : (
-        <div className="card divide-y divide-paperLine overflow-hidden">
+        <div className="grid gap-3">
           {rows.map((it) => {
             const status = it.status || 'checking';
             const stage = it.stage || 'candidate';
@@ -738,14 +813,14 @@ export default function SourcingList({ items }: { items: any[] }) {
 
             if (isEditing) {
               return (
-                <div key={it.id} className="p-4">
+                <div key={it.id} className="card p-4">
                   <EditForm item={it} onDone={() => setEditingId(null)} />
                 </div>
               );
             }
 
             return (
-              <div key={it.id} className="p-4 flex flex-col gap-2">
+              <div key={it.id} className="card p-4 flex flex-col gap-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -865,13 +940,15 @@ export default function SourcingList({ items }: { items: any[] }) {
                     {new Date(it.created_at).toLocaleDateString('ko-KR')}
                   </span>
                   <div className="flex gap-2 text-xs items-center">
-                    <span
-                      className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
-                        entered ? 'bg-profitBg text-profit' : 'bg-warnBg text-warn'
-                      }`}
+                    <select
+                      value={entered ? 'entered' : 'not_entered'}
+                      disabled
+                      title="판매가·원가를 둘 다 채우면 자동으로 '입력'으로 바뀌어요"
+                      className="border border-paperLine bg-white text-xs px-1 py-0.5"
                     >
-                      {entered ? '입력' : '미입력'}
-                    </span>
+                      <option value="not_entered">미입력</option>
+                      <option value="entered">입력</option>
+                    </select>
                     <select
                       value={stage}
                       disabled={isPending}

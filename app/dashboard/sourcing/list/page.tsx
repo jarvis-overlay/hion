@@ -23,7 +23,7 @@ export default async function SourcingPage() {
   }
 
   return (
-    <div>
+    <div className="max-w-2xl">
       <h1 className="font-display text-2xl font-bold mb-1">소싱 리스트</h1>
       <p className="text-sm text-inkSoft mb-5">
         소싱 후보 상품을 등록하고 상태 · 마진까지 한 곳에서 관리해요

@@ -70,21 +70,47 @@ function PlatformPriceList({
 // 쌓았다가 최종 등록 시 한번에 제출)과 이미 저장된 카드(바로 서버에
 // 저장) 양쪽에서 똑같이 쓴다 - 완성된 비교 데이터를 어떻게 처리할지는
 // onSave 콜백에 맡긴다.
-export default function ComparisonEntryEditor({ onSave }: { onSave: (c: ComparisonInput) => void }) {
-  const [link, setLink] = useState('');
-  const [coupang, setCoupang] = useState<ComparisonPriceInput[]>([]);
-  const [naver, setNaver] = useState<ComparisonPriceInput[]>([]);
+export default function ComparisonEntryEditor({
+  initial,
+  onSave,
+  onCancel,
+  saveLabel = '비교 상품 추가',
+}: {
+  initial?: ComparisonInput;
+  onSave: (c: ComparisonInput) => void;
+  onCancel?: () => void;
+  saveLabel?: string;
+}) {
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [link, setLink] = useState(initial?.link ?? '');
+  const [coupang, setCoupang] = useState<ComparisonPriceInput[]>(
+    initial?.prices.filter((p) => p.platform === 'coupang') ?? []
+  );
+  const [naver, setNaver] = useState<ComparisonPriceInput[]>(
+    initial?.prices.filter((p) => p.platform === 'naver') ?? []
+  );
 
   function handleSave() {
-    if (!link.trim() && coupang.length === 0 && naver.length === 0) return;
-    onSave({ link: link.trim(), prices: [...coupang, ...naver] });
-    setLink('');
-    setCoupang([]);
-    setNaver([]);
+    if (!title.trim() && !link.trim() && coupang.length === 0 && naver.length === 0) return;
+    onSave({ title: title.trim(), link: link.trim(), prices: [...coupang, ...naver] });
+    // 수정 모드(initial 있음)는 저장 후 부모가 편집을 닫으므로 필드를
+    // 비우지 않는다 - 새로 추가하는 경우에만 다음 입력을 위해 초기화.
+    if (!initial) {
+      setTitle('');
+      setLink('');
+      setCoupang([]);
+      setNaver([]);
+    }
   }
 
   return (
     <div className="grid gap-2 bg-paper rounded-md p-3">
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="비교 상품명 (구분용)"
+        className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+      />
       <input
         value={link}
         onChange={(e) => setLink(e.target.value)}
@@ -93,13 +119,24 @@ export default function ComparisonEntryEditor({ onSave }: { onSave: (c: Comparis
       />
       <PlatformPriceList label="쿠팡" platform="coupang" entries={coupang} onChange={setCoupang} />
       <PlatformPriceList label="네이버" platform="naver" entries={naver} onChange={setNaver} />
-      <button
-        type="button"
-        onClick={handleSave}
-        className="btn-primary py-1.5 text-xs font-semibold self-start px-4"
-      >
-        비교 상품 추가
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          className="btn-primary py-1.5 text-xs font-semibold self-start px-4"
+        >
+          {saveLabel}
+        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="py-1.5 text-xs font-semibold text-inkSoft ring-1 ring-paperLine rounded self-start px-4"
+          >
+            취소
+          </button>
+        )}
+      </div>
     </div>
   );
 }
