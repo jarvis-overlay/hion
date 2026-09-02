@@ -1,12 +1,14 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
-import { addSourcingItem } from '@/app/dashboard/sourcing/list/actions';
+import { addSourcingItem, type ComparisonInput } from '@/app/dashboard/sourcing/list/actions';
 import { useMarginFields } from '@/lib/useMarginFields';
 import FxCalculator from '@/components/FxCalculator';
 import { MarginDetailFields } from '@/components/MarginDetailFields';
+import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
+const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
 
 export default function SourcingForm() {
   const formRef = useRef<HTMLFormElement>(null);
@@ -14,6 +16,8 @@ export default function SourcingForm() {
   const [open, setOpen] = useState(false);
   const [showMarginDetail, setShowMarginDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [comparisons, setComparisons] = useState<ComparisonInput[]>([]);
+  const [addingComparison, setAddingComparison] = useState(false);
 
   const f = useMarginFields();
 
@@ -33,13 +37,15 @@ export default function SourcingForm() {
           action={(fd) =>
             startTransition(async () => {
               setError(null);
-              const res = await addSourcingItem(fd);
+              const res = await addSourcingItem(fd, comparisons);
               if ('error' in res) {
                 setError(res.error);
                 return;
               }
               formRef.current?.reset();
               f.reset();
+              setComparisons([]);
+              setAddingComparison(false);
               setOpen(false);
               setShowMarginDetail(false);
             })
@@ -121,6 +127,61 @@ export default function SourcingForm() {
               </div>
             </div>
           )}
+
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-inkSoft">
+                비교 상품군 링크 {comparisons.length > 0 && `(${comparisons.length})`}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAddingComparison((v) => !v)}
+                className="text-xs text-accent font-semibold"
+              >
+                {addingComparison ? '닫기' : '+ 비교 상품 추가'}
+              </button>
+            </div>
+
+            {comparisons.length > 0 && (
+              <div className="grid gap-1.5">
+                {comparisons.map((c, i) => (
+                  <div key={i} className="flex items-start justify-between gap-2 text-xs bg-paper rounded px-2 py-1.5">
+                    <div className="min-w-0">
+                      {c.link && <p className="text-profit truncate">{c.link}</p>}
+                      {c.prices.length > 0 && (
+                        <p className="text-inkSoft mt-0.5">
+                          {c.prices
+                            .map(
+                              (p) =>
+                                `${PLATFORM_LABEL[p.platform]} ${p.priceRange || '가격대 미입력'}${
+                                  p.marketSize ? ` (규모 ${MARKET_SIZE_LABEL[p.marketSize]})` : ''
+                                }`
+                            )
+                            .join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setComparisons(comparisons.filter((_, j) => j !== i))}
+                      className="text-inkSoft hover:text-red-700 shrink-0"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {addingComparison && (
+              <ComparisonEntryEditor
+                onSave={(c) => {
+                  setComparisons([...comparisons, c]);
+                  setAddingComparison(false);
+                }}
+              />
+            )}
+          </div>
 
           <textarea
             name="content"

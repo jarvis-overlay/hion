@@ -10,8 +10,50 @@ function numOrNull(fd: FormData, key: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// 비교 상품군 링크 하나 - 쿠팡/네이버에서 관찰한 가격대·시장규모를 각각
+// 여러 건 남길 수 있다(같은 플랫폼 안에서도 가격대별 시장규모가 다르게
+// 형성돼 있을 수 있어서).
+export interface ComparisonPriceInput {
+  platform: 'coupang' | 'naver';
+  priceRange: string;
+  marketSize: 'high' | 'mid' | 'low' | '';
+}
+export interface ComparisonInput {
+  link: string;
+  prices: ComparisonPriceInput[];
+}
+
+async function insertComparisons(
+  supabase: ReturnType<typeof createClient>,
+  sourcingItemId: string,
+  comparisons: ComparisonInput[]
+): Promise<string | null> {
+  for (const c of comparisons) {
+    const { data: comp, error: compErr } = await supabase
+      .from('sourcing_item_comparisons')
+      .insert({ sourcing_item_id: sourcingItemId, link: c.link || null })
+      .select('id')
+      .single();
+    if (compErr) return compErr.message;
+
+    if (c.prices.length > 0) {
+      const { error: priceErr } = await supabase.from('sourcing_comparison_prices').insert(
+        c.prices.map((p) => ({
+          comparison_id: (comp as { id: string }).id,
+          platform: p.platform,
+          price_range: p.priceRange || null,
+          market_size: p.marketSize || null,
+        }))
+      );
+      if (priceErr) return priceErr.message;
+    }
+  }
+  return null;
+}
+
 export async function addSourcingItem(
-  formData: FormData
+  formData: FormData,
+  comparisons: ComparisonInput[] = []
 ): Promise<{ error: string } | { success: true }> {
   const supabase = createClient();
   const {
@@ -26,27 +68,57 @@ export async function addSourcingItem(
 
   if (!title) return { error: '상품명을 입력해주세요.' };
 
-  const { error } = await supabase.from('sourcing_items').insert({
-    title,
-    link: link || null,
-    content: content || null,
-    moq: moq || null,
-    price: numOrNull(formData, 'price'),
-    cost: numOrNull(formData, 'cost'),
-    coupon: numOrNull(formData, 'coupon'),
-    output_vat: numOrNull(formData, 'output_vat'),
-    import_vat: numOrNull(formData, 'import_vat'),
-    coupang_fee: numOrNull(formData, 'coupang_fee'),
-    shipping: numOrNull(formData, 'shipping'),
-    ad_cost: numOrNull(formData, 'ad_cost'),
-    etc_cost: numOrNull(formData, 'etc_cost'),
-    author_email: user.email,
-  });
+  const { data: item, error } = await supabase
+    .from('sourcing_items')
+    .insert({
+      title,
+      link: link || null,
+      content: content || null,
+      moq: moq || null,
+      price: numOrNull(formData, 'price'),
+      cost: numOrNull(formData, 'cost'),
+      coupon: numOrNull(formData, 'coupon'),
+      output_vat: numOrNull(formData, 'output_vat'),
+      import_vat: numOrNull(formData, 'import_vat'),
+      coupang_fee: numOrNull(formData, 'coupang_fee'),
+      shipping: numOrNull(formData, 'shipping'),
+      ad_cost: numOrNull(formData, 'ad_cost'),
+      etc_cost: numOrNull(formData, 'etc_cost'),
+      author_email: user.email,
+    })
+    .select('id')
+    .single();
 
   if (error) return { error: error.message };
 
+  if (comparisons.length > 0 && item) {
+    const compErr = await insertComparisons(supabase, (item as { id: string }).id, comparisons);
+    if (compErr) return { error: compErr };
+  }
+
   revalidatePath('/dashboard/sourcing/list');
   return { success: true };
+}
+
+// 이미 등록된 소싱 후보에 비교 상품군을 나중에 추가 (옵션 구성/공급처
+// 비교와 같은 패턴 - 카드 안에서 펼쳐서 즉시 추가).
+export async function addSourcingComparison(
+  sourcingItemId: string,
+  comparison: ComparisonInput
+): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const err = await insertComparisons(supabase, sourcingItemId, [comparison]);
+  if (err) return { error: err };
+
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
+export async function deleteSourcingComparison(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from('sourcing_item_comparisons').delete().eq('id', id);
+  if (error) console.error('[sourcing] deleteSourcingComparison 실패:', error.message);
+  revalidatePath('/dashboard/sourcing/list');
 }
 
 // 카드 인라인 수정 - 상태/후보-확정 말고 나머지 항목(상품명, 링크,

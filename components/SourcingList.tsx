@@ -10,11 +10,16 @@ import {
   deleteSourcingOption,
   addSourcingSupplier,
   deleteSourcingSupplier,
+  addSourcingComparison,
+  deleteSourcingComparison,
 } from '@/app/dashboard/sourcing/list/actions';
 import { computeMargin as computeMarginShared } from '@/lib/marginCalc';
 import { useMarginFields } from '@/lib/useMarginFields';
 import FxCalculator from '@/components/FxCalculator';
 import { MarginDetailFields } from '@/components/MarginDetailFields';
+import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
+
+const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
 
 const STATUS_LABEL: Record<string, string> = {
   checking: '검토중',
@@ -519,6 +524,84 @@ function SuppliersSection({ item }: { item: any }) {
   );
 }
 
+// 경쟁/비교 상품군 링크 - 쿠팡·네이버에서 관찰한 가격대·시장규모를
+// 남겨서 이 후보가 시장에서 어느 위치인지 참고하려는 목적으로 추가함.
+function ComparisonsSection({ item }: { item: any }) {
+  const [adding, setAdding] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const comparisons: any[] = item.sourcing_item_comparisons || [];
+
+  return (
+    <div className="rounded-md ring-1 ring-paperLine p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-inkSoft">비교 상품군 ({comparisons.length})</span>
+        <button onClick={() => setAdding((v) => !v)} className="text-xs text-accent font-semibold">
+          {adding ? '닫기' : '+ 비교 상품 추가'}
+        </button>
+      </div>
+
+      {comparisons.length > 0 && (
+        <div className="grid gap-1.5 mb-2">
+          {comparisons.map((c) => {
+            const prices: any[] = c.sourcing_comparison_prices || [];
+            return (
+              <div key={c.id} className="flex items-start justify-between gap-2 text-xs bg-paper rounded px-2 py-1.5">
+                <div className="min-w-0">
+                  {c.link ? (
+                    <a href={c.link} target="_blank" rel="noreferrer" className="text-profit underline">
+                      [링크]
+                    </a>
+                  ) : (
+                    <span className="text-inkSoft">링크 없음</span>
+                  )}
+                  {prices.length > 0 && (
+                    <p className="text-inkSoft mt-0.5">
+                      {prices
+                        .map(
+                          (p) =>
+                            `${PLATFORM_LABEL[p.platform] || p.platform} ${p.price_range || '가격대 미입력'}${
+                              p.market_size ? ` (규모 ${MARKET_SIZE_LABEL[p.market_size]})` : ''
+                            }`
+                        )
+                        .join(' · ')}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => startTransition(() => deleteSourcingComparison(c.id))}
+                  disabled={isPending}
+                  className="text-inkSoft hover:text-red-700 shrink-0"
+                >
+                  삭제
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {error && <p className="text-[11px] text-warn bg-warnBg rounded px-2 py-1 mb-2">{error}</p>}
+
+      {adding && (
+        <ComparisonEntryEditor
+          onSave={(c) =>
+            startTransition(async () => {
+              setError(null);
+              const res = await addSourcingComparison(item.id, c);
+              if ('error' in res) {
+                setError(res.error);
+                return;
+              }
+              setAdding(false);
+            })
+          }
+        />
+      )}
+    </div>
+  );
+}
+
 export default function SourcingList({ items }: { items: any[] }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -528,6 +611,7 @@ export default function SourcingList({ items }: { items: any[] }) {
   const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
   const [expandedOptionsId, setExpandedOptionsId] = useState<string | null>(null);
   const [expandedSuppliersId, setExpandedSuppliersId] = useState<string | null>(null);
+  const [expandedComparisonsId, setExpandedComparisonsId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const rows = useMemo(() => {
@@ -625,8 +709,10 @@ export default function SourcingList({ items }: { items: any[] }) {
             const isMarginExpanded = expandedMarginId === it.id;
             const isOptionsExpanded = expandedOptionsId === it.id;
             const isSuppliersExpanded = expandedSuppliersId === it.id;
+            const isComparisonsExpanded = expandedComparisonsId === it.id;
             const optionCount = (it.sourcing_item_options || []).length;
             const supplierCount = (it.sourcing_item_suppliers || []).length;
+            const comparisonCount = (it.sourcing_item_comparisons || []).length;
 
             if (isEditing) {
               return (
@@ -735,9 +821,16 @@ export default function SourcingList({ items }: { items: any[] }) {
                   >
                     공급처 비교 {supplierCount > 0 && `(${supplierCount})`} {isSuppliersExpanded ? '▲' : '▼'}
                   </button>
+                  <button
+                    onClick={() => setExpandedComparisonsId(isComparisonsExpanded ? null : it.id)}
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                  >
+                    비교 상품군 {comparisonCount > 0 && `(${comparisonCount})`} {isComparisonsExpanded ? '▲' : '▼'}
+                  </button>
                 </div>
 
                 {isOptionsExpanded && <OptionsSection item={it} />}
+                {isComparisonsExpanded && <ComparisonsSection item={it} />}
                 {isSuppliersExpanded && <SuppliersSection item={it} />}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
@@ -746,6 +839,13 @@ export default function SourcingList({ items }: { items: any[] }) {
                     {new Date(it.created_at).toLocaleDateString('ko-KR')}
                   </span>
                   <div className="flex gap-2 text-xs items-center">
+                    <span
+                      className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
+                        entered ? 'bg-profitBg text-profit' : 'bg-warnBg text-warn'
+                      }`}
+                    >
+                      {entered ? '입력' : '미입력'}
+                    </span>
                     <select
                       value={stage}
                       disabled={isPending}
