@@ -616,6 +616,10 @@ export default function SourcingList({ items }: { items: any[] }) {
           {rows.map((it) => {
             const status = it.status || 'checking';
             const stage = it.stage || 'candidate';
+            // 판매가·원가를 아직 안 넣은 후보인지 - 상품 등록 직후엔
+            // "미입력"으로 시작하고, 둘 다 채우면 자동으로 "입력"으로
+            // 바뀐다 (수동 선택이 아니라 실제 입력 여부로 자동 판정).
+            const entered = it.price != null && it.cost != null;
             const m = it.margin;
             const isEditing = editingId === it.id;
             const isMarginExpanded = expandedMarginId === it.id;
@@ -647,6 +651,13 @@ export default function SourcingList({ items }: { items: any[] }) {
                         className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${STAGE_STYLE[stage]}`}
                       >
                         {STAGE_LABEL[stage]}
+                      </span>
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
+                          entered ? 'bg-profitBg text-profit' : 'bg-warnBg text-warn'
+                        }`}
+                      >
+                        {entered ? '입력' : '미입력'}
                       </span>
                       {m.marginPct != null && (
                         <button
