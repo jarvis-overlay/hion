@@ -576,6 +576,15 @@ export default function SourcingList({ items }: { items: any[] }) {
           className="border border-paperLine bg-white px-3 py-2 text-sm flex-1 min-w-[180px]"
         />
         <select
+          value={stageFilter}
+          onChange={(e) => setStageFilter(e.target.value)}
+          className="border border-paperLine bg-white px-2 py-2 text-sm"
+        >
+          <option value="all">후보/확정 전체</option>
+          <option value="candidate">후보</option>
+          <option value="confirmed">확정</option>
+        </select>
+        <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           className="border border-paperLine bg-white px-2 py-2 text-sm"
@@ -584,15 +593,6 @@ export default function SourcingList({ items }: { items: any[] }) {
           <option value="checking">검토중</option>
           <option value="ordered">발주완료</option>
           <option value="hold">보류</option>
-        </select>
-        <select
-          value={stageFilter}
-          onChange={(e) => setStageFilter(e.target.value)}
-          className="border border-paperLine bg-white px-2 py-2 text-sm"
-        >
-          <option value="all">후보/확정 전체</option>
-          <option value="candidate">후보</option>
-          <option value="confirmed">확정</option>
         </select>
         <select
           value={sortKey}
