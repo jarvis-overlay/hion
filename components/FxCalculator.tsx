@@ -1,8 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { getFxRates } from '@/app/dashboard/sourcing/list/fxActions';
+import type { FxRates } from '@/lib/fx';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
+const fmtRate = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
 
 // 1688/알리바바는 위안/달러로 가격이 나오니, 현지 금액+환율을 넣으면
 // 원화로 환산해준다. 등록/수정/옵션 추가 폼 세 군데서 공용으로 씀.
@@ -11,7 +14,26 @@ export default function FxCalculator({ onApply }: { onApply: (krw: number) => vo
   const [currency, setCurrency] = useState<'CNY' | 'USD'>('CNY');
   const [amount, setAmount] = useState('');
   const [rate, setRate] = useState('300');
+  const [liveRates, setLiveRates] = useState<FxRates | null>(null);
+  const [loadingRates, setLoadingRates] = useState(false);
+  const [ratesFailed, setRatesFailed] = useState(false);
   const result = (parseFloat(amount) || 0) * (parseFloat(rate) || 0);
+
+  // 계산기를 펼칠 때 한 번만 실시간 환율을 조회한다 (ECB 기준환율 -
+  // 완전한 실시간은 아니고 영업일마다 갱신되지만, 무료/키불필요로 얻을
+  // 수 있는 가장 최신 환율). 조회에 실패해도 직접 입력은 그대로 되므로
+  // 폼 사용을 막지 않는다.
+  useEffect(() => {
+    if (!show || liveRates || loadingRates) return;
+    setLoadingRates(true);
+    getFxRates()
+      .then((r) => {
+        if (r) setLiveRates(r);
+        else setRatesFailed(true);
+      })
+      .catch(() => setRatesFailed(true))
+      .finally(() => setLoadingRates(false));
+  }, [show, liveRates, loadingRates]);
 
   return (
     <div>
@@ -57,6 +79,29 @@ export default function FxCalculator({ onApply }: { onApply: (krw: number) => vo
           >
             {result ? `${fmt(result)} 적용` : '금액/환율 입력'}
           </button>
+        </div>
+      )}
+      {show && (
+        <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-inkSoft">
+          {loadingRates && <span>실시간 환율 조회 중...</span>}
+          {!loadingRates && liveRates && (
+            <>
+              <span>
+                실시간 환율 - 1 CNY {fmtRate(liveRates.CNY)}원 · 1 USD {fmtRate(liveRates.USD)}원 (
+                {liveRates.date} 기준)
+              </span>
+              <button
+                type="button"
+                onClick={() => setRate(String(liveRates[currency]))}
+                className="text-accent font-semibold underline"
+              >
+                이 환율 적용
+              </button>
+            </>
+          )}
+          {!loadingRates && !liveRates && ratesFailed && (
+            <span>실시간 환율 조회 실패 - 환율은 직접 입력해주세요.</span>
+          )}
         </div>
       )}
     </div>

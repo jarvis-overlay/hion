@@ -182,14 +182,14 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
       {f.price && (
         <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1">
           <div className="flex items-center justify-between">
-            <span className="text-inkSoft">예상 마진</span>
+            <span className="text-inkSoft">예상 마진 (광고비 적용)</span>
             <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
               {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
               {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-inkSoft text-xs">순수 마진 (광고비 제외)</span>
+            <span className="text-inkSoft text-xs">예상 마진 (광고비 미적용)</span>
             <span className="font-mono text-xs text-inkSoft">
               {(f.pureProfit < 0 ? '-' : '') + fmt(Math.abs(f.pureProfit))}
               {f.pureMarginPct != null && ` (${f.pureMarginPct.toFixed(1)}%)`}
@@ -305,14 +305,14 @@ function OptionAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onD
       {f.price && (
         <div className="text-xs grid gap-0.5">
           <div className="flex items-center justify-between">
-            <span className="text-inkSoft">예상 마진</span>
+            <span className="text-inkSoft">예상 마진 (광고비 적용)</span>
             <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
               {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
               {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-inkSoft text-[11px]">순수 마진 (광고비 제외)</span>
+            <span className="text-inkSoft text-[11px]">예상 마진 (광고비 미적용)</span>
             <span className="font-mono text-[11px] text-inkSoft">
               {(f.pureProfit < 0 ? '-' : '') + fmt(Math.abs(f.pureProfit))}
               {f.pureMarginPct != null && ` (${f.pureMarginPct.toFixed(1)}%)`}
