@@ -285,6 +285,7 @@ export async function addSourcingSupplier(
 
   const { error } = await supabase.from('sourcing_item_suppliers').insert({
     sourcing_item_id: sourcingItemId,
+    title: String(formData.get('title') || '').trim() || null,
     link: link || null,
     price,
     currency: String(formData.get('currency') || 'CNY'),

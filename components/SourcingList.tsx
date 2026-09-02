@@ -453,6 +453,11 @@ function SupplierAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; o
       className="grid gap-2 bg-paper rounded-md p-3"
     >
       <input
+        name="title"
+        placeholder="상품명 (구분용)"
+        className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+      />
+      <input
         name="link"
         placeholder="공급처 링크 (1688, 알리바바 등)"
         className="border border-paperLine bg-white px-2 py-1.5 text-xs"
@@ -518,13 +523,14 @@ function SuppliersSection({ item }: { item: any }) {
               }`}
             >
               <div className="min-w-0 flex-1">
-                {s.link ? (
-                  <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline">
-                    [링크]
-                  </a>
-                ) : (
-                  <span className="text-inkSoft">링크 없음</span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-ink truncate">{s.title || '(이름 없음)'}</span>
+                  {s.link && (
+                    <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline shrink-0">
+                      [링크]
+                    </a>
+                  )}
+                </div>
                 {s.notes && <p className="text-inkSoft mt-0.5">{s.notes}</p>}
               </div>
               <div className="flex items-center gap-2 shrink-0">
