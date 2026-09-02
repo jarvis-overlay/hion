@@ -75,6 +75,28 @@ function computeMargin(it: any) {
   };
 }
 
+// 메모에 링크를 같이 적어두는 경우가 많은데, 긴 URL이 공백 없는 한
+// 덩어리라 줄바꿈 없이 카드 밖으로 넘쳐서 잘려 보이고 클릭도 안 됐다 -
+// URL 부분만 잘라서 실제 <a> 링크로 바꿔준다.
+function linkifyText(text: string) {
+  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  return parts.map((part, i) =>
+    /^https?:\/\//.test(part) ? (
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noreferrer"
+        className="text-profit underline break-all"
+      >
+        {part}
+      </a>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
 function marginBadgeClass(pct: number) {
   if (pct < 0) return 'bg-red-100 text-red-700';
   if (pct < 15) return 'bg-warnBg text-warn';
@@ -806,7 +828,11 @@ export default function SourcingList({ items }: { items: any[] }) {
                   </dl>
                 )}
 
-                {it.content && <p className="text-xs text-ink">{it.content}</p>}
+                {it.content && (
+                  <p className="text-xs text-ink whitespace-pre-wrap break-words">
+                    {linkifyText(it.content)}
+                  </p>
+                )}
 
                 <div className="flex flex-wrap gap-2 text-xs">
                   <button
