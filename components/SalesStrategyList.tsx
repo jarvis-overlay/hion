@@ -57,6 +57,7 @@ export default function SalesStrategyList({ items }: { items: any[] }) {
   // 뜨면 찾기 힘들다는 피드백으로 필터를 추가함.
   const [enteredFilter, setEnteredFilter] = useState('entered');
   const [stageFilter, setStageFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [keywords, setKeywords] = useState<Record<string, string>>({});
   const [results, setResults] = useState<Record<string, { strategy: SalesStrategyResult; verdict: string; keyword: string }>>({});
   const [generatingId, setGeneratingId] = useState<string | null>(null);
@@ -67,6 +68,7 @@ export default function SalesStrategyList({ items }: { items: any[] }) {
   const filtered = items.filter((it) => {
     if (enteredFilter !== 'all' && (it.input_status || 'not_entered') !== enteredFilter) return false;
     if (stageFilter !== 'all' && (it.stage || 'candidate') !== stageFilter) return false;
+    if (statusFilter !== 'all' && (it.status || 'checking') !== statusFilter) return false;
     if (!q) return true;
     return it.title?.toLowerCase().includes(q);
   });
@@ -115,6 +117,16 @@ export default function SalesStrategyList({ items }: { items: any[] }) {
           <option value="all">후보/확정 전체</option>
           <option value="candidate">후보</option>
           <option value="confirmed">확정</option>
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="border border-paperLine bg-white px-2 py-2 text-sm"
+        >
+          <option value="all">상태 전체</option>
+          <option value="checking">검토중</option>
+          <option value="ordered">발주완료</option>
+          <option value="hold">보류</option>
         </select>
       </div>
       <p className="text-xs text-inkSoft mb-4">{filtered.length}개 표시 중 (전체 {items.length}개)</p>
