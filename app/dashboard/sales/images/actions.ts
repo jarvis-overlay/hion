@@ -114,7 +114,8 @@ export async function runRemoveBackground(
   const supabase = createClient();
   try {
     const img = await getImage(supabase, imageId);
-    const cutout = await removeImageBackground(img.original_url);
+    const { buffer, contentType } = await fetchImageBuffer(img.original_url);
+    const cutout = await removeImageBackground(buffer, contentType);
     const url = await uploadResult(supabase, img.sourcing_item_id, imageId, 'cutout', cutout, 'image/png');
     const { error } = await supabase.from('sourcing_item_images').update({ cutout_url: url }).eq('id', imageId);
     if (error) return { error: error.message };

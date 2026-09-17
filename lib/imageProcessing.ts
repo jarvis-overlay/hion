@@ -124,18 +124,21 @@ export async function compositeTranslatedImage(
     .toBuffer();
 }
 
-// remove.bg - 이미 업로드한 원본 이미지의 공개 URL을 그대로 넘겨서
-// 배경 제거된 투명 PNG를 받는다 (이미지를 다시 업로드할 필요 없음).
-export async function removeImageBackground(imageUrl: string): Promise<Buffer> {
+// remove.bg - image_url 방식은 remove.bg 서버가 우리 URL을 직접
+// 가져가야 하는데, 호스트에 따라 못 가져오는 경우가 실측으로 확인돼서
+// (핫링크 차단 등) 이미지 바이트를 직접 업로드하는 방식으로 처리한다.
+export async function removeImageBackground(imageBuffer: Buffer, contentType: string): Promise<Buffer> {
   const apiKey = requireEnv('REMOVE_BG_API_KEY');
+
+  const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+  const form = new FormData();
+  form.append('image_file', new Blob([new Uint8Array(imageBuffer)], { type: contentType.split(';')[0] }), `image.${ext}`);
+  form.append('size', 'auto');
 
   const res = await fetch('https://api.remove.bg/v1.0/removebg', {
     method: 'POST',
-    headers: {
-      'X-Api-Key': apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ image_url: imageUrl, size: 'auto' }),
+    headers: { 'X-Api-Key': apiKey },
+    body: form,
   });
 
   if (!res.ok) {
