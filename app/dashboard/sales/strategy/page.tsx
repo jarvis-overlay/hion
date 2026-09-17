@@ -8,12 +8,23 @@ export const maxDuration = 280;
 
 export default async function SalesStrategyPage() {
   const supabase = createClient();
-  const { data: items } = await supabase
+  // sourcing_item_strategies 마이그레이션을 아직 안 돌렸으면 이 조인
+  // 쿼리 자체가 실패한다 - 그런 경우에도 상품 목록은 그대로 보이도록
+  // (전략 없이) 예전 방식으로 한 번 더 시도한다.
+  let { data: items, error } = await supabase
     .from('sourcing_items')
     .select(
       '*, sourcing_item_suppliers(*), sourcing_item_comparisons(*, sourcing_comparison_prices(*)), sourcing_item_strategies(*)'
     )
     .order('created_at', { ascending: false });
+
+  if (error) {
+    const fallback = await supabase
+      .from('sourcing_items')
+      .select('*, sourcing_item_suppliers(*), sourcing_item_comparisons(*, sourcing_comparison_prices(*))')
+      .order('created_at', { ascending: false });
+    items = fallback.data;
+  }
 
   return (
     <div className="max-w-2xl">
