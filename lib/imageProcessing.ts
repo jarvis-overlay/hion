@@ -27,6 +27,11 @@ export interface TranslatedRegion {
   translatedText: string;
 }
 
+// 실제 키로 테스트해보니 gemini-2.5-flash는 신규 키에 막혀있고
+// gemini-3.6-flash를 쓰라고 안내함 - 모델명이 또 바뀔 수 있어서 환경
+// 변수로 오버라이드 가능하게 함.
+const VISION_MODEL = process.env.GEMINI_VISION_MODEL || 'gemini-3.6-flash';
+
 // Gemini 비전 모델에게 이미지 속 텍스트 위치+원문+번역문을 한 번에
 // 요청한다. 정확한 픽셀 좌표 대신 0~1 비율로 받아서(해상도 독립적),
 // 합성 단계에서 실제 이미지 크기에 맞게 다시 환산한다.
@@ -49,7 +54,7 @@ export async function detectAndTranslateText(imageBuffer: Buffer, mimeType: stri
 ]`;
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${VISION_MODEL}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
