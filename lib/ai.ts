@@ -89,6 +89,28 @@ function parseJsonArray(text: string): any[] {
   throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
 }
 
+// parseJsonArray의 객체 버전 - 응답이 배열이 아니라 단일 JSON 객체일
+// 때 쓴다 (판매 전략처럼 항목이 고정된 몇 개 필드로 구성된 경우).
+function parseJsonObject(text: string): any {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch {
+    // fall through to repair
+  }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      // fall through
+    }
+  }
+  console.error('[ai] JSON 객체 파싱 실패. 원문:', text.slice(0, 1000));
+  throw new Error('AI 응답을 해석하지 못했어요. 다시 시도해주세요.');
+}
+
 export type Season = 'summer' | 'winter' | 'all';
 
 const SEASON_LABEL: Record<Season, string> = {
@@ -423,4 +445,68 @@ ${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}
   } catch {
     return names;
   }
+}
+
+export interface SalesStrategyInput {
+  title: string;
+  price: number | null;
+  cost: number | null;
+  marginProfit: number | null;
+  marginPct: number | null;
+  feeRatePct: number | null; // 저장된 coupang_fee로부터 역산한 수수료율
+  adRatePct: number | null; // 저장된 ad_cost로부터 역산한 광고비율
+  marketSummary: string; // 실제 쿠팡 검색 결과 요약 (analyzeCoupangResults 스타일)
+  marketVerdict: string; // 뱃지 기반으로 이미 계산된 한줄 결론
+  comparisonSummary: string | null; // 비교 상품군/공급처에 입력해둔 데이터 요약
+}
+
+export interface SalesStrategyResult {
+  pricingStrategy: string;
+  reviewStrategy: string;
+  adStrategy: string;
+  channelStrategy: string;
+  differentiation: string;
+}
+
+// "판매" 대분류의 첫 기능 - 이미 확보한 실데이터(쿠팡 시장 위치) +
+// 사용자가 입력해둔 마진/공급처/비교 상품군 데이터를 근거로, 이 상품을
+// 구체적으로 "어떻게 팔지/어떻게 광고를 태울지" 결론까지 내려준다.
+// 새로 데이터를 수집하지 않고 이미 있는 걸 최대한 재사용한다.
+export async function generateSalesStrategy(input: SalesStrategyInput): Promise<SalesStrategyResult> {
+  const marginText =
+    input.price != null
+      ? `판매가 ${input.price.toLocaleString()}원, 원가 ${input.cost?.toLocaleString() ?? '미입력'}원, 마진 ${
+          input.marginProfit != null ? input.marginProfit.toLocaleString() + '원' : '계산불가'
+        }${input.marginPct != null ? ` (${input.marginPct.toFixed(1)}%)` : ''}, 쿠팡수수료율 ${
+          input.feeRatePct != null ? input.feeRatePct.toFixed(1) + '%' : '미입력'
+        }, 현재 설정된 광고비율 ${input.adRatePct != null ? input.adRatePct.toFixed(1) + '%' : '미입력'}`
+      : '판매가/원가 미입력 (마진 계산 불가)';
+
+  const prompt = `당신은 1인 이커머스 셀러(쿠팡 로켓그로스, 네이버도 같이 판매)의 판매 전략 컨설턴트입니다.
+
+상품명: "${input.title}"
+
+[내 상품의 원가/마진 구조]
+${marginText}
+
+[실제 쿠팡 시장 조회 결과 - "${input.title}"로 검색한 실데이터]
+${input.marketSummary}
+결론: ${input.marketVerdict}
+
+[내가 직접 조사해둔 공급처/경쟁 상품 비교 데이터]
+${input.comparisonSummary || '(아직 입력한 비교 데이터 없음)'}
+
+위 실데이터를 근거로, 이 상품을 **지금 이 시장 위치에서 구체적으로 어떻게 팔아야 하는지** 판매 전략을 세워주세요. 추측이 아니라 위에 주어진 숫자(마진, 리뷰수, 경쟁강도, 가격대)를 직접 인용해서 근거를 대야 합니다.
+
+반드시 아래 JSON 객체 형식으로만 응답하세요 (각 항목 2~4문장):
+{
+  "pricingStrategy": "가격 전략 - 런칭가를 얼마로 잡을지, 초반 쿠폰/할인이 필요한지, 마진 구조상 가격을 더 내릴 여유가 있는지",
+  "reviewStrategy": "리뷰 확보 전략 - 경쟁 상품 리뷰 규모 대비 초반에 얼마나 공격적으로 리뷰를 쌓아야 하는지, 구체적 방법",
+  "adStrategy": "광고 운영 전략 - 현재 광고비율이 이 경쟁강도에 적정한지, 어떤 키워드/시점에 얼마나 태워야 하는지",
+  "channelStrategy": "채널 우선순위 - 쿠팡/네이버 중 지금 어디에 먼저 집중해야 하는지와 이유",
+  "differentiation": "차별화 포인트 - 원가/공급처 경쟁력이나 경쟁 상품 대비 내세울 수 있는 지점"
+}`;
+
+  const cleaned = await callClaude(prompt);
+  return parseJsonObject(cleaned) as SalesStrategyResult;
 }
