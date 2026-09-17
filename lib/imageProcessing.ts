@@ -56,7 +56,7 @@ export async function detectAndTranslateText(imageBuffer: Buffer, mimeType: stri
       body: JSON.stringify({
         contents: [
           {
-            parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64 } }],
+            parts: [{ text: prompt }, { inlineData: { mimeType, data: base64 } }],
           },
         ],
       }),
@@ -148,6 +148,51 @@ export async function removeImageBackground(imageBuffer: Buffer, contentType: st
 
   const arrayBuffer = await res.arrayBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+// "상세페이지 제작" - 섹션 하나(첨부 이미지 + 키워드/분위기/설명 문구)를
+// 근거로 Gemini의 이미지 생성/편집 모델(Nano Banana)에게 상세페이지
+// 한 장면을 만들어달라고 요청한다. 원본 상품 사진이 있으면 그 사진을
+// 그대로 편집 재료로 넘겨 실제 상품 모습을 유지하게 하고, 없으면
+// 설명만으로 새로 생성하게 한다.
+const IMAGE_GEN_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+
+export async function generateDetailSectionImage(
+  promptText: string,
+  productImage: { buffer: Buffer; mimeType: string } | null
+): Promise<Buffer> {
+  const apiKey = requireEnv('GEMINI_API_KEY');
+
+  const instruction = productImage
+    ? `아래 상품 사진을 그대로 활용해서, 쿠팡 상세페이지에 들어갈 마케팅 이미지 한 장면을 만들어주세요. 상품의 실제 형태·색상·디자인은 최대한 그대로 유지하면서, 배경과 분위기와 문구 배치만 아래 설명에 맞게 합성/편집해주세요.\n\n설명: ${promptText}`
+    : `아래 설명에 맞는 쿠팡 상세페이지용 마케팅 이미지를 새로 만들어주세요. 첨부된 상품 사진이 없으니, 설명에 맞는 상황/분위기의 이미지를 상황에 맞게 구성해주세요.\n\n설명: ${promptText}`;
+
+  const parts: Record<string, unknown>[] = [{ text: instruction }];
+  if (productImage) {
+    parts.push({ inlineData: { mimeType: productImage.mimeType, data: productImage.buffer.toString('base64') } });
+  }
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      }),
+    }
+  );
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json?.error?.message || `Gemini 이미지 생성 오류 (HTTP ${res.status})`);
+  }
+
+  const imagePart = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
+  if (!imagePart) {
+    throw new Error('이미지 생성 결과를 받지 못했어요. 설명을 조금 더 구체적으로 적어서 다시 시도해주세요.');
+  }
+  return Buffer.from(imagePart.inlineData.data, 'base64');
 }
 
 // 쿠팡 상세페이지 이미지 규격(가로 860px)에 맞춘다 - AI 업스케일이
