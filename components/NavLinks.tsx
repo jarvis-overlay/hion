@@ -23,7 +23,10 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
   },
   {
     label: '판매',
-    items: [{ href: '/dashboard/sales/strategy', label: '판매 전략' }],
+    items: [
+      { href: '/dashboard/sales/strategy', label: '판매 전략' },
+      { href: '/dashboard/sales/images', label: '상세페이지 이미지' },
+    ],
   },
   {
     label: '재고관리',
