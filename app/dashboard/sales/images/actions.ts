@@ -7,7 +7,7 @@ import {
   detectAndTranslateText,
   compositeTranslatedImage,
   removeImageBackground,
-  upscaleImage,
+  resizeForCoupang,
 } from '@/lib/imageProcessing';
 
 const BUCKET = 'detail-images';
@@ -125,13 +125,14 @@ export async function runRemoveBackground(
   }
 }
 
-export async function runUpscale(imageId: string): Promise<{ error: string } | { success: true; url: string }> {
+export async function runResize(imageId: string): Promise<{ error: string } | { success: true; url: string }> {
   const supabase = createClient();
   try {
     const img = await getImage(supabase, imageId);
-    const upscaled = await upscaleImage(img.original_url);
-    const url = await uploadResult(supabase, img.sourcing_item_id, imageId, 'upscaled', upscaled, 'image/png');
-    const { error } = await supabase.from('sourcing_item_images').update({ upscaled_url: url }).eq('id', imageId);
+    const { buffer } = await fetchImageBuffer(img.original_url);
+    const resized = await resizeForCoupang(buffer);
+    const url = await uploadResult(supabase, img.sourcing_item_id, imageId, 'resized', resized, 'image/jpeg');
+    const { error } = await supabase.from('sourcing_item_images').update({ resized_url: url }).eq('id', imageId);
     if (error) return { error: error.message };
     revalidatePath('/dashboard/sales/images');
     return { success: true, url };

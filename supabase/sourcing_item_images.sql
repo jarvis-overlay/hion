@@ -1,6 +1,6 @@
 -- Supabase SQL Editor에서 실행하세요.
 -- "판매" 대분류 - 1688 원본 이미지를 한국 판매용으로 가공(번역/누끼/
--- 업스케일)하는 기능에 쓸 저장소 버킷 + 테이블. 각 처리 단계는
+-- 쿠팡 규격 리사이즈)하는 기능에 쓸 저장소 버킷 + 테이블. 각 처리 단계는
 -- 독립적으로 실행 가능해서, 한 이미지 행에 단계별 결과 URL을 각각
 -- 저장한다 (원본은 항상 있고 나머지는 처리한 것만 채워짐).
 
@@ -42,7 +42,7 @@ create table if not exists sourcing_item_images (
   original_url text not null,
   translated_url text,  -- 중국어->한국어 텍스트 합성 결과
   cutout_url text,      -- 배경 제거(누끼) 결과
-  upscaled_url text     -- 해상도 업스케일 결과
+  resized_url text      -- 쿠팡 상세페이지 규격(가로 860px) 리사이즈 결과
 );
 
 alter table sourcing_item_images enable row level security;

@@ -1,13 +1,13 @@
-// "판매" 대분류 - 1688 원본 이미지를 한국 판매용으로 가공하는 세 기능.
-// 각각 별도 외부 API를 쓰고, 서로 독립적으로 실행 가능하다:
+// "판매" 대분류 - 1688 원본 이미지를 한국 판매용으로 가공하는 세 기능:
 //   1) 번역: Gemini 비전으로 이미지 속 중국어 텍스트 위치+번역문을
 //      한 번에 뽑아내고, sharp로 그 자리에 흰 박스+번역문을 합성한다
 //      (OCR과 번역을 나누지 않고 비전 모델 한 번으로 처리).
 //   2) 누끼: remove.bg API로 배경 제거.
-//   3) 업스케일: Replicate에 호스팅된 업스케일 모델(기본 Real-ESRGAN)로
-//      해상도를 올린다 - 비동기 예측(prediction)이라 완료까지 폴링함.
+//   3) 쿠팡 규격 리사이즈: AI 업스케일이 아니라 쿠팡 상세페이지
+//      이미지가 요구하는 가로 860px 규격에 맞추는 단순 리사이즈라,
+//      외부 API 없이 sharp로 로컬 처리한다.
 //
-// 셋 다 실제 서비스 키가 있어야 동작하고, 키가 없으면 명확한 한국어
+// 1)/2)는 실제 서비스 키가 있어야 동작하고, 키가 없으면 명확한 한국어
 // 에러로 바로 알려준다 (다른 lib 파일들과 동일한 requireEnv 패턴).
 import sharp from 'sharp';
 
@@ -147,48 +147,12 @@ export async function removeImageBackground(imageUrl: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
-// Replicate - 모델을 owner/name으로 지정해서 버전 해시를 고정하지
-// 않고 호출한다(모델이 바뀌면 REPLICATE_UPSCALE_MODEL 환경변수만
-// 바꾸면 됨, 기본값은 Real-ESRGAN). 예측은 비동기라 완료까지 폴링.
-export async function upscaleImage(imageUrl: string): Promise<Buffer> {
-  const apiToken = requireEnv('REPLICATE_API_TOKEN');
-  const model = process.env.REPLICATE_UPSCALE_MODEL || 'nightmareai/real-esrgan';
+// 쿠팡 상세페이지 이미지 규격(가로 860px)에 맞춘다 - AI 업스케일이
+// 아니라 단순 리사이즈라 외부 API 없이 sharp로 로컬 처리한다. 원본이
+// 860px보다 작아도 규격을 맞추기 위해 확대까지 허용한다(화질 손실은
+// 감수 - 애초에 원본이 작으면 어쩔 수 없음).
+export const COUPANG_DETAIL_WIDTH = 860;
 
-  const createRes = await fetch(`https://api.replicate.com/v1/models/${model}/predictions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ input: { image: imageUrl } }),
-  });
-  const createJson = await createRes.json();
-  if (!createRes.ok) {
-    throw new Error(createJson?.detail || `Replicate 요청 오류 (HTTP ${createRes.status})`);
-  }
-
-  let prediction = createJson;
-  const startedAt = Date.now();
-  const TIMEOUT_MS = 90000;
-  while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && prediction.status !== 'canceled') {
-    if (Date.now() - startedAt > TIMEOUT_MS) {
-      throw new Error('업스케일 처리 시간이 너무 오래 걸려서 중단했어요. 잠시 후 다시 시도해주세요.');
-    }
-    await new Promise((r) => setTimeout(r, 2000));
-    const pollRes = await fetch(prediction.urls.get, {
-      headers: { Authorization: `Bearer ${apiToken}` },
-    });
-    prediction = await pollRes.json();
-  }
-
-  if (prediction.status !== 'succeeded') {
-    throw new Error(prediction.error || '업스케일 처리에 실패했어요.');
-  }
-
-  const outputUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
-  if (!outputUrl) throw new Error('업스케일 결과 이미지를 받지 못했어요.');
-
-  const imgRes = await fetch(outputUrl);
-  const arrayBuffer = await imgRes.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+export async function resizeForCoupang(imageBuffer: Buffer): Promise<Buffer> {
+  return sharp(imageBuffer).resize({ width: COUPANG_DETAIL_WIDTH }).jpeg({ quality: 90 }).toBuffer();
 }

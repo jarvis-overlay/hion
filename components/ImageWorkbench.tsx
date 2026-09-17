@@ -5,22 +5,22 @@ import {
   addSourceImage,
   runTranslate,
   runRemoveBackground,
-  runUpscale,
+  runResize,
   deleteSourcingImage,
 } from '@/app/dashboard/sales/images/actions';
 
-type Stage = 'translated' | 'cutout' | 'upscaled';
+type Stage = 'translated' | 'cutout' | 'resized';
 
 const STAGE_LABEL: Record<Stage, string> = {
   translated: '번역',
   cutout: '누끼',
-  upscaled: '업스케일',
+  resized: '쿠팡 규격(860px)',
 };
 
 const STAGE_RUNNER: Record<Stage, (id: string) => Promise<{ error: string } | { success: true; url: string }>> = {
   translated: runTranslate,
   cutout: runRemoveBackground,
-  upscaled: runUpscale,
+  resized: runResize,
 };
 
 function ImageCard({ image }: { image: any }) {
@@ -31,7 +31,7 @@ function ImageCard({ image }: { image: any }) {
   const urls: Record<Stage, string | null> = {
     translated: image.translated_url,
     cutout: image.cutout_url,
-    upscaled: image.upscaled_url,
+    resized: image.resized_url,
   };
 
   function run(stage: Stage) {
@@ -54,7 +54,7 @@ function ImageCard({ image }: { image: any }) {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={image.original_url} alt="원본" className="w-full aspect-square object-cover rounded bg-paper" />
         </div>
-        {(['translated', 'cutout', 'upscaled'] as Stage[]).map((stage) => (
+        {(['translated', 'cutout', 'resized'] as Stage[]).map((stage) => (
           <div key={stage}>
             <p className="text-[11px] font-semibold text-inkSoft mb-1">{STAGE_LABEL[stage]}</p>
             {urls[stage] ? (
