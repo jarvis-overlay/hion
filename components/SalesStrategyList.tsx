@@ -52,6 +52,11 @@ function StrategyView({
 
 export default function SalesStrategyList({ items }: { items: any[] }) {
   const [search, setSearch] = useState('');
+  // 판매 전략은 가격이 정해진 상품이라야 의미가 있어서, 기본값은 "입력"
+  // (판매가·원가 다 있는) 상태만 보여준다 - 아직 조사 중인 후보까지 다
+  // 뜨면 찾기 힘들다는 피드백으로 필터를 추가함.
+  const [enteredFilter, setEnteredFilter] = useState('entered');
+  const [stageFilter, setStageFilter] = useState('all');
   const [keywords, setKeywords] = useState<Record<string, string>>({});
   const [results, setResults] = useState<Record<string, { strategy: SalesStrategyResult; verdict: string; keyword: string }>>({});
   const [generatingId, setGeneratingId] = useState<string | null>(null);
@@ -59,7 +64,12 @@ export default function SalesStrategyList({ items }: { items: any[] }) {
   const [, startTransition] = useTransition();
 
   const q = search.trim().toLowerCase();
-  const filtered = items.filter((it) => !q || it.title?.toLowerCase().includes(q));
+  const filtered = items.filter((it) => {
+    if (enteredFilter !== 'all' && (it.input_status || 'not_entered') !== enteredFilter) return false;
+    if (stageFilter !== 'all' && (it.stage || 'candidate') !== stageFilter) return false;
+    if (!q) return true;
+    return it.title?.toLowerCase().includes(q);
+  });
 
   function handleGenerate(item: any) {
     const keyword = keywords[item.id] ?? item.title;
@@ -81,15 +91,36 @@ export default function SalesStrategyList({ items }: { items: any[] }) {
 
   return (
     <div>
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="상품명 검색"
-        className="border border-paperLine bg-white px-3 py-2 text-sm w-full mb-4"
-      />
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="상품명 검색"
+          className="border border-paperLine bg-white px-3 py-2 text-sm flex-1 min-w-[180px]"
+        />
+        <select
+          value={enteredFilter}
+          onChange={(e) => setEnteredFilter(e.target.value)}
+          className="border border-paperLine bg-white px-2 py-2 text-sm"
+        >
+          <option value="entered">입력된 상품만</option>
+          <option value="not_entered">미입력</option>
+          <option value="all">입력/미입력 전체</option>
+        </select>
+        <select
+          value={stageFilter}
+          onChange={(e) => setStageFilter(e.target.value)}
+          className="border border-paperLine bg-white px-2 py-2 text-sm"
+        >
+          <option value="all">후보/확정 전체</option>
+          <option value="candidate">후보</option>
+          <option value="confirmed">확정</option>
+        </select>
+      </div>
+      <p className="text-xs text-inkSoft mb-4">{filtered.length}개 표시 중 (전체 {items.length}개)</p>
 
       {filtered.length === 0 ? (
-        <p className="text-sm text-inkSoft">상품이 없어요.</p>
+        <p className="text-sm text-inkSoft">조건에 맞는 상품이 없어요.</p>
       ) : (
         <div className="grid gap-3">
           {filtered.map((item) => {
