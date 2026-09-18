@@ -10,46 +10,102 @@ import {
 } from '@/app/dashboard/sales/detail-pages/actions';
 
 // 이미지(왼쪽) - 문구(가운데) - 결과(오른쪽) - 관리 순서로 행이 쌓이는
-// 스프레드시트 형태. 맨 아래 입력 행에 새 섹션을 채우면 위 목록에
-// 행으로 추가되는 방식 - 여러 섹션을 한눈에 비교하며 작업하기 위함.
-const GRID_COLS = 'grid-cols-[110px_1fr_110px_56px]';
+// 스프레드시트 형태. 미완성 행(초안, draft)을 여러 개 동시에 쌓아두고
+// 하나씩(또는 순서대로) 생성할 수 있다 - 이미지 여러 장을 한 번에
+// 선택하면 그만큼 초안 행이 바로 생김.
+const THUMB = 'w-44 h-44';
+const GRID_COLS = 'grid-cols-[190px_1fr_190px_56px]';
+
+interface Draft {
+  id: string;
+  file: File | null;
+  previewUrl: string | null;
+  keyword: string;
+  mood: string;
+  description: string;
+}
+
+function buildPromptText(d: { keyword: string; mood: string; description: string }): string {
+  const parts: string[] = [];
+  if (d.keyword.trim()) parts.push(`키워드: ${d.keyword.trim()}`);
+  if (d.mood.trim()) parts.push(`분위기: ${d.mood.trim()}`);
+  if (d.description.trim()) parts.push(`설명: ${d.description.trim()}`);
+  return parts.join(' / ');
+}
+
+function newDraft(file: File | null): Draft {
+  return {
+    id: crypto.randomUUID(),
+    file,
+    previewUrl: file ? URL.createObjectURL(file) : null,
+    keyword: '',
+    mood: '',
+    description: '',
+  };
+}
 
 function ProjectEditor({ project, onClose }: { project: any; onClose: () => void }) {
   const [isPending, startTransition] = useTransition();
-  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null); // 재시도 중인 section id 또는 생성 중인 draft id
   const [error, setError] = useState<string | null>(null);
-  const [newText, setNewText] = useState('');
-  const [newFile, setNewFile] = useState<File | null>(null);
+  const [drafts, setDrafts] = useState<Draft[]>([newDraft(null)]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sections: any[] = [...(project.detail_page_sections || [])].sort((a, b) => a.position - b.position);
-  const isAdding = isPending && retryingId === null;
 
-  function handleAdd() {
-    if (!newText.trim()) {
-      setError('문구(키워드/분위기/설명)를 입력해주세요.');
+  function handleFilesSelected(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const added = Array.from(files).map((f) => newDraft(f));
+    setDrafts((prev) => {
+      // 맨 처음 비어있는(이미지도 문구도 없는) 초안 행은 그대로 두면
+      // 항상 빈 줄이 하나 남아있어서, 이미지 여러 장을 한 번에 고르면
+      // 그 빈 줄은 없애고 방금 고른 장수만큼 초안을 채운다.
+      const rest = prev.filter((d) => d.file || d.keyword || d.mood || d.description);
+      return [...rest, ...added];
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function updateDraft(id: string, patch: Partial<Draft>) {
+    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  }
+
+  function removeDraft(id: string) {
+    setDrafts((prev) => prev.filter((d) => d.id !== id));
+  }
+
+  function addBlankDraft() {
+    setDrafts((prev) => [...prev, newDraft(null)]);
+  }
+
+  function handleGenerate(draft: Draft) {
+    const promptText = buildPromptText(draft);
+    if (!promptText) {
+      setError('키워드/분위기/설명 중 하나는 입력해주세요.');
       return;
     }
     setError(null);
     const fd = new FormData();
-    fd.set('text', newText);
-    if (newFile) fd.set('image', newFile);
+    fd.set('text', promptText);
+    if (draft.file) fd.set('image', draft.file);
+    setBusyId(draft.id);
     startTransition(async () => {
       const res = await addSection(project.id, sections.length, fd);
+      setBusyId(null);
       if ('error' in res) {
         setError(res.error);
         return;
       }
-      setNewText('');
-      setNewFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      removeDraft(draft.id);
+      // 초안이 하나도 안 남으면 다음 입력을 위해 빈 줄 하나 다시 만들어준다
+      setDrafts((prev) => (prev.length === 0 ? [newDraft(null)] : prev));
     });
   }
 
   function handleRetry(sectionId: string) {
-    setRetryingId(sectionId);
+    setBusyId(sectionId);
     startTransition(async () => {
       await retrySection(sectionId);
-      setRetryingId(null);
+      setBusyId(null);
     });
   }
 
@@ -71,7 +127,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         </div>
 
         {sections.map((s) => {
-          const isRetrying = isPending && retryingId === s.id;
+          const isRetrying = isPending && busyId === s.id;
           return (
             <div key={s.id} className={`grid ${GRID_COLS} border-t border-paperLine items-start`}>
               <div className="p-2">
@@ -80,10 +136,10 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                   <img
                     src={s.input_image_url}
                     alt="첨부 이미지"
-                    className="w-24 h-24 object-cover rounded bg-paper"
+                    className={`${THUMB} object-cover rounded bg-paper`}
                   />
                 ) : (
-                  <div className="w-24 h-24 rounded bg-paper flex items-center justify-center text-[10px] text-inkSoft text-center px-1">
+                  <div className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-1`}>
                     없음 (AI 생성)
                   </div>
                 )}
@@ -94,22 +150,33 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
               </div>
               <div className="p-2">
                 {s.output_image_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={s.output_image_url}
-                    alt="생성 결과"
-                    className="w-24 h-24 object-cover rounded bg-paper"
-                  />
+                  <div>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={s.output_image_url}
+                      alt="생성 결과"
+                      className={`${THUMB} object-cover rounded bg-paper`}
+                    />
+                    <a
+                      href={s.output_image_url}
+                      download
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-center text-[11px] text-accent underline mt-1"
+                    >
+                      다운로드
+                    </a>
+                  </div>
                 ) : s.error ? (
                   <button
                     onClick={() => handleRetry(s.id)}
                     disabled={isRetrying}
-                    className="w-24 h-24 rounded bg-warnBg flex items-center justify-center text-[10px] text-warn font-semibold text-center px-1 disabled:opacity-50"
+                    className={`${THUMB} rounded bg-warnBg flex items-center justify-center text-[11px] text-warn font-semibold text-center px-1 disabled:opacity-50`}
                   >
                     {isRetrying ? '재시도 중...' : '실패 - 다시 생성'}
                   </button>
                 ) : (
-                  <div className="w-24 h-24 rounded bg-paper flex items-center justify-center text-[10px] text-inkSoft">
+                  <div className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft`}>
                     생성 중...
                   </div>
                 )}
@@ -126,37 +193,76 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
           );
         })}
 
-        {/* 새 행 입력줄 - 여기 채우고 "섹션 생성" 누르면 위 목록에 행으로 쌓임 */}
-        <div className={`grid ${GRID_COLS} border-t border-paperLine items-start bg-paper/60`}>
-          <div className="p-2">
+        {/* 초안 행들 - 이미지 여러 장을 한 번에 고르면 그만큼 바로 생김 */}
+        {drafts.map((d) => {
+          const isGenerating = isPending && busyId === d.id;
+          return (
+            <div key={d.id} className={`grid ${GRID_COLS} border-t border-paperLine items-start bg-paper/60`}>
+              <div className="p-2">
+                {d.previewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={d.previewUrl} alt="" className={`${THUMB} object-cover rounded bg-paper`} />
+                ) : (
+                  <div className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-1`}>
+                    없음 (AI 생성)
+                  </div>
+                )}
+              </div>
+              <div className="p-2 grid gap-1.5">
+                <input
+                  value={d.keyword}
+                  onChange={(e) => updateDraft(d.id, { keyword: e.target.value })}
+                  placeholder="키워드 (예: 여름 휴대용 선풍기)"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                />
+                <input
+                  value={d.mood}
+                  onChange={(e) => updateDraft(d.id, { mood: e.target.value })}
+                  placeholder="분위기 (예: 시원한 파란 톤)"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                />
+                <input
+                  value={d.description}
+                  onChange={(e) => updateDraft(d.id, { description: e.target.value })}
+                  placeholder="설명 (예: '한여름 폭염도 거뜬' 문구 강조)"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                />
+              </div>
+              <div className="p-2 grid gap-1">
+                <button
+                  onClick={() => handleGenerate(d)}
+                  disabled={isPending}
+                  className={`btn-primary ${THUMB} text-xs font-semibold disabled:opacity-50`}
+                >
+                  {isGenerating ? '생성 중...' : '섹션 생성'}
+                </button>
+              </div>
+              <div className="p-2">
+                {drafts.length > 1 && (
+                  <button onClick={() => removeDraft(d.id)} className="text-[11px] text-inkSoft hover:text-red-700">
+                    삭제
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        <div className="border-t border-paperLine p-2 flex gap-3">
+          <label className="text-xs text-accent font-semibold cursor-pointer">
+            + 이미지로 행 추가 (여러 장 선택 가능)
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              onChange={(e) => setNewFile(e.target.files?.[0] || null)}
-              className="text-[10px] w-24"
+              multiple
+              onChange={(e) => handleFilesSelected(e.target.files)}
+              className="hidden"
             />
-            <p className="text-[9px] text-inkSoft mt-1 leading-tight">없으면 AI가 새로 생성</p>
-          </div>
-          <div className="p-2">
-            <textarea
-              value={newText}
-              onChange={(e) => setNewText(e.target.value)}
-              placeholder="키워드/분위기/설명 (예: 여름 휴대용 선풍기, 시원한 파란 톤, '한여름 폭염도 거뜬' 문구 강조)"
-              rows={3}
-              className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-            />
-          </div>
-          <div className="p-2">
-            <button
-              onClick={handleAdd}
-              disabled={isAdding}
-              className="btn-primary w-24 h-24 text-xs font-semibold disabled:opacity-50"
-            >
-              {isAdding ? '생성 중...' : '섹션 생성'}
-            </button>
-          </div>
-          <div className="p-2" />
+          </label>
+          <button onClick={addBlankDraft} className="text-xs text-inkSoft hover:text-ink">
+            + 텍스트만 있는 행 추가
+          </button>
         </div>
       </div>
 
