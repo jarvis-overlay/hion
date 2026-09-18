@@ -9,122 +9,39 @@ import {
   deleteSection,
 } from '@/app/dashboard/sales/detail-pages/actions';
 
-function SectionAddForm({
-  onSubmit,
-  isPending,
-}: {
-  onSubmit: (fd: FormData) => void;
-  isPending: boolean;
-}) {
-  const formRef = useRef<HTMLFormElement>(null);
-
-  return (
-    <form
-      ref={formRef}
-      action={(fd) => {
-        onSubmit(fd);
-      }}
-      className="grid gap-2 bg-paper rounded-md p-3"
-    >
-      <input name="image" type="file" accept="image/*" className="text-xs" />
-      <p className="text-[11px] text-inkSoft">상품 사진 없이 문구만 넣으면 AI가 이미지를 새로 만들어요</p>
-      <textarea
-        name="text"
-        placeholder="키워드/분위기/설명 (예: 여름 휴대용 선풍기, 시원한 파란 톤, '한여름 폭염도 거뜬' 문구 강조)"
-        rows={2}
-        className="border border-paperLine bg-white px-2 py-1.5 text-xs"
-        required
-      />
-      <button
-        type="submit"
-        disabled={isPending}
-        className="btn-primary py-1.5 text-xs font-semibold disabled:opacity-50 self-start px-4"
-        onClick={() => {
-          // 서버 액션이 끝나면(성공/실패 모두) 폼을 비워서 다음 섹션을 바로 이어 넣을 수 있게 함
-          setTimeout(() => formRef.current?.reset(), 0);
-        }}
-      >
-        {isPending ? '생성 중... (최대 1분 정도 걸려요)' : '섹션 생성'}
-      </button>
-    </form>
-  );
-}
-
-function SectionCard({
-  section,
-  onRetry,
-  onDelete,
-  isPending,
-}: {
-  section: any;
-  onRetry: () => void;
-  onDelete: () => void;
-  isPending: boolean;
-}) {
-  return (
-    <div className="card p-3">
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <p className="text-[11px] font-semibold text-inkSoft mb-1">첨부 이미지</p>
-          {section.input_image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={section.input_image_url}
-              alt="첨부 이미지"
-              className="w-full aspect-square object-cover rounded bg-paper"
-            />
-          ) : (
-            <div className="w-full aspect-square rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-1">
-              없음 (AI가 새로 생성)
-            </div>
-          )}
-        </div>
-        <div>
-          <p className="text-[11px] font-semibold text-inkSoft mb-1">생성 결과</p>
-          {section.output_image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={section.output_image_url}
-              alt="생성 결과"
-              className="w-full aspect-square object-cover rounded bg-paper"
-            />
-          ) : section.error ? (
-            <div className="w-full aspect-square rounded bg-warnBg flex items-center justify-center p-1">
-              <button
-                onClick={onRetry}
-                disabled={isPending}
-                className="text-[11px] text-warn font-semibold text-center disabled:opacity-50"
-              >
-                {isPending ? '재시도 중...' : '실패 - 다시 생성'}
-              </button>
-            </div>
-          ) : (
-            <div className="w-full aspect-square rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft">
-              생성 중...
-            </div>
-          )}
-        </div>
-      </div>
-      <p className="text-xs text-ink mt-2 leading-relaxed">{section.prompt_text}</p>
-      {section.error && <p className="text-[11px] text-warn mt-1">{section.error}</p>}
-      <button onClick={onDelete} className="text-[11px] text-inkSoft hover:text-red-700 mt-1.5">
-        섹션 삭제
-      </button>
-    </div>
-  );
-}
+// 이미지(왼쪽) - 문구(가운데) - 결과(오른쪽) - 관리 순서로 행이 쌓이는
+// 스프레드시트 형태. 맨 아래 입력 행에 새 섹션을 채우면 위 목록에
+// 행으로 추가되는 방식 - 여러 섹션을 한눈에 비교하며 작업하기 위함.
+const GRID_COLS = 'grid-cols-[110px_1fr_110px_56px]';
 
 function ProjectEditor({ project, onClose }: { project: any; onClose: () => void }) {
   const [isPending, startTransition] = useTransition();
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [newText, setNewText] = useState('');
+  const [newFile, setNewFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const sections: any[] = [...(project.detail_page_sections || [])].sort((a, b) => a.position - b.position);
+  const isAdding = isPending && retryingId === null;
 
-  function handleAdd(fd: FormData) {
+  function handleAdd() {
+    if (!newText.trim()) {
+      setError('문구(키워드/분위기/설명)를 입력해주세요.');
+      return;
+    }
     setError(null);
+    const fd = new FormData();
+    fd.set('text', newText);
+    if (newFile) fd.set('image', newFile);
     startTransition(async () => {
       const res = await addSection(project.id, sections.length, fd);
-      if ('error' in res) setError(res.error);
+      if ('error' in res) {
+        setError(res.error);
+        return;
+      }
+      setNewText('');
+      setNewFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     });
   }
 
@@ -145,23 +62,105 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         </button>
       </div>
 
-      {sections.length > 0 && (
-        <div className="grid gap-3">
-          {sections.map((s) => (
-            <SectionCard
-              key={s.id}
-              section={s}
-              isPending={isPending && retryingId === s.id}
-              onRetry={() => handleRetry(s.id)}
-              onDelete={() => startTransition(() => deleteSection(s.id))}
-            />
-          ))}
+      <div className="card overflow-hidden">
+        <div className={`grid ${GRID_COLS} bg-paper text-[11px] font-semibold text-inkSoft`}>
+          <div className="px-2 py-2">이미지</div>
+          <div className="px-2 py-2">키워드 / 분위기 / 설명</div>
+          <div className="px-2 py-2">결과</div>
+          <div className="px-2 py-2" />
         </div>
-      )}
+
+        {sections.map((s) => {
+          const isRetrying = isPending && retryingId === s.id;
+          return (
+            <div key={s.id} className={`grid ${GRID_COLS} border-t border-paperLine items-start`}>
+              <div className="p-2">
+                {s.input_image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={s.input_image_url}
+                    alt="첨부 이미지"
+                    className="w-24 h-24 object-cover rounded bg-paper"
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded bg-paper flex items-center justify-center text-[10px] text-inkSoft text-center px-1">
+                    없음 (AI 생성)
+                  </div>
+                )}
+              </div>
+              <div className="p-2 text-xs text-ink leading-relaxed">
+                {s.prompt_text}
+                {s.error && <p className="text-[11px] text-warn mt-1">{s.error}</p>}
+              </div>
+              <div className="p-2">
+                {s.output_image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={s.output_image_url}
+                    alt="생성 결과"
+                    className="w-24 h-24 object-cover rounded bg-paper"
+                  />
+                ) : s.error ? (
+                  <button
+                    onClick={() => handleRetry(s.id)}
+                    disabled={isRetrying}
+                    className="w-24 h-24 rounded bg-warnBg flex items-center justify-center text-[10px] text-warn font-semibold text-center px-1 disabled:opacity-50"
+                  >
+                    {isRetrying ? '재시도 중...' : '실패 - 다시 생성'}
+                  </button>
+                ) : (
+                  <div className="w-24 h-24 rounded bg-paper flex items-center justify-center text-[10px] text-inkSoft">
+                    생성 중...
+                  </div>
+                )}
+              </div>
+              <div className="p-2">
+                <button
+                  onClick={() => startTransition(() => deleteSection(s.id))}
+                  className="text-[11px] text-inkSoft hover:text-red-700"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* 새 행 입력줄 - 여기 채우고 "섹션 생성" 누르면 위 목록에 행으로 쌓임 */}
+        <div className={`grid ${GRID_COLS} border-t border-paperLine items-start bg-paper/60`}>
+          <div className="p-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={(e) => setNewFile(e.target.files?.[0] || null)}
+              className="text-[10px] w-24"
+            />
+            <p className="text-[9px] text-inkSoft mt-1 leading-tight">없으면 AI가 새로 생성</p>
+          </div>
+          <div className="p-2">
+            <textarea
+              value={newText}
+              onChange={(e) => setNewText(e.target.value)}
+              placeholder="키워드/분위기/설명 (예: 여름 휴대용 선풍기, 시원한 파란 톤, '한여름 폭염도 거뜬' 문구 강조)"
+              rows={3}
+              className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+            />
+          </div>
+          <div className="p-2">
+            <button
+              onClick={handleAdd}
+              disabled={isAdding}
+              className="btn-primary w-24 h-24 text-xs font-semibold disabled:opacity-50"
+            >
+              {isAdding ? '생성 중...' : '섹션 생성'}
+            </button>
+          </div>
+          <div className="p-2" />
+        </div>
+      </div>
 
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{error}</p>}
-
-      <SectionAddForm onSubmit={handleAdd} isPending={isPending && retryingId === null} />
     </div>
   );
 }
