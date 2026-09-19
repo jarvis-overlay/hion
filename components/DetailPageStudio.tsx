@@ -497,22 +497,30 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 >
                   {d.recommending ? 'AI 추천 생성 중...' : '✨ AI 추천으로 문구+디자인 채우기'}
                 </button>
-                <div className="flex gap-2 overflow-x-auto pb-1">
+                <div className="flex gap-2 flex-wrap pb-1">
                   {TEMPLATES.map((t) => {
                     const isActive = d.layoutStyle === t.layoutStyle && (t.layoutStyle === 'white' || d.theme === t.theme);
                     return (
-                      <button
-                        key={t.id}
-                        onClick={() => updateDraft(d.id, { layoutStyle: t.layoutStyle, theme: t.theme })}
-                        title={t.desc}
-                        className={`shrink-0 w-16 rounded border-2 overflow-hidden text-left ${
-                          isActive ? 'border-accent' : 'border-transparent'
-                        }`}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={t.thumb} alt={t.label} className="w-16 h-16 object-cover bg-paper" />
-                        <p className="text-[9px] leading-tight text-inkSoft px-0.5 py-0.5 truncate">{t.label}</p>
-                      </button>
+                      <div key={t.id} className="relative group shrink-0">
+                        <button
+                          onClick={() => updateDraft(d.id, { layoutStyle: t.layoutStyle, theme: t.theme })}
+                          className={`w-16 rounded border-2 overflow-hidden text-left block ${
+                            isActive ? 'border-accent' : 'border-transparent'
+                          }`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={t.thumb} alt={t.label} className="w-16 h-16 object-cover bg-paper" />
+                          <p className="text-[9px] leading-tight text-inkSoft px-0.5 py-0.5 truncate">{t.label}</p>
+                        </button>
+                        {/* 마우스 올리면 크게 확대해서 보여주는 미리보기 - 썸네일이
+                            64px라 디자인이 안 보인다는 피드백 대응 */}
+                        <div className="hidden group-hover:block absolute z-50 left-0 top-full mt-1 w-52 rounded-lg shadow-xl border border-paperLine bg-white p-1.5 pointer-events-none">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={t.thumb} alt={t.label} className="w-full rounded" />
+                          <p className="text-[11px] font-semibold text-ink px-0.5 pt-1">{t.label}</p>
+                          <p className="text-[10px] text-inkSoft px-0.5 pb-0.5">{t.desc}</p>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
