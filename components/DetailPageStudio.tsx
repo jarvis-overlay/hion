@@ -23,6 +23,53 @@ const GRID_COLS = 'grid-cols-[280px_1fr_280px_56px]';
 type LayoutStyle = 'white' | 'overlay' | 'typography';
 type Theme = 'dark' | 'purple' | 'light';
 
+// 실제 렌더링 코드(lib/imageProcessing.ts)로 미리 만들어둔 썸네일이라
+// 클릭했을 때 나오는 결과와 100% 동일한 모양이다 (public/templates/*).
+// 클릭하면 문구는 안 건드리고 layoutStyle/theme만 그 조합으로 바꿔준다 -
+// 실제 카피는 직접 입력하거나 AI 추천 버튼으로 채우면 됨.
+const TEMPLATES: { id: string; label: string; desc: string; thumb: string; layoutStyle: LayoutStyle; theme: Theme }[] = [
+  {
+    id: 'white-simple',
+    label: '화이트 심플',
+    desc: '사진+깔끔한 헤드라인 (기능/실용 상품)',
+    thumb: '/templates/white-simple.jpg',
+    layoutStyle: 'white',
+    theme: 'dark',
+  },
+  {
+    id: 'overlay-lifestyle',
+    label: '오버레이 라이프스타일',
+    desc: '사진 위 그라데이션+문구',
+    thumb: '/templates/overlay-lifestyle.jpg',
+    layoutStyle: 'overlay',
+    theme: 'dark',
+  },
+  {
+    id: 'brand-mood',
+    label: '브랜드 무드',
+    desc: '그라데이션 배경+브랜드명 (퍼퓸/코스메틱형)',
+    thumb: '/templates/brand-mood.jpg',
+    layoutStyle: 'typography',
+    theme: 'purple',
+  },
+  {
+    id: 'badge-list',
+    label: '인증뱃지+리스트',
+    desc: '뱃지+번호 매김 피처 리스트',
+    thumb: '/templates/badge-list.jpg',
+    layoutStyle: 'typography',
+    theme: 'dark',
+  },
+  {
+    id: 'stat-highlight',
+    label: '통계 강조',
+    desc: '큰 숫자로 신뢰도 강조',
+    thumb: '/templates/stat-highlight.jpg',
+    layoutStyle: 'typography',
+    theme: 'dark',
+  },
+];
+
 interface Draft {
   id: string;
   file: File | null;
@@ -450,6 +497,25 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 >
                   {d.recommending ? 'AI 추천 생성 중...' : '✨ AI 추천으로 문구+디자인 채우기'}
                 </button>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {TEMPLATES.map((t) => {
+                    const isActive = d.layoutStyle === t.layoutStyle && (t.layoutStyle === 'white' || d.theme === t.theme);
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => updateDraft(d.id, { layoutStyle: t.layoutStyle, theme: t.theme })}
+                        title={t.desc}
+                        className={`shrink-0 w-16 rounded border-2 overflow-hidden text-left ${
+                          isActive ? 'border-accent' : 'border-transparent'
+                        }`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={t.thumb} alt={t.label} className="w-16 h-16 object-cover bg-paper" />
+                        <p className="text-[9px] leading-tight text-inkSoft px-0.5 py-0.5 truncate">{t.label}</p>
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="flex gap-1.5">
                   <select
                     value={d.layoutStyle}
