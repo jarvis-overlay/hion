@@ -872,3 +872,123 @@ export const COUPANG_DETAIL_WIDTH = 860;
 export async function resizeForCoupang(imageBuffer: Buffer): Promise<Buffer> {
   return sharp(imageBuffer).resize({ width: COUPANG_DETAIL_WIDTH }).jpeg({ quality: 90 }).toBuffer();
 }
+
+// "썸네일 제작" - 쿠팡 메인/서브 썸네일 규격(1000x1000, 흰 배경)에
+// 맞춰 상품 컷아웃을 배치한다. remove.bg로 딴 누끼(투명 배경)를
+// 트리밍해서 실제 상품 영역만 남긴 뒤, 원하는 위치에 배치하고 나머지는
+// 순백색으로 채운다 - AI가 아니라 sharp로 결정적으로 처리해서
+// "배경이 흰색이어야 한다"는 요구사항이 항상 정확하게 지켜진다.
+export type ThumbnailPosition = 'center' | 'top' | 'bottom' | 'left' | 'right';
+export const THUMBNAIL_SIZE = 1000;
+
+export async function composeThumbnailImage(
+  cutoutBuffer: Buffer,
+  position: ThumbnailPosition = 'center'
+): Promise<Buffer> {
+  const SIZE = THUMBNAIL_SIZE;
+  const marginRatio = 0.86; // 상품이 캔버스의 86%를 넘지 않게(여백 확보)
+  const maxDim = Math.round(SIZE * marginRatio);
+  const pad = Math.round((SIZE - maxDim) / 2);
+
+  const trimmed = await sharp(cutoutBuffer).trim().toBuffer();
+  const resized = await sharp(trimmed)
+    .resize({ width: maxDim, height: maxDim, fit: 'inside' })
+    .toBuffer();
+  const meta = await sharp(resized).metadata();
+  const w = meta.width || maxDim;
+  const h = meta.height || maxDim;
+
+  let left: number;
+  let top: number;
+  switch (position) {
+    case 'top':
+      left = Math.round((SIZE - w) / 2);
+      top = pad;
+      break;
+    case 'bottom':
+      left = Math.round((SIZE - w) / 2);
+      top = SIZE - h - pad;
+      break;
+    case 'left':
+      left = pad;
+      top = Math.round((SIZE - h) / 2);
+      break;
+    case 'right':
+      left = SIZE - w - pad;
+      top = Math.round((SIZE - h) / 2);
+      break;
+    case 'center':
+    default:
+      left = Math.round((SIZE - w) / 2);
+      top = Math.round((SIZE - h) / 2);
+  }
+
+  return sharp({
+    create: { width: SIZE, height: SIZE, channels: 3, background: '#ffffff' },
+  })
+    .composite([{ input: resized, left, top }])
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
+// 완성된 1000x1000 흰 배경 썸네일에 사용자가 요청한 효과(그림자,
+// 조명, 계절 소품 등)를 AI로 추가하는 선택 단계 - 기본 흰 배경
+// 컷아웃(composeThumbnailImage)은 항상 결정적으로 먼저 만들고, 이
+// 함수는 그 결과물 위에 추가 편집을 요청할 때만 호출한다. 결과 크기가
+// 정확히 1000x1000이 아닐 수 있어서 마지막에 다시 규격에 맞춘다.
+export async function applyThumbnailEffect(imageBuffer: Buffer, effectPrompt: string): Promise<Buffer> {
+  const apiKey = requireEnv('GEMINI_API_KEY');
+
+  const instruction = `**절대 이미지 안에 어떤 문자·숫자·기호도 넣지 마세요.** 아래 상품 썸네일 사진에 요청한 효과만 추가해주세요. 상품 자체의 실제 형태·색상·디자인·비율은 절대 바꾸지 말고, 조명/그림자/배경 질감/소품 같은 연출 효과만 추가하세요. 쿠팡 상품 썸네일이라는 걸 감안해서 상품이 가려지거나 알아보기 어려워지면 안 됩니다.
+
+효과 요청: ${effectPrompt}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: instruction },
+              { inlineData: { mimeType: 'image/jpeg', data: imageBuffer.toString('base64') } },
+            ],
+          },
+        ],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      }),
+    }
+  );
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json?.error?.message || `Gemini 이미지 생성 오류 (HTTP ${res.status})`);
+  }
+
+  const imagePart = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
+  if (!imagePart) {
+    throw new Error('효과 적용 결과를 받지 못했어요. 프롬프트를 조금 더 구체적으로 적어서 다시 시도해주세요.');
+  }
+  const edited = Buffer.from(imagePart.inlineData.data, 'base64');
+  return sharp(edited)
+    .resize({ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, fit: 'cover' })
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
+export interface GenerateThumbnailInput {
+  productImage: { buffer: Buffer; mimeType: string };
+  position: ThumbnailPosition;
+  effectPrompt?: string;
+}
+
+// 누끼 -> 흰 배경 1000x1000 배치 -> (선택) 효과 추가, 순서로 처리한다.
+export async function generateThumbnailImage(input: GenerateThumbnailInput): Promise<Buffer> {
+  const cutout = await removeImageBackground(input.productImage.buffer, input.productImage.mimeType);
+  const base = await composeThumbnailImage(cutout, input.position);
+  if (input.effectPrompt?.trim()) {
+    return applyThumbnailEffect(base, input.effectPrompt.trim());
+  }
+  return base;
+}
