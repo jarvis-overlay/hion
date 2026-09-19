@@ -497,32 +497,35 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 >
                   {d.recommending ? 'AI 추천 생성 중...' : '✨ AI 추천으로 문구+디자인 채우기'}
                 </button>
+                {/* 카드는 "선택 상태"를 표시하는 게 아니라 눌렀을 때 아래
+                    드롭다운 값을 그 조합으로 세팅해주는 원클릭 버튼일 뿐이다.
+                    두 카드가 같은 layoutStyle+theme 조합을 쓸 수 있어서(예:
+                    인증뱃지+리스트, 통계 강조가 둘 다 typography+dark),
+                    카드에 "선택됨" 테두리를 표시하면 실제로는 하나만 눌렀는데
+                    다른 카드까지 같이 켜진 것처럼 보여 혼란스럽다는 피드백으로
+                    선택 표시를 없애고 순수 프리셋 버튼으로 바꿈 - 지금 실제로
+                    적용된 값은 아래 드롭다운만 보면 된다. */}
                 <div className="flex gap-2 flex-wrap pb-1">
-                  {TEMPLATES.map((t) => {
-                    const isActive = d.layoutStyle === t.layoutStyle && (t.layoutStyle === 'white' || d.theme === t.theme);
-                    return (
-                      <div key={t.id} className="relative group shrink-0">
-                        <button
-                          onClick={() => updateDraft(d.id, { layoutStyle: t.layoutStyle, theme: t.theme })}
-                          className={`w-16 rounded border-2 overflow-hidden text-left block ${
-                            isActive ? 'border-accent' : 'border-transparent'
-                          }`}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={t.thumb} alt={t.label} className="w-16 h-16 object-cover bg-paper" />
-                          <p className="text-[9px] leading-tight text-inkSoft px-0.5 py-0.5 truncate">{t.label}</p>
-                        </button>
-                        {/* 마우스 올리면 크게 확대해서 보여주는 미리보기 - 썸네일이
-                            64px라 디자인이 안 보인다는 피드백 대응 */}
-                        <div className="hidden group-hover:block absolute z-50 left-0 top-full mt-1 w-52 rounded-lg shadow-xl border border-paperLine bg-white p-1.5 pointer-events-none">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={t.thumb} alt={t.label} className="w-full rounded" />
-                          <p className="text-[11px] font-semibold text-ink px-0.5 pt-1">{t.label}</p>
-                          <p className="text-[10px] text-inkSoft px-0.5 pb-0.5">{t.desc}</p>
-                        </div>
+                  {TEMPLATES.map((t) => (
+                    <div key={t.id} className="relative group shrink-0">
+                      <button
+                        onClick={() => updateDraft(d.id, { layoutStyle: t.layoutStyle, theme: t.theme })}
+                        className="w-16 rounded border-2 border-transparent hover:border-accent overflow-hidden text-left block"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={t.thumb} alt={t.label} className="w-16 h-16 object-cover bg-paper" />
+                        <p className="text-[9px] leading-tight text-inkSoft px-0.5 py-0.5 truncate">{t.label}</p>
+                      </button>
+                      {/* 마우스 올리면 크게 확대해서 보여주는 미리보기 - 썸네일이
+                          64px라 디자인이 안 보인다는 피드백 대응 */}
+                      <div className="hidden group-hover:block absolute z-50 left-0 top-full mt-1 w-52 rounded-lg shadow-xl border border-paperLine bg-white p-1.5 pointer-events-none">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={t.thumb} alt={t.label} className="w-full rounded" />
+                        <p className="text-[11px] font-semibold text-ink px-0.5 pt-1">{t.label}</p>
+                        <p className="text-[10px] text-inkSoft px-0.5 pb-0.5">{t.desc}</p>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
                 <div className="flex gap-1.5">
                   <select
