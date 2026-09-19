@@ -21,7 +21,7 @@ export default async function DetailPagesPage() {
   }
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-6xl">
       <h1 className="font-display text-2xl font-bold mb-1">상세페이지 제작</h1>
       <p className="text-sm text-inkSoft mb-6">
         상품 이미지와 문구(키워드·분위기·설명)를 섹션 단위로 넣으면, AI가 섹션마다 쿠팡 상세페이지 한

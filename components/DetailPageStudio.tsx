@@ -13,8 +13,8 @@ import {
 // 스프레드시트 형태. 미완성 행(초안, draft)을 여러 개 동시에 쌓아두고
 // 하나씩(또는 순서대로) 생성할 수 있다 - 이미지 여러 장을 한 번에
 // 선택하면 그만큼 초안 행이 바로 생김.
-const THUMB = 'w-44 h-44';
-const GRID_COLS = 'grid-cols-[190px_1fr_190px_56px]';
+const THUMB = 'w-64 h-64';
+const GRID_COLS = 'grid-cols-[280px_1fr_280px_56px]';
 
 interface Draft {
   id: string;
