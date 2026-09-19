@@ -510,3 +510,77 @@ ${input.comparisonSummary || '(아직 입력한 비교 데이터 없음)'}
   const cleaned = await callClaude(prompt);
   return parseJsonObject(cleaned) as SalesStrategyResult;
 }
+
+export type DetailLayoutStyle = 'white' | 'overlay' | 'typography';
+export type DetailTheme = 'dark' | 'purple' | 'light';
+
+export interface DetailCopyRecommendation {
+  keyword: string;
+  mood: string;
+  eyebrow: string;
+  description: string;
+  accentTitle: string;
+  accentSubtitle: string;
+  stat: string;
+  statCaption: string;
+  layoutStyle: DetailLayoutStyle;
+  theme: DetailTheme;
+}
+
+// "상세페이지 제작" - 섹션 입력칸(키워드/분위기/문구/브랜드명/통계 +
+// 레이아웃/테마)을 사용자가 하나씩 채우는 대신 AI가 한 번에 초안을
+// 만들어준다. 원본 사진 OCR 결과(있으면)와 프로젝트명, 이미 입력해둔
+// 내용을 참고자료로 준다 - 비전 모델이 아니라 텍스트 모델이라 사진을
+// 직접 보진 못하지만, OCR로 뽑은 원문/번역문이 사진 속 실제 셀링
+// 포인트를 담고 있어서 이것만으로도 꽤 구체적인 카피가 나온다.
+export async function recommendDetailSectionCopy(input: {
+  productName: string;
+  extractedText: string; // OCR 원문+번역 (없으면 빈 문자열)
+  existingHints: string; // 사용자가 이미 입력해둔 키워드/문구 (있으면 참고, 없으면 빈 문자열)
+}): Promise<DetailCopyRecommendation> {
+  const prompt = `당신은 쿠팡 상세페이지 카피라이터입니다. 아래 상품의 상세페이지 섹션 하나에 들어갈 문구와 디자인 스타일을 추천해주세요.
+
+상품명: "${input.productName || '(제목 없음)'}"
+${input.extractedText ? `원본(1688) 사진에 있던 셀링 포인트 문구 (원문/번역):\n${input.extractedText}\n` : ''}${input.existingHints ? `사용자가 이미 입력해둔 참고 내용:\n${input.existingHints}\n` : ''}
+이 섹션은 아래 계층 구조로 구성됩니다 (전부 채울 필요 없음 - 상품 성격에 안 맞으면 빈 문자열로 남겨도 됨):
+- eyebrow: 헤드라인 위에 작게 들어갈 감성적인 문구 (1줄, 선택)
+- description: 메인 헤드라인 - 가장 굵고 크게 나오는 핵심 문구 (필수, 1~2줄 분량)
+- accentTitle: 영문 브랜드/제품명 스타일 문구 (선택, 상품에 브랜드성이 없으면 빈 문자열)
+- accentSubtitle: accentTitle의 한글 표기 (accentTitle을 채웠으면 같이 채움)
+- stat: 강조할 숫자/통계 (선택, 예: "50% 할인", "리뷰 1,200+", 없으면 빈 문자열)
+- statCaption: stat 아래에 붙는 짧은 설명 (stat을 채웠을 때만)
+- keyword: AI가 배경 사진을 새로 생성/편집할 때 참고할 상황 키워드 (예: "원룸 현관")
+- mood: 배경 이미지의 분위기 (예: "따뜻한 우드톤 조명")
+
+레이아웃/테마도 상품 성격에 맞게 골라주세요:
+- layoutStyle: "white"(사진+흰 문구 섹션 분리 - 기능성/실용 상품에 무난), "overlay"(사진 위 그라데이션+문구 - 라이프스타일/감성 상품), "typography"(사진 없이 그라데이션 배경+문구만 - 브랜드/무드 강조용, stat이나 짧은 카피 위주 섹션에 적합)
+- theme: "dark"(무난한 블랙), "purple"(고급스러운 톤), "light"(밝고 화사한 톤)
+
+문구는 실제 쿠팡 상세페이지에 바로 써도 될 만큼 자연스럽고 설득력 있는 한국어로 작성하세요. 과장 광고나 근거 없는 최상급 표현은 피하세요.
+
+반드시 아래 JSON 객체 형식으로만 응답하세요:
+{
+  "keyword": "...", "mood": "...", "eyebrow": "...", "description": "...",
+  "accentTitle": "...", "accentSubtitle": "...", "stat": "...", "statCaption": "...",
+  "layoutStyle": "white|overlay|typography", "theme": "dark|purple|light"
+}`;
+
+  const cleaned = await callClaude(prompt);
+  const parsed = parseJsonObject(cleaned) as Partial<DetailCopyRecommendation>;
+  return {
+    keyword: parsed.keyword || '',
+    mood: parsed.mood || '',
+    eyebrow: parsed.eyebrow || '',
+    description: parsed.description || '',
+    accentTitle: parsed.accentTitle || '',
+    accentSubtitle: parsed.accentSubtitle || '',
+    stat: parsed.stat || '',
+    statCaption: parsed.statCaption || '',
+    layoutStyle: (['white', 'overlay', 'typography'] as const).includes(parsed.layoutStyle as any)
+      ? (parsed.layoutStyle as DetailLayoutStyle)
+      : 'white',
+    theme: (['dark', 'purple', 'light'] as const).includes(parsed.theme as any)
+      ? (parsed.theme as DetailTheme)
+      : 'dark',
+  };
+}

@@ -8,6 +8,7 @@ import {
   retrySection,
   deleteSection,
   extractImageText,
+  recommendSectionCopy,
 } from '@/app/dashboard/sales/detail-pages/actions';
 
 // 이미지(왼쪽) - 문구(가운데) - 결과(오른쪽) - 관리 순서로 행이 쌓이는
@@ -37,6 +38,7 @@ interface Draft {
   extractedTexts: { original: string; translated: string }[] | null;
   extracting: boolean;
   extractError: string | null;
+  recommending: boolean;
 }
 
 function newDraft(): Draft {
@@ -57,6 +59,7 @@ function newDraft(): Draft {
     extractedTexts: null,
     extracting: false,
     extractError: null,
+    recommending: false,
   };
 }
 
@@ -140,6 +143,36 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         return;
       }
       updateDraft(draft.id, { extracting: false, extractedTexts: res.texts });
+    });
+  }
+
+  // 문구/디자인 칸을 사용자가 하나씩 채우는 대신 AI가 한 번에 초안을
+  // 채워준다 - 추출해둔 원본 문구(있으면)와 이미 입력해둔 내용을 참고
+  // 자료로 넘긴다.
+  function handleRecommend(draft: Draft) {
+    updateDraft(draft.id, { recommending: true });
+    const extractedText = (draft.extractedTexts || [])
+      .map((t) => `${t.original} -> ${t.translated}`)
+      .join('\n');
+    const existingHints = [
+      draft.keyword && `키워드: ${draft.keyword}`,
+      draft.mood && `분위기: ${draft.mood}`,
+      draft.description && `헤드라인: ${draft.description}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    startTransition(async () => {
+      const res = await recommendSectionCopy({
+        productName: project.title || '',
+        extractedText,
+        existingHints,
+      });
+      if ('error' in res) {
+        updateDraft(draft.id, { recommending: false });
+        setError(res.error);
+        return;
+      }
+      updateDraft(draft.id, { recommending: false, ...res.data });
     });
   }
 
@@ -283,7 +316,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                     </button>
                     {d.extractError && <p className="text-[11px] text-warn mt-1">{d.extractError}</p>}
                     {d.extractedTexts && (
-                      <div className="mt-1 bg-paper rounded p-1.5 text-[11px] leading-relaxed max-h-32 overflow-y-auto">
+                      <div className="mt-1 bg-paper rounded p-1.5 text-[11px] leading-relaxed resize-y overflow-auto h-32 min-h-[3.5rem] max-h-[28rem]">
                         {d.extractedTexts.length === 0 ? (
                           <p className="text-inkSoft">인식된 문구가 없어요.</p>
                         ) : (
@@ -300,6 +333,13 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 )}
               </div>
               <div className="p-2 grid gap-1.5">
+                <button
+                  onClick={() => handleRecommend(d)}
+                  disabled={d.recommending}
+                  className="text-[11px] text-accent font-semibold underline justify-self-start disabled:opacity-50"
+                >
+                  {d.recommending ? 'AI 추천 생성 중...' : '✨ AI 추천으로 문구+디자인 채우기'}
+                </button>
                 <div className="flex gap-1.5">
                   <select
                     value={d.layoutStyle}

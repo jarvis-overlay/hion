@@ -10,6 +10,7 @@ import {
   type DetailSectionLayout,
   type DetailSectionTheme,
 } from '@/lib/imageProcessing';
+import { recommendDetailSectionCopy, type DetailCopyRecommendation } from '@/lib/ai';
 
 const BUCKET = 'detail-images';
 const PATH = '/dashboard/sales/detail-pages';
@@ -220,6 +221,22 @@ async function runGeneration(
     await supabase.from('detail_page_sections').update({ error: message }).eq('id', sectionId);
     revalidatePath(PATH);
     return { error: message };
+  }
+}
+
+// 사용자가 칸을 하나씩 채우는 대신 AI에게 초안을 맡긴다 - 원본 사진
+// OCR 결과(추출해뒀다면)와 프로젝트명, 이미 입력해둔 내용을 참고자료로
+// 넘긴다.
+export async function recommendSectionCopy(input: {
+  productName: string;
+  extractedText: string;
+  existingHints: string;
+}): Promise<{ error: string } | { success: true; data: DetailCopyRecommendation }> {
+  try {
+    const data = await recommendDetailSectionCopy(input);
+    return { success: true, data };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
   }
 }
 
