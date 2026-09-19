@@ -3,7 +3,7 @@
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { generateDetailSectionImage, resizeForCoupang } from '@/lib/imageProcessing';
+import { generateDetailSectionImage, resizeForCoupang, type DetailSectionInput } from '@/lib/imageProcessing';
 
 const BUCKET = 'detail-images';
 const PATH = '/dashboard/sales/detail-pages';
@@ -49,8 +49,19 @@ export async function addSection(
   formData: FormData
 ): Promise<{ error: string } | { success: true; url: string }> {
   const supabase = createClient();
-  const promptText = String(formData.get('text') || '').trim();
-  if (!promptText) return { error: '문구(키워드/분위기/설명)를 입력해주세요.' };
+  const keyword = String(formData.get('keyword') || '').trim();
+  const mood = String(formData.get('mood') || '').trim();
+  const description = String(formData.get('description') || '').trim();
+  if (!keyword && !mood && !description) {
+    return { error: '키워드/분위기/설명 중 하나는 입력해주세요.' };
+  }
+  const promptText = [
+    keyword && `키워드: ${keyword}`,
+    mood && `분위기: ${mood}`,
+    description && `설명: ${description}`,
+  ]
+    .filter(Boolean)
+    .join(' / ');
 
   const file = formData.get('image') as File | null;
   let inputImageUrl: string | null = null;
@@ -76,10 +87,13 @@ export async function addSection(
     position,
     input_image_url: inputImageUrl,
     prompt_text: promptText,
+    keyword: keyword || null,
+    mood: mood || null,
+    description: description || null,
   });
   if (insertErr) return { error: insertErr.message };
 
-  return runGeneration(supabase, sectionId, projectId, promptText, productImage);
+  return runGeneration(supabase, sectionId, projectId, { keyword, mood, description }, productImage);
 }
 
 export async function retrySection(
@@ -101,18 +115,24 @@ export async function retrySection(
     productImage = { buffer, mimeType: res.headers.get('content-type') || 'image/jpeg' };
   }
 
-  return runGeneration(supabase, sectionId, section.project_id, section.prompt_text, productImage);
+  return runGeneration(
+    supabase,
+    sectionId,
+    section.project_id,
+    { keyword: section.keyword || '', mood: section.mood || '', description: section.description || '' },
+    productImage
+  );
 }
 
 async function runGeneration(
   supabase: ReturnType<typeof createClient>,
   sectionId: string,
   projectId: string,
-  promptText: string,
+  input: DetailSectionInput,
   productImage: { buffer: Buffer; mimeType: string } | null
 ): Promise<{ error: string } | { success: true; url: string }> {
   try {
-    const generated = await generateDetailSectionImage(promptText, productImage);
+    const generated = await generateDetailSectionImage(input, productImage);
     const resized = await resizeForCoupang(generated);
     const outPath = `detail-pages/${projectId}/${sectionId}-output.jpg`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, resized, {

@@ -155,39 +155,46 @@ export async function removeImageBackground(imageBuffer: Buffer, contentType: st
   return Buffer.from(arrayBuffer);
 }
 
-// "상세페이지 제작" - 섹션 하나(첨부 이미지 + 키워드/분위기/설명 문구)를
-// 근거로 Gemini의 이미지 생성/편집 모델(Nano Banana)에게 상세페이지
-// 한 장면을 만들어달라고 요청한다. 원본 상품 사진이 있으면 그 사진을
-// 그대로 편집 재료로 넘겨 실제 상품 모습을 유지하게 하고, 없으면
-// 설명만으로 새로 생성하게 한다.
+// "상세페이지 제작" - 섹션 하나(첨부 이미지 + 키워드/분위기/설명)를
+// 근거로 상세페이지 한 장면을 만든다. 실측 결과 이미지 생성 모델이
+// 한글을 깨진 글자로 렌더링하는 문제가 프롬프트 지시만으로는 해결이
+// 안 돼서, 2단계로 나눈다:
+//   1) Gemini에게는 "문구 없는" 배경/상품 합성 이미지만 만들게 한다
+//      (키워드/분위기만 참고, 텍스트 렌더링은 아예 시키지 않음).
+//   2) "설명"에 적은 문구는 AI가 그리게 하지 않고, sharp로 실제 폰트를
+//      써서 우리가 직접 정확하게 합성한다 (번역 기능과 동일한 방식 -
+//      글자가 깨질 수가 없음).
 const IMAGE_GEN_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
 
-export async function generateDetailSectionImage(
-  promptText: string,
+export interface DetailSectionInput {
+  keyword: string;
+  mood: string;
+  description: string; // 이미지에 그대로 얹을 문구 - AI가 아니라 우리가 직접 합성
+}
+
+async function generateBackgroundImage(
+  keyword: string,
+  mood: string,
   productImage: { buffer: Buffer; mimeType: string } | null
 ): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
 
-  // 이미지 생성 모델이 한글(비라틴 문자)을 정확히 그리지 못하고 깨진
-  // 글자로 렌더링하거나, 원본 이미지에 있던 중국어 텍스트를 안 지우고
-  // 그대로 남기는 문제가 실측으로 확인돼서, 이 두 가지를 명시적으로
-  // 강하게 지시한다.
-  const textRules = `
-**텍스트 관련 필수 규칙**:
-- 원본 사진에 중국어나 다른 외국어 텍스트가 있다면 전부 지우고 깨끗한 배경으로 바꾸세요. 원문 텍스트를 절대 남기지 마세요.
-- 이미지에 한글 문구를 넣을 때는 실제로 존재하는 올바른 한글 단어와 맞춤법으로만 작성하세요. 만들어낸 글자나 깨진 글자, 의미 없는 한글 조합은 절대 넣지 마세요.
-- 문구는 짧고 간결하게 (5~10자 내외 단위로 끊어서) 넣어야 정확도가 높습니다. 긴 문장을 한 번에 넣지 마세요.
-- 한글 렌더링에 자신이 없다면, 문구를 화려하게 꾸미기보다 굵고 큰 단순한 서체로 정확하게 쓰는 것을 우선하세요.`;
+  const noTextRule =
+    '**절대 이미지 안에 어떤 문구·텍스트·글자도 넣지 마세요.** 문구는 이후 단계에서 별도로 정확하게 합성할 예정이라, 지금은 순수하게 사진/배경/분위기만 만들어야 합니다. 원본 사진에 중국어 등 외국어 텍스트가 있다면 전부 지우고 깨끗한 배경으로 바꿔주세요.';
 
   const instruction = productImage
-    ? `아래 상품 사진을 그대로 활용해서, 쿠팡 상세페이지에 들어갈 마케팅 이미지 한 장면을 만들어주세요. 상품의 실제 형태·색상·디자인은 최대한 그대로 유지하면서, 배경과 분위기와 문구 배치만 아래 설명에 맞게 합성/편집해주세요.
-${textRules}
+    ? `아래 상품 사진을 그대로 활용해서, 쿠팡 상세페이지에 들어갈 마케팅 배경 이미지를 만들어주세요. 상품의 실제 형태·색상·디자인은 최대한 그대로 유지하면서, 배경과 분위기만 아래 키워드/분위기에 맞게 합성/편집해주세요.
 
-설명: ${promptText}`
-    : `아래 설명에 맞는 쿠팡 상세페이지용 마케팅 이미지를 새로 만들어주세요. 첨부된 상품 사진이 없으니, 설명에 맞는 상황/분위기의 이미지를 상황에 맞게 구성해주세요.
-${textRules}
+${noTextRule}
 
-설명: ${promptText}`;
+키워드: ${keyword || '(없음)'}
+분위기: ${mood || '(없음)'}`
+    : `아래 키워드/분위기에 맞는 쿠팡 상세페이지용 마케팅 배경 이미지를 새로 만들어주세요. 첨부된 상품 사진이 없으니, 상황에 맞는 이미지를 구성해주세요.
+
+${noTextRule}
+
+키워드: ${keyword || '(없음)'}
+분위기: ${mood || '(없음)'}`;
 
   const parts: Record<string, unknown>[] = [{ text: instruction }];
   if (productImage) {
@@ -212,9 +219,68 @@ ${textRules}
 
   const imagePart = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
   if (!imagePart) {
-    throw new Error('이미지 생성 결과를 받지 못했어요. 설명을 조금 더 구체적으로 적어서 다시 시도해주세요.');
+    throw new Error('이미지 생성 결과를 받지 못했어요. 키워드/분위기를 조금 더 구체적으로 적어서 다시 시도해주세요.');
   }
   return Buffer.from(imagePart.inlineData.data, 'base64');
+}
+
+// 긴 문구는 화면 폭에 맞게 여러 줄로 나눈다 (아주 단순한 어절 단위 wrap).
+function wrapText(text: string, maxCharsPerLine: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  for (const w of words) {
+    const next = current ? `${current} ${w}` : w;
+    if (next.length > maxCharsPerLine && current) {
+      lines.push(current);
+      current = w;
+    } else {
+      current = next;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [text];
+}
+
+// AI가 만든 "문구 없는" 배경 위에, 실제 폰트로 문구를 상단 배너
+// 형태로 정확하게 합성한다 - 글자가 깨질 수 없는 방식.
+export async function compositeHeadlineText(imageBuffer: Buffer, text: string): Promise<Buffer> {
+  const meta = await sharp(imageBuffer).metadata();
+  const width = meta.width || 800;
+  const height = meta.height || 800;
+  const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const maxCharsPerLine = 14;
+  const lines = wrapText(text, maxCharsPerLine).slice(0, 3);
+  const fontSize = Math.max(22, Math.min(56, (width / maxCharsPerLine) * 1.5));
+  const lineHeight = fontSize * 1.4;
+  const bannerHeight = Math.min(height * 0.4, lineHeight * lines.length + fontSize * 0.7);
+
+  const textEls = lines
+    .map((line, i) => {
+      const y = bannerHeight / 2 - ((lines.length - 1) * lineHeight) / 2 + i * lineHeight;
+      return `<text x="${width / 2}" y="${y}" font-size="${fontSize}" font-family="sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="middle" fill="white">${escapeXml(line)}</text>`;
+    })
+    .join('\n');
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="${width}" height="${bannerHeight}" fill="black" fill-opacity="0.55" />
+    ${textEls}
+  </svg>`;
+
+  return sharp(imageBuffer)
+    .composite([{ input: Buffer.from(svg) }])
+    .jpeg({ quality: 90 })
+    .toBuffer();
+}
+
+export async function generateDetailSectionImage(
+  input: DetailSectionInput,
+  productImage: { buffer: Buffer; mimeType: string } | null
+): Promise<Buffer> {
+  const background = await generateBackgroundImage(input.keyword, input.mood, productImage);
+  if (!input.description.trim()) return background;
+  return compositeHeadlineText(background, input.description.trim());
 }
 
 // 쿠팡 상세페이지 이미지 규격(가로 860px)에 맞춘다 - AI 업스케일이

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import {
   createProject,
   deleteProject,
@@ -25,19 +25,11 @@ interface Draft {
   description: string;
 }
 
-function buildPromptText(d: { keyword: string; mood: string; description: string }): string {
-  const parts: string[] = [];
-  if (d.keyword.trim()) parts.push(`키워드: ${d.keyword.trim()}`);
-  if (d.mood.trim()) parts.push(`분위기: ${d.mood.trim()}`);
-  if (d.description.trim()) parts.push(`설명: ${d.description.trim()}`);
-  return parts.join(' / ');
-}
-
-function newDraft(file: File | null): Draft {
+function newDraft(): Draft {
   return {
     id: crypto.randomUUID(),
-    file,
-    previewUrl: file ? URL.createObjectURL(file) : null,
+    file: null,
+    previewUrl: null,
     keyword: '',
     mood: '',
     description: '',
@@ -48,22 +40,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null); // 재시도 중인 section id 또는 생성 중인 draft id
   const [error, setError] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Draft[]>([newDraft(null)]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [drafts, setDrafts] = useState<Draft[]>([newDraft()]);
   const sections: any[] = [...(project.detail_page_sections || [])].sort((a, b) => a.position - b.position);
-
-  function handleFilesSelected(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const added = Array.from(files).map((f) => newDraft(f));
-    setDrafts((prev) => {
-      // 맨 처음 비어있는(이미지도 문구도 없는) 초안 행은 그대로 두면
-      // 항상 빈 줄이 하나 남아있어서, 이미지 여러 장을 한 번에 고르면
-      // 그 빈 줄은 없애고 방금 고른 장수만큼 초안을 채운다.
-      const rest = prev.filter((d) => d.file || d.keyword || d.mood || d.description);
-      return [...rest, ...added];
-    });
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }
 
   function updateDraft(id: string, patch: Partial<Draft>) {
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
@@ -73,19 +51,20 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     setDrafts((prev) => prev.filter((d) => d.id !== id));
   }
 
-  function addBlankDraft() {
-    setDrafts((prev) => [...prev, newDraft(null)]);
+  function addRow() {
+    setDrafts((prev) => [...prev, newDraft()]);
   }
 
   function handleGenerate(draft: Draft) {
-    const promptText = buildPromptText(draft);
-    if (!promptText) {
+    if (!draft.keyword.trim() && !draft.mood.trim() && !draft.description.trim()) {
       setError('키워드/분위기/설명 중 하나는 입력해주세요.');
       return;
     }
     setError(null);
     const fd = new FormData();
-    fd.set('text', promptText);
+    fd.set('keyword', draft.keyword);
+    fd.set('mood', draft.mood);
+    fd.set('description', draft.description);
     if (draft.file) fd.set('image', draft.file);
     setBusyId(draft.id);
     startTransition(async () => {
@@ -97,7 +76,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
       }
       removeDraft(draft.id);
       // 초안이 하나도 안 남으면 다음 입력을 위해 빈 줄 하나 다시 만들어준다
-      setDrafts((prev) => (prev.length === 0 ? [newDraft(null)] : prev));
+      setDrafts((prev) => (prev.length === 0 ? [newDraft()] : prev));
     });
   }
 
@@ -193,20 +172,36 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
           );
         })}
 
-        {/* 초안 행들 - 이미지 여러 장을 한 번에 고르면 그만큼 바로 생김 */}
+        {/* 초안 행들 - 이미지 칸을 클릭하면 그 행에 사진을 붙일 수 있고,
+            안 붙이면 그대로 AI가 새로 생성한다. */}
         {drafts.map((d) => {
           const isGenerating = isPending && busyId === d.id;
           return (
             <div key={d.id} className={`grid ${GRID_COLS} border-t border-paperLine items-start bg-paper/60`}>
               <div className="p-2">
-                {d.previewUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={d.previewUrl} alt="" className={`${THUMB} object-cover rounded bg-paper`} />
-                ) : (
-                  <div className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-1`}>
-                    없음 (AI 생성)
-                  </div>
-                )}
+                <label className="cursor-pointer block">
+                  {d.previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={d.previewUrl} alt="" className={`${THUMB} object-cover rounded bg-paper`} />
+                  ) : (
+                    <div
+                      className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition`}
+                    >
+                      클릭해서 이미지 첨부
+                      <br />
+                      (없으면 AI가 생성)
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      updateDraft(d.id, { file: f, previewUrl: f ? URL.createObjectURL(f) : null });
+                    }}
+                  />
+                </label>
               </div>
               <div className="p-2 grid gap-1.5">
                 <input
@@ -238,30 +233,17 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 </button>
               </div>
               <div className="p-2">
-                {drafts.length > 1 && (
-                  <button onClick={() => removeDraft(d.id)} className="text-[11px] text-inkSoft hover:text-red-700">
-                    삭제
-                  </button>
-                )}
+                <button onClick={() => removeDraft(d.id)} className="text-[11px] text-inkSoft hover:text-red-700">
+                  삭제
+                </button>
               </div>
             </div>
           );
         })}
 
-        <div className="border-t border-paperLine p-2 flex gap-3">
-          <label className="text-xs text-accent font-semibold cursor-pointer">
-            + 이미지로 행 추가 (여러 장 선택 가능)
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(e) => handleFilesSelected(e.target.files)}
-              className="hidden"
-            />
-          </label>
-          <button onClick={addBlankDraft} className="text-xs text-inkSoft hover:text-ink">
-            + 텍스트만 있는 행 추가
+        <div className="border-t border-paperLine p-2">
+          <button onClick={addRow} className="text-xs text-accent font-semibold">
+            + 행 추가
           </button>
         </div>
       </div>
