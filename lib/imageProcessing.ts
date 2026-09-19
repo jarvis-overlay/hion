@@ -977,6 +977,101 @@ export async function applyThumbnailEffect(imageBuffer: Buffer, effectPrompt: st
     .toBuffer();
 }
 
+// 실측 결과 "이미지 생성 모델에게 상품만 남기고 다시 그려달라"는
+// 방식은 같은 사진을 두 번 넣어도 결과가 들쭉날쭉했다(한 번은 소품이
+// 남고, 한 번은 깔끔하게 나옴) - 이미지 생성 자체가 확률적이라
+// 일관성을 보장 못 한다. 반면 "이 상품의 위치가 어디냐"를 좌표로
+// 답하는 건 훨씬 일관적이고 안정적이다(텍스트 출력이라 흔들림이
+// 적음). 그래서 이미지를 다시 그리게 하는 대신, 먼저 상품의 위치만
+// 정확히 찾아서 그 영역만 크롭한다 - 옆에 있던 소품(책상 등)은
+// 크롭 단계에서 물리적으로 아예 잘려나가므로 이후 단계에서 다시
+// 나타날 수가 없다.
+async function detectProductBoundingBox(
+  imageBuffer: Buffer,
+  mimeType: string
+): Promise<{ xMin: number; yMin: number; xMax: number; yMax: number } | null> {
+  const apiKey = requireEnv('GEMINI_API_KEY');
+  const prompt = `이 사진은 이커머스 상품 사진입니다. 사진 속에 여러 물건이 함께 있더라도, **실제로 판매하는 메인 상품 하나**의 위치를 찾아주세요 (옆에 같이 연출된 다른 가구·소품은 제외).
+
+반드시 아래 JSON 객체 형식으로만 응답하세요:
+{
+  "xMin": 0.0~1.0 사이 (이미지 왼쪽 기준 상품 영역 시작 비율),
+  "yMin": 0.0~1.0 사이 (이미지 위쪽 기준 상품 영역 시작 비율),
+  "xMax": 0.0~1.0 사이 (상품 영역 끝 비율),
+  "yMax": 0.0~1.0 사이 (상품 영역 끝 비율)
+}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${VISION_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: imageBuffer.toString('base64') } }] }],
+        generationConfig: { temperature: 0 },
+      }),
+    }
+  );
+  const json = await res.json();
+  if (!res.ok) return null;
+
+  const text: string = (json.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('');
+  const cleaned = text.replace(/```json\s*|```\s*/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+
+  try {
+    const box = JSON.parse(cleaned.slice(start, end + 1));
+    if (
+      typeof box.xMin === 'number' &&
+      typeof box.yMin === 'number' &&
+      typeof box.xMax === 'number' &&
+      typeof box.yMax === 'number' &&
+      box.xMax > box.xMin &&
+      box.yMax > box.yMin
+    ) {
+      return box;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// 찾은 상품 영역만 여유(10%)를 두고 크롭한다 - 이후 remove.bg가 볼
+// 이미지에는 옆 소품이 아예 존재하지 않게 된다. 좌표 인식이 실패하면
+// (드묾) 원본 그대로 다음 단계로 넘긴다 - 크롭을 안 해도 파이프라인은
+// 계속 동작한다.
+async function cropToProduct(imageBuffer: Buffer, mimeType: string): Promise<Buffer> {
+  const box = await detectProductBoundingBox(imageBuffer, mimeType);
+  if (!box) return imageBuffer;
+
+  const meta = await sharp(imageBuffer).metadata();
+  const width = meta.width || 0;
+  const height = meta.height || 0;
+  if (!width || !height) return imageBuffer;
+
+  const padRatio = 0.1;
+  const boxW = box.xMax - box.xMin;
+  const boxH = box.yMax - box.yMin;
+  const padX = boxW * padRatio;
+  const padY = boxH * padRatio;
+
+  const xMin = Math.max(0, box.xMin - padX);
+  const yMin = Math.max(0, box.yMin - padY);
+  const xMax = Math.min(1, box.xMax + padX);
+  const yMax = Math.min(1, box.yMax + padY);
+
+  const left = Math.round(xMin * width);
+  const top = Math.round(yMin * height);
+  const cropWidth = Math.round((xMax - xMin) * width);
+  const cropHeight = Math.round((yMax - yMin) * height);
+  if (cropWidth < 10 || cropHeight < 10) return imageBuffer;
+
+  return sharp(imageBuffer).extract({ left, top, width: cropWidth, height: cropHeight }).toBuffer();
+}
+
 // 1688 원본 사진은 보통 (1) 중국어 홍보 문구/워터마크가 얹혀있고,
 // (2) 실제 판매 상품 옆에 다른 가구/소품이 같이 스타일링된 "연출컷"인
 // 경우가 많다. remove.bg는 단순히 "전경 vs 배경"만 구분하는 매팅
@@ -1007,7 +1102,7 @@ async function cleanProductPhotoForCutout(
             parts: [{ text: instruction }, { inlineData: { mimeType, data: imageBuffer.toString('base64') } }],
           },
         ],
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'], temperature: 0 },
       }),
     }
   );
@@ -1033,10 +1128,11 @@ export interface GenerateThumbnailInput {
   effectPrompt?: string;
 }
 
-// 문구/워터마크 정리 -> 누끼 -> 흰 배경 1000x1000 배치 -> (선택) 효과
-// 추가, 순서로 처리한다.
+// 상품 위치 크롭(소품 물리적으로 제거) -> 문구/워터마크 정리 -> 누끼
+// -> 흰 배경 1000x1000 배치 -> (선택) 효과 추가, 순서로 처리한다.
 export async function generateThumbnailImage(input: GenerateThumbnailInput): Promise<Buffer> {
-  const cleaned = await cleanProductPhotoForCutout(input.productImage.buffer, input.productImage.mimeType);
+  const cropped = await cropToProduct(input.productImage.buffer, input.productImage.mimeType);
+  const cleaned = await cleanProductPhotoForCutout(cropped, input.productImage.mimeType);
   const cutout = await removeImageBackground(cleaned.buffer, cleaned.mimeType);
   const base = await composeThumbnailImage(cutout, input.position);
   if (input.effectPrompt?.trim()) {
