@@ -25,12 +25,15 @@ function requireEnv(name: string): string {
 // 못 잡았음). node-canvas는 registerFont로 폰트 파일을 직접 읽어서
 // 쓰기 때문에 시스템 폰트 설치 여부와 무관하게 항상 정확하게 렌더링
 // 된다 - 그래서 텍스트가 들어가는 합성은 전부 canvas로 처리한다.
+// 웹 화면(app/globals.css)과 동일하게 Pretendard를 쓴다 - 정적(비가변)
+// weight별 파일이라 canvas/Cairo에서 굵기가 확실하게 반영된다.
+const FONT_BOLD = 'PretendardBold';
+const FONT_EXTRABOLD = 'PretendardExtraBold';
 let fontRegistered = false;
 function ensureKoreanFontRegistered() {
   if (fontRegistered) return;
-  registerFont(path.join(process.cwd(), 'assets/fonts/NotoSansKR-Variable.ttf'), {
-    family: 'NotoSansKR',
-  });
+  registerFont(path.join(process.cwd(), 'assets/fonts/Pretendard-Bold.otf'), { family: FONT_BOLD });
+  registerFont(path.join(process.cwd(), 'assets/fonts/Pretendard-ExtraBold.otf'), { family: FONT_EXTRABOLD });
   fontRegistered = true;
 }
 
@@ -154,7 +157,7 @@ export async function compositeTranslatedImage(
     ctx.fillStyle = 'white';
     ctx.fillRect(x, y, w, h);
     ctx.fillStyle = 'black';
-    ctx.font = `${fontSize}px NotoSansKR`;
+    ctx.font = `${fontSize}px ${FONT_BOLD}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(r.translatedText, x + w / 2, y + h / 2);
@@ -262,32 +265,59 @@ ${noTextRule}
 }
 
 // AI가 만든 "문구 없는" 배경 위에, 실제 폰트로 문구를 상단 배너
-// 형태로 정확하게 합성한다 - 글자가 깨질 수 없는 방식.
+// 형태로 정확하게 합성한다 - 글자가 깨질 수 없는 방식. 밋밋한 단색
+// 박스 대신 위->아래로 옅어지는 그라데이션 + 그림자로 사진에 자연스럽게
+// 녹아들게 하고, 문구 아래 얇은 포인트 라인으로 마무리한다.
 export async function compositeHeadlineText(imageBuffer: Buffer, text: string): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width || 800;
   const height = meta.height || 800;
 
-  const maxCharsPerLine = 14;
+  const maxCharsPerLine = 13;
   const lines = wrapText(text, maxCharsPerLine).slice(0, 3);
-  const fontSize = Math.max(22, Math.min(56, (width / maxCharsPerLine) * 1.5));
-  const lineHeight = fontSize * 1.4;
-  const bannerHeight = Math.min(height * 0.4, lineHeight * lines.length + fontSize * 0.7);
+  const fontSize = Math.max(26, Math.min(60, (width / maxCharsPerLine) * 1.55));
+  const lineHeight = fontSize * 1.35;
+  const paddingY = fontSize * 0.9;
+  const bannerHeight = Math.min(height * 0.42, lineHeight * lines.length + paddingY);
 
   ensureKoreanFontRegistered();
   const canvas = createCanvas(width, Math.round(bannerHeight));
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  // 사진 위에 자연스럽게 얹히도록 위쪽이 진하고 아래로 갈수록 옅어지는
+  // 그라데이션 (배너 경계선이 딱 잘린 느낌이 안 나게 함)
+  const gradient = ctx.createLinearGradient(0, 0, 0, bannerHeight);
+  gradient.addColorStop(0, 'rgba(0, 0, 0, 0.72)');
+  gradient.addColorStop(0.75, 'rgba(0, 0, 0, 0.45)');
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, bannerHeight);
-  ctx.fillStyle = 'white';
-  ctx.font = `bold ${fontSize}px NotoSansKR`;
+
+  const textBlockHeight = lineHeight * lines.length;
+  const textTop = paddingY * 0.45;
+
+  ctx.font = `${fontSize}px ${FONT_EXTRABOLD}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+  ctx.shadowBlur = fontSize * 0.25;
+  ctx.shadowOffsetY = fontSize * 0.06;
+  ctx.fillStyle = 'white';
   lines.forEach((line, i) => {
-    const y = bannerHeight / 2 - ((lines.length - 1) * lineHeight) / 2 + i * lineHeight;
+    const y = textTop + lineHeight / 2 + i * lineHeight;
     ctx.fillText(line, width / 2, y);
   });
+  ctx.shadowColor = 'transparent';
+
+  // 문구 아래 얇은 포인트 라인으로 배너를 정리
+  const lineY = textTop + textBlockHeight + fontSize * 0.28;
+  const accentWidth = Math.min(width * 0.18, 120);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = Math.max(2, fontSize * 0.045);
+  ctx.beginPath();
+  ctx.moveTo(width / 2 - accentWidth / 2, lineY);
+  ctx.lineTo(width / 2 + accentWidth / 2, lineY);
+  ctx.stroke();
 
   return sharp(imageBuffer)
     .composite([{ input: canvas.toBuffer('image/png'), top: 0, left: 0 }])
