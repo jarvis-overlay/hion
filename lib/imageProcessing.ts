@@ -10,11 +10,46 @@
 // 1)/2)는 실제 서비스 키가 있어야 동작하고, 키가 없으면 명확한 한국어
 // 에러로 바로 알려준다 (다른 lib 파일들과 동일한 requireEnv 패턴).
 import sharp from 'sharp';
+import { createCanvas, registerFont } from 'canvas';
+import path from 'path';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} 환경변수가 설정 안 되어있어요.`);
   return v;
+}
+
+// sharp의 SVG 텍스트 렌더링은 시스템에 설치된 폰트에 의존하는데, Vercel
+// 서버리스 환경엔 한글 폰트가 아예 없어서 글자가 빈 네모로 나오는 문제를
+// 실측으로 확인했다(로컬 윈도우엔 한글 폰트가 있어서 로컬 테스트만으론
+// 못 잡았음). node-canvas는 registerFont로 폰트 파일을 직접 읽어서
+// 쓰기 때문에 시스템 폰트 설치 여부와 무관하게 항상 정확하게 렌더링
+// 된다 - 그래서 텍스트가 들어가는 합성은 전부 canvas로 처리한다.
+let fontRegistered = false;
+function ensureKoreanFontRegistered() {
+  if (fontRegistered) return;
+  registerFont(path.join(process.cwd(), 'assets/fonts/NotoSansKR-Variable.ttf'), {
+    family: 'NotoSansKR',
+  });
+  fontRegistered = true;
+}
+
+// 긴 문구는 화면 폭에 맞게 여러 줄로 나눈다 (아주 단순한 어절 단위 wrap).
+function wrapText(text: string, maxCharsPerLine: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  for (const w of words) {
+    const next = current ? `${current} ${w}` : w;
+    if (next.length > maxCharsPerLine && current) {
+      lines.push(current);
+      current = w;
+    } else {
+      current = next;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [text];
 }
 
 export interface TranslatedRegion {
@@ -90,8 +125,9 @@ export async function detectAndTranslateText(imageBuffer: Buffer, mimeType: stri
 }
 
 // 인식된 텍스트 영역마다 흰 박스를 깔고 번역문을 그 위에 그려서
-// 원본 이미지에 합성한다. sharp로 SVG를 오버레이하는 방식 - 별도
-// 이미지 편집 API 없이 서버에서 바로 처리 가능.
+// 원본 이미지에 합성한다. canvas로 오버레이 레이어를 그려서 sharp로
+// 합치는 방식 - 폰트 파일을 직접 읽어 쓰므로 어떤 서버 환경에서도
+// 글자가 정확하게 나온다.
 export async function compositeTranslatedImage(
   imageBuffer: Buffer,
   regions: TranslatedRegion[]
@@ -104,27 +140,28 @@ export async function compositeTranslatedImage(
     return sharp(imageBuffer).png().toBuffer();
   }
 
-  const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  ensureKoreanFontRegistered();
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
 
-  const overlays = regions
-    .map((r) => {
-      const x = r.xMin * width;
-      const y = r.yMin * height;
-      const w = Math.max(1, (r.xMax - r.xMin) * width);
-      const h = Math.max(1, (r.yMax - r.yMin) * height);
-      const fontSize = Math.max(10, Math.min(h * 0.7, w / Math.max(1, r.translatedText.length) * 1.8));
-      return `
-        <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="white" />
-        <text x="${x + w / 2}" y="${y + h / 2}" font-size="${fontSize}" font-family="sans-serif"
-          text-anchor="middle" dominant-baseline="middle" fill="black">${escapeXml(r.translatedText)}</text>
-      `;
-    })
-    .join('\n');
+  for (const r of regions) {
+    const x = r.xMin * width;
+    const y = r.yMin * height;
+    const w = Math.max(1, (r.xMax - r.xMin) * width);
+    const h = Math.max(1, (r.yMax - r.yMin) * height);
+    const fontSize = Math.max(10, Math.min(h * 0.7, (w / Math.max(1, r.translatedText.length)) * 1.8));
 
-  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${overlays}</svg>`;
+    ctx.fillStyle = 'white';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = 'black';
+    ctx.font = `${fontSize}px NotoSansKR`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(r.translatedText, x + w / 2, y + h / 2);
+  }
 
   return sharp(imageBuffer)
-    .composite([{ input: Buffer.from(svg) }])
+    .composite([{ input: canvas.toBuffer('image/png') }])
     .png()
     .toBuffer();
 }
@@ -224,31 +261,12 @@ ${noTextRule}
   return Buffer.from(imagePart.inlineData.data, 'base64');
 }
 
-// 긴 문구는 화면 폭에 맞게 여러 줄로 나눈다 (아주 단순한 어절 단위 wrap).
-function wrapText(text: string, maxCharsPerLine: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let current = '';
-  for (const w of words) {
-    const next = current ? `${current} ${w}` : w;
-    if (next.length > maxCharsPerLine && current) {
-      lines.push(current);
-      current = w;
-    } else {
-      current = next;
-    }
-  }
-  if (current) lines.push(current);
-  return lines.length > 0 ? lines : [text];
-}
-
 // AI가 만든 "문구 없는" 배경 위에, 실제 폰트로 문구를 상단 배너
 // 형태로 정확하게 합성한다 - 글자가 깨질 수 없는 방식.
 export async function compositeHeadlineText(imageBuffer: Buffer, text: string): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const width = meta.width || 800;
   const height = meta.height || 800;
-  const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   const maxCharsPerLine = 14;
   const lines = wrapText(text, maxCharsPerLine).slice(0, 3);
@@ -256,20 +274,23 @@ export async function compositeHeadlineText(imageBuffer: Buffer, text: string): 
   const lineHeight = fontSize * 1.4;
   const bannerHeight = Math.min(height * 0.4, lineHeight * lines.length + fontSize * 0.7);
 
-  const textEls = lines
-    .map((line, i) => {
-      const y = bannerHeight / 2 - ((lines.length - 1) * lineHeight) / 2 + i * lineHeight;
-      return `<text x="${width / 2}" y="${y}" font-size="${fontSize}" font-family="sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="middle" fill="white">${escapeXml(line)}</text>`;
-    })
-    .join('\n');
+  ensureKoreanFontRegistered();
+  const canvas = createCanvas(width, Math.round(bannerHeight));
+  const ctx = canvas.getContext('2d');
 
-  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <rect x="0" y="0" width="${width}" height="${bannerHeight}" fill="black" fill-opacity="0.55" />
-    ${textEls}
-  </svg>`;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(0, 0, width, bannerHeight);
+  ctx.fillStyle = 'white';
+  ctx.font = `bold ${fontSize}px NotoSansKR`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, i) => {
+    const y = bannerHeight / 2 - ((lines.length - 1) * lineHeight) / 2 + i * lineHeight;
+    ctx.fillText(line, width / 2, y);
+  });
 
   return sharp(imageBuffer)
-    .composite([{ input: Buffer.from(svg) }])
+    .composite([{ input: canvas.toBuffer('image/png'), top: 0, left: 0 }])
     .jpeg({ quality: 90 })
     .toBuffer();
 }
