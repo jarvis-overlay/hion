@@ -507,9 +507,9 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                   className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
                 />
                 {d.layoutStyle !== 'white' && (
-                  <details className="text-xs">
-                    <summary className="cursor-pointer text-inkSoft select-none">
-                      고급 문구 (브랜드명/통계/리스트, 선택)
+                  <details className="text-xs" open>
+                    <summary className="cursor-pointer text-accent font-semibold select-none">
+                      + 디자인 요소 추가 (브랜드명 / 뱃지 / 통계 / 문단 / 번호 리스트, 전부 선택)
                     </summary>
                     <div className="grid gap-1.5 mt-1.5">
                       <input
