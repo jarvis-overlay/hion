@@ -120,6 +120,8 @@ interface Draft {
   colorPrompt: string;
   layoutStyle: LayoutStyle;
   theme: Theme;
+  templateId: string; // 카드 중 실제로 클릭한 것 (같은 layoutStyle+theme를 쓰는 카드가
+  // 여러 개일 수 있어서, "선택됨" 표시는 값 비교가 아니라 이 id로만 판단한다)
   extractedTexts: { original: string; translated: string }[] | null;
   extracting: boolean;
   extractError: string | null;
@@ -145,6 +147,7 @@ function newDraft(): Draft {
     colorPrompt: '',
     layoutStyle: 'white',
     theme: 'dark',
+    templateId: 'white-simple',
     extractedTexts: null,
     extracting: false,
     extractError: null,
@@ -529,57 +532,46 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 >
                   {d.recommending ? 'AI 추천 생성 중...' : '✨ AI 추천으로 문구+디자인 채우기'}
                 </button>
-                {/* 카드는 "선택 상태"를 표시하는 게 아니라 눌렀을 때 아래
-                    드롭다운 값을 그 조합으로 세팅해주는 원클릭 버튼일 뿐이다.
-                    두 카드가 같은 layoutStyle+theme 조합을 쓸 수 있어서(예:
-                    인증뱃지+리스트, 통계 강조가 둘 다 typography+dark),
-                    카드에 "선택됨" 테두리를 표시하면 실제로는 하나만 눌렀는데
-                    다른 카드까지 같이 켜진 것처럼 보여 혼란스럽다는 피드백으로
-                    선택 표시를 없애고 순수 프리셋 버튼으로 바꿈 - 지금 실제로
-                    적용된 값은 아래 드롭다운만 보면 된다. */}
-                <div className="flex gap-2 flex-wrap pb-1">
-                  {TEMPLATES.map((t) => (
-                    <div key={t.id} className="relative group shrink-0">
-                      <button
-                        onClick={() => updateDraft(d.id, { layoutStyle: t.layoutStyle, theme: t.theme })}
-                        className="w-16 rounded border-2 border-transparent hover:border-accent overflow-hidden text-left block"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={t.thumb} alt={t.label} className="w-16 h-16 object-cover bg-paper" />
-                        <p className="text-[9px] leading-tight text-inkSoft px-0.5 py-0.5 truncate">{t.label}</p>
-                      </button>
-                      {/* 마우스 올리면 크게 확대해서 보여주는 미리보기 - 썸네일이
-                          64px라 디자인이 안 보인다는 피드백 대응 */}
-                      <div className="hidden group-hover:block absolute z-50 left-0 top-full mt-1 w-52 rounded-lg shadow-xl border border-paperLine bg-white p-1.5 pointer-events-none">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={t.thumb} alt={t.label} className="w-full rounded" />
-                        <p className="text-[11px] font-semibold text-ink px-0.5 pt-1">{t.label}</p>
-                        <p className="text-[10px] text-inkSoft px-0.5 pb-0.5">{t.desc}</p>
+                {/* 디자인 스타일을 고르는 유일한 컨트롤 - 예전엔 이 카드
+                    아래에 layoutStyle/theme 드롭다운이 따로 있어서 "카드랑
+                    드롭다운 중 뭘 봐야 하냐"는 혼란이 있었음. 드롭다운을
+                    없애고 카드 하나로 통일함. 같은 layoutStyle+theme 값을
+                    쓰는 카드가 여러 개 있을 수 있어서(예: 인증뱃지+리스트,
+                    통계 강조가 둘 다 typography+dark), "선택됨" 표시는
+                    값 비교가 아니라 실제로 클릭한 카드 id(templateId)로만
+                    판단한다. */}
+                <div className="grid grid-cols-3 gap-2">
+                  {TEMPLATES.map((t) => {
+                    const isSelected = d.templateId === t.id;
+                    return (
+                      <div key={t.id} className="relative group">
+                        <button
+                          onClick={() => updateDraft(d.id, { layoutStyle: t.layoutStyle, theme: t.theme, templateId: t.id })}
+                          className={`w-full rounded-lg border-2 overflow-hidden text-left block transition ${
+                            isSelected ? 'border-accent ring-2 ring-accent/30' : 'border-paperLine hover:border-accent/50'
+                          }`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={t.thumb} alt={t.label} className="w-full block bg-paper" />
+                          <p
+                            className={`text-[11px] leading-tight px-1.5 py-1 truncate ${
+                              isSelected ? 'text-accent font-semibold' : 'text-inkSoft'
+                            }`}
+                          >
+                            {isSelected && '✓ '}
+                            {t.label}
+                          </p>
+                        </button>
+                        {/* 마우스 올리면 더 크게 보여주는 미리보기 */}
+                        <div className="hidden group-hover:block absolute z-50 left-0 top-full mt-1 w-56 rounded-lg shadow-xl border border-paperLine bg-white p-1.5 pointer-events-none">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={t.thumb} alt={t.label} className="w-full rounded" />
+                          <p className="text-[11px] font-semibold text-ink px-0.5 pt-1">{t.label}</p>
+                          <p className="text-[10px] text-inkSoft px-0.5 pb-0.5">{t.desc}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-1.5">
-                  <select
-                    value={d.layoutStyle}
-                    onChange={(e) => updateDraft(d.id, { layoutStyle: e.target.value as LayoutStyle })}
-                    className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
-                  >
-                    <option value="white">화이트 섹션 (사진+문구 분리)</option>
-                    <option value="overlay">오버레이 (사진 위 그라데이션+문구)</option>
-                    <option value="typography">타이포그래피 (사진 없이 문구만)</option>
-                  </select>
-                  {d.layoutStyle !== 'white' && (
-                    <select
-                      value={d.theme}
-                      onChange={(e) => updateDraft(d.id, { theme: e.target.value as Theme })}
-                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-24"
-                    >
-                      <option value="dark">다크</option>
-                      <option value="purple">퍼플</option>
-                      <option value="light">라이트</option>
-                    </select>
-                  )}
+                    );
+                  })}
                 </div>
                 {d.layoutStyle !== 'typography' && (
                   <>
