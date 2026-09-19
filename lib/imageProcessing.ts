@@ -264,63 +264,53 @@ ${noTextRule}
   return Buffer.from(imagePart.inlineData.data, 'base64');
 }
 
-// AI가 만든 "문구 없는" 배경 위에, 실제 폰트로 문구를 상단 배너
-// 형태로 정확하게 합성한다 - 글자가 깨질 수 없는 방식. 밋밋한 단색
-// 박스 대신 위->아래로 옅어지는 그라데이션 + 그림자로 사진에 자연스럽게
-// 녹아들게 하고, 문구 아래 얇은 포인트 라인으로 마무리한다.
-export async function compositeHeadlineText(imageBuffer: Buffer, text: string): Promise<Buffer> {
-  const meta = await sharp(imageBuffer).metadata();
-  const width = meta.width || 800;
-  const height = meta.height || 800;
+// 실제 쿠팡/전문 상세페이지 레퍼런스를 참고해서 다시 만든 레이아웃 -
+// 문구를 사진 위에 얹지 않고, 흰 배경의 독립된 "문구 섹션"을 만들어서
+// 그 아래에 사진을 이어붙인다 (레퍼런스들도 전부 이 구조: 문구 구간과
+// 사진 구간이 분리돼있고, 사진 위에는 글자가 전혀 없음). 여백을
+// 넉넉하게 둬서 편집숍/브랜드 상세페이지 느낌을 낸다.
+export async function composeDetailSection(imageBuffer: Buffer, text: string): Promise<Buffer> {
+  const resizedImage = await sharp(imageBuffer).resize({ width: COUPANG_DETAIL_WIDTH }).toBuffer();
+  if (!text.trim()) {
+    return sharp(resizedImage).jpeg({ quality: 90 }).toBuffer();
+  }
 
-  const maxCharsPerLine = 13;
-  const lines = wrapText(text, maxCharsPerLine).slice(0, 3);
-  const fontSize = Math.max(26, Math.min(60, (width / maxCharsPerLine) * 1.55));
-  const lineHeight = fontSize * 1.35;
-  const paddingY = fontSize * 0.9;
-  const bannerHeight = Math.min(height * 0.42, lineHeight * lines.length + paddingY);
+  const imgMeta = await sharp(resizedImage).metadata();
+  const width = imgMeta.width || COUPANG_DETAIL_WIDTH;
+  const imgHeight = imgMeta.height || COUPANG_DETAIL_WIDTH;
 
   ensureKoreanFontRegistered();
-  const canvas = createCanvas(width, Math.round(bannerHeight));
-  const ctx = canvas.getContext('2d');
 
-  // 사진 위에 자연스럽게 얹히도록 위쪽이 진하고 아래로 갈수록 옅어지는
-  // 그라데이션 (배너 경계선이 딱 잘린 느낌이 안 나게 함)
-  const gradient = ctx.createLinearGradient(0, 0, 0, bannerHeight);
-  gradient.addColorStop(0, 'rgba(0, 0, 0, 0.72)');
-  gradient.addColorStop(0.75, 'rgba(0, 0, 0, 0.45)');
-  gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, width, bannerHeight);
+  const maxCharsPerLine = 13;
+  const lines = wrapText(text, maxCharsPerLine).slice(0, 2);
+  const fontSize = Math.max(30, Math.min(46, (width / maxCharsPerLine) * 1.4));
+  const lineHeight = fontSize * 1.4;
+  const sectionPaddingY = fontSize * 1.7;
+  const textSectionHeight = Math.round(lineHeight * lines.length + sectionPaddingY * 2);
 
-  const textBlockHeight = lineHeight * lines.length;
-  const textTop = paddingY * 0.45;
+  const textCanvas = createCanvas(width, textSectionHeight);
+  const ctx = textCanvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, textSectionHeight);
 
   ctx.font = `${fontSize}px ${FONT_EXTRABOLD}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-  ctx.shadowBlur = fontSize * 0.25;
-  ctx.shadowOffsetY = fontSize * 0.06;
-  ctx.fillStyle = 'white';
+  ctx.fillStyle = '#191919';
+  const textTop = sectionPaddingY;
   lines.forEach((line, i) => {
     const y = textTop + lineHeight / 2 + i * lineHeight;
     ctx.fillText(line, width / 2, y);
   });
-  ctx.shadowColor = 'transparent';
 
-  // 문구 아래 얇은 포인트 라인으로 배너를 정리
-  const lineY = textTop + textBlockHeight + fontSize * 0.28;
-  const accentWidth = Math.min(width * 0.18, 120);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-  ctx.lineWidth = Math.max(2, fontSize * 0.045);
-  ctx.beginPath();
-  ctx.moveTo(width / 2 - accentWidth / 2, lineY);
-  ctx.lineTo(width / 2 + accentWidth / 2, lineY);
-  ctx.stroke();
-
-  return sharp(imageBuffer)
-    .composite([{ input: canvas.toBuffer('image/png'), top: 0, left: 0 }])
+  const totalHeight = textSectionHeight + imgHeight;
+  return sharp({
+    create: { width, height: totalHeight, channels: 3, background: '#ffffff' },
+  })
+    .composite([
+      { input: textCanvas.toBuffer('image/png'), top: 0, left: 0 },
+      { input: resizedImage, top: textSectionHeight, left: 0 },
+    ])
     .jpeg({ quality: 90 })
     .toBuffer();
 }
@@ -330,8 +320,7 @@ export async function generateDetailSectionImage(
   productImage: { buffer: Buffer; mimeType: string } | null
 ): Promise<Buffer> {
   const background = await generateBackgroundImage(input.keyword, input.mood, productImage);
-  if (!input.description.trim()) return background;
-  return compositeHeadlineText(background, input.description.trim());
+  return composeDetailSection(background, input.description.trim());
 }
 
 // 쿠팡 상세페이지 이미지 규격(가로 860px)에 맞춘다 - AI 업스케일이

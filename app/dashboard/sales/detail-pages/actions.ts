@@ -3,7 +3,7 @@
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { generateDetailSectionImage, resizeForCoupang, type DetailSectionInput } from '@/lib/imageProcessing';
+import { generateDetailSectionImage, type DetailSectionInput } from '@/lib/imageProcessing';
 
 const BUCKET = 'detail-images';
 const PATH = '/dashboard/sales/detail-pages';
@@ -133,9 +133,8 @@ async function runGeneration(
 ): Promise<{ error: string } | { success: true; url: string }> {
   try {
     const generated = await generateDetailSectionImage(input, productImage);
-    const resized = await resizeForCoupang(generated);
     const outPath = `detail-pages/${projectId}/${sectionId}-output.jpg`;
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, resized, {
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
       contentType: 'image/jpeg',
       upsert: true,
     });
