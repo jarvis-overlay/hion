@@ -16,6 +16,9 @@ import {
 const THUMB = 'w-64 h-64';
 const GRID_COLS = 'grid-cols-[280px_1fr_280px_56px]';
 
+type LayoutStyle = 'white' | 'overlay' | 'typography';
+type Theme = 'dark' | 'purple' | 'light';
+
 interface Draft {
   id: string;
   file: File | null;
@@ -23,6 +26,13 @@ interface Draft {
   keyword: string;
   mood: string;
   description: string;
+  eyebrow: string;
+  accentTitle: string;
+  accentSubtitle: string;
+  stat: string;
+  statCaption: string;
+  layoutStyle: LayoutStyle;
+  theme: Theme;
 }
 
 function newDraft(): Draft {
@@ -33,6 +43,13 @@ function newDraft(): Draft {
     keyword: '',
     mood: '',
     description: '',
+    eyebrow: '',
+    accentTitle: '',
+    accentSubtitle: '',
+    stat: '',
+    statCaption: '',
+    layoutStyle: 'white',
+    theme: 'dark',
   };
 }
 
@@ -56,8 +73,15 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   }
 
   function handleGenerate(draft: Draft) {
-    if (!draft.keyword.trim() && !draft.mood.trim() && !draft.description.trim()) {
-      setError('키워드/분위기/설명 중 하나는 입력해주세요.');
+    const hasText =
+      draft.keyword.trim() ||
+      draft.mood.trim() ||
+      draft.description.trim() ||
+      draft.eyebrow.trim() ||
+      draft.accentTitle.trim() ||
+      draft.stat.trim();
+    if (!hasText) {
+      setError('문구 항목(설명/작은 문구/브랜드명/통계 중 하나)은 입력해주세요.');
       return;
     }
     setError(null);
@@ -65,6 +89,13 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     fd.set('keyword', draft.keyword);
     fd.set('mood', draft.mood);
     fd.set('description', draft.description);
+    fd.set('eyebrow', draft.eyebrow);
+    fd.set('accentTitle', draft.accentTitle);
+    fd.set('accentSubtitle', draft.accentSubtitle);
+    fd.set('stat', draft.stat);
+    fd.set('statCaption', draft.statCaption);
+    fd.set('layoutStyle', draft.layoutStyle);
+    fd.set('theme', draft.theme);
     if (draft.file) fd.set('image', draft.file);
     setBusyId(draft.id);
     startTransition(async () => {
@@ -179,49 +210,124 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
           return (
             <div key={d.id} className={`grid ${GRID_COLS} border-t border-paperLine items-start bg-paper/60`}>
               <div className="p-2">
-                <label className="cursor-pointer block">
-                  {d.previewUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={d.previewUrl} alt="" className={`${THUMB} object-cover rounded bg-paper`} />
-                  ) : (
-                    <div
-                      className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition`}
-                    >
-                      클릭해서 이미지 첨부
-                      <br />
-                      (없으면 AI가 생성)
-                    </div>
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] || null;
-                      updateDraft(d.id, { file: f, previewUrl: f ? URL.createObjectURL(f) : null });
-                    }}
-                  />
-                </label>
+                {d.layoutStyle === 'typography' ? (
+                  <div
+                    className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2`}
+                  >
+                    사진 없음
+                    <br />
+                    (그라데이션 배경)
+                  </div>
+                ) : (
+                  <label className="cursor-pointer block">
+                    {d.previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={d.previewUrl} alt="" className={`${THUMB} object-cover rounded bg-paper`} />
+                    ) : (
+                      <div
+                        className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition`}
+                      >
+                        클릭해서 이미지 첨부
+                        <br />
+                        (없으면 AI가 생성)
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        updateDraft(d.id, { file: f, previewUrl: f ? URL.createObjectURL(f) : null });
+                      }}
+                    />
+                  </label>
+                )}
               </div>
               <div className="p-2 grid gap-1.5">
+                <div className="flex gap-1.5">
+                  <select
+                    value={d.layoutStyle}
+                    onChange={(e) => updateDraft(d.id, { layoutStyle: e.target.value as LayoutStyle })}
+                    className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
+                  >
+                    <option value="white">화이트 섹션 (사진+문구 분리)</option>
+                    <option value="overlay">오버레이 (사진 위 그라데이션+문구)</option>
+                    <option value="typography">타이포그래피 (사진 없이 문구만)</option>
+                  </select>
+                  {d.layoutStyle !== 'white' && (
+                    <select
+                      value={d.theme}
+                      onChange={(e) => updateDraft(d.id, { theme: e.target.value as Theme })}
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-24"
+                    >
+                      <option value="dark">다크</option>
+                      <option value="purple">퍼플</option>
+                      <option value="light">라이트</option>
+                    </select>
+                  )}
+                </div>
+                {d.layoutStyle !== 'typography' && (
+                  <>
+                    <input
+                      value={d.keyword}
+                      onChange={(e) => updateDraft(d.id, { keyword: e.target.value })}
+                      placeholder="키워드 (예: 여름 휴대용 선풍기)"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                    />
+                    <input
+                      value={d.mood}
+                      onChange={(e) => updateDraft(d.id, { mood: e.target.value })}
+                      placeholder="분위기 (예: 시원한 파란 톤)"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                    />
+                  </>
+                )}
                 <input
-                  value={d.keyword}
-                  onChange={(e) => updateDraft(d.id, { keyword: e.target.value })}
-                  placeholder="키워드 (예: 여름 휴대용 선풍기)"
-                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                />
-                <input
-                  value={d.mood}
-                  onChange={(e) => updateDraft(d.id, { mood: e.target.value })}
-                  placeholder="분위기 (예: 시원한 파란 톤)"
+                  value={d.eyebrow}
+                  onChange={(e) => updateDraft(d.id, { eyebrow: e.target.value })}
+                  placeholder="작은 상단 문구 (선택, 예: 처음 시향한 순간)"
                   className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
                 />
                 <input
                   value={d.description}
                   onChange={(e) => updateDraft(d.id, { description: e.target.value })}
-                  placeholder="설명 (예: '한여름 폭염도 거뜬' 문구 강조)"
+                  placeholder="헤드라인 문구 (예: '한여름 폭염도 거뜬' 강조)"
                   className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
                 />
+                {d.layoutStyle !== 'white' && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-inkSoft select-none">
+                      고급 문구 (브랜드명/통계, 선택)
+                    </summary>
+                    <div className="grid gap-1.5 mt-1.5">
+                      <input
+                        value={d.accentTitle}
+                        onChange={(e) => updateDraft(d.id, { accentTitle: e.target.value })}
+                        placeholder="브랜드/제품명 영문 (예: Saffron Luminous Arcana)"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <input
+                        value={d.accentSubtitle}
+                        onChange={(e) => updateDraft(d.id, { accentSubtitle: e.target.value })}
+                        placeholder="한글 표기 (예: 사프란 루미너스 아르카나)"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <input
+                        value={d.stat}
+                        onChange={(e) => updateDraft(d.id, { stat: e.target.value })}
+                        placeholder="강조 숫자 (예: 110%, 부향률 30%)"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <input
+                        value={d.statCaption}
+                        onChange={(e) => updateDraft(d.id, { statCaption: e.target.value })}
+                        placeholder="숫자 아래 설명 문구"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                    </div>
+                  </details>
+                )}
               </div>
               <div className="p-2 grid gap-1">
                 <button

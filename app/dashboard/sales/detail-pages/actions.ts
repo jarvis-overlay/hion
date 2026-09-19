@@ -3,7 +3,12 @@
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { generateDetailSectionImage, type DetailSectionInput } from '@/lib/imageProcessing';
+import {
+  generateDetailSectionImage,
+  type DetailSectionInput,
+  type DetailSectionLayout,
+  type DetailSectionTheme,
+} from '@/lib/imageProcessing';
 
 const BUCKET = 'detail-images';
 const PATH = '/dashboard/sales/detail-pages';
@@ -52,13 +57,23 @@ export async function addSection(
   const keyword = String(formData.get('keyword') || '').trim();
   const mood = String(formData.get('mood') || '').trim();
   const description = String(formData.get('description') || '').trim();
-  if (!keyword && !mood && !description) {
-    return { error: '키워드/분위기/설명 중 하나는 입력해주세요.' };
+  const eyebrow = String(formData.get('eyebrow') || '').trim();
+  const accentTitle = String(formData.get('accentTitle') || '').trim();
+  const accentSubtitle = String(formData.get('accentSubtitle') || '').trim();
+  const stat = String(formData.get('stat') || '').trim();
+  const statCaption = String(formData.get('statCaption') || '').trim();
+  const layoutStyle = (String(formData.get('layoutStyle') || 'white') as DetailSectionLayout) || 'white';
+  const theme = (String(formData.get('theme') || 'dark') as DetailSectionTheme) || 'dark';
+  if (!keyword && !mood && !description && !eyebrow && !accentTitle && !stat) {
+    return { error: '문구 항목(설명/작은 문구/브랜드명/통계 중 하나)은 입력해주세요.' };
   }
   const promptText = [
     keyword && `키워드: ${keyword}`,
     mood && `분위기: ${mood}`,
     description && `설명: ${description}`,
+    eyebrow && `작은 문구: ${eyebrow}`,
+    accentTitle && `브랜드명: ${accentTitle}`,
+    stat && `통계: ${stat}`,
   ]
     .filter(Boolean)
     .join(' / ');
@@ -90,10 +105,29 @@ export async function addSection(
     keyword: keyword || null,
     mood: mood || null,
     description: description || null,
+    eyebrow: eyebrow || null,
+    accent_title: accentTitle || null,
+    accent_subtitle: accentSubtitle || null,
+    stat: stat || null,
+    stat_caption: statCaption || null,
+    layout_style: layoutStyle,
+    theme,
   });
   if (insertErr) return { error: insertErr.message };
 
-  return runGeneration(supabase, sectionId, projectId, { keyword, mood, description }, productImage);
+  const input: DetailSectionInput = {
+    keyword,
+    mood,
+    description,
+    eyebrow,
+    accentTitle,
+    accentSubtitle,
+    stat,
+    statCaption,
+    layoutStyle,
+    theme,
+  };
+  return runGeneration(supabase, sectionId, projectId, input, productImage);
 }
 
 export async function retrySection(
@@ -115,13 +149,19 @@ export async function retrySection(
     productImage = { buffer, mimeType: res.headers.get('content-type') || 'image/jpeg' };
   }
 
-  return runGeneration(
-    supabase,
-    sectionId,
-    section.project_id,
-    { keyword: section.keyword || '', mood: section.mood || '', description: section.description || '' },
-    productImage
-  );
+  const input: DetailSectionInput = {
+    keyword: section.keyword || '',
+    mood: section.mood || '',
+    description: section.description || '',
+    eyebrow: section.eyebrow || '',
+    accentTitle: section.accent_title || '',
+    accentSubtitle: section.accent_subtitle || '',
+    stat: section.stat || '',
+    statCaption: section.stat_caption || '',
+    layoutStyle: (section.layout_style as DetailSectionLayout) || 'white',
+    theme: (section.theme as DetailSectionTheme) || 'dark',
+  };
+  return runGeneration(supabase, sectionId, section.project_id, input, productImage);
 }
 
 async function runGeneration(
