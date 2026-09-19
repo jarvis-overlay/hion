@@ -6,9 +6,11 @@ import { createClient } from '@/lib/supabase/server';
 import {
   generateDetailSectionImage,
   detectAndTranslateText,
+  composeSpecTableSection,
   type DetailSectionInput,
   type DetailSectionLayout,
   type DetailSectionTheme,
+  type SpecRow,
 } from '@/lib/imageProcessing';
 import { recommendDetailSectionCopy, type DetailCopyRecommendation } from '@/lib/ai';
 
@@ -89,10 +91,14 @@ export async function addSection(
   const accentSubtitle = String(formData.get('accentSubtitle') || '').trim();
   const stat = String(formData.get('stat') || '').trim();
   const statCaption = String(formData.get('statCaption') || '').trim();
+  const badge = String(formData.get('badge') || '').trim();
+  const bodyText = String(formData.get('bodyText') || '').trim();
+  const listItems = String(formData.get('listItems') || '').trim();
+  const colorPrompt = String(formData.get('colorPrompt') || '').trim();
   const layoutStyle = (String(formData.get('layoutStyle') || 'white') as DetailSectionLayout) || 'white';
   const theme = (String(formData.get('theme') || 'dark') as DetailSectionTheme) || 'dark';
-  if (!keyword && !mood && !description && !eyebrow && !accentTitle && !stat) {
-    return { error: '문구 항목(설명/작은 문구/브랜드명/통계 중 하나)은 입력해주세요.' };
+  if (!keyword && !mood && !description && !eyebrow && !accentTitle && !stat && !badge && !bodyText && !listItems) {
+    return { error: '문구 항목 중 하나는 입력해주세요.' };
   }
   const promptText = [
     keyword && `키워드: ${keyword}`,
@@ -101,6 +107,9 @@ export async function addSection(
     eyebrow && `작은 문구: ${eyebrow}`,
     accentTitle && `브랜드명: ${accentTitle}`,
     stat && `통계: ${stat}`,
+    badge && `뱃지: ${badge}`,
+    bodyText && `문단: ${bodyText}`,
+    listItems && `리스트: ${listItems.split(/\r?\n/).filter(Boolean).length}개 항목`,
   ]
     .filter(Boolean)
     .join(' / ');
@@ -137,6 +146,10 @@ export async function addSection(
     accent_subtitle: accentSubtitle || null,
     stat: stat || null,
     stat_caption: statCaption || null,
+    badge: badge || null,
+    body_text: bodyText || null,
+    list_items: listItems || null,
+    color_prompt: colorPrompt || null,
     layout_style: layoutStyle,
     theme,
   });
@@ -151,6 +164,10 @@ export async function addSection(
     accentSubtitle,
     stat,
     statCaption,
+    badge,
+    bodyText,
+    listItems,
+    colorPrompt,
     layoutStyle,
     theme,
   };
@@ -185,6 +202,10 @@ export async function retrySection(
     accentSubtitle: section.accent_subtitle || '',
     stat: section.stat || '',
     statCaption: section.stat_caption || '',
+    badge: section.badge || '',
+    bodyText: section.body_text || '',
+    listItems: section.list_items || '',
+    colorPrompt: section.color_prompt || '',
     layoutStyle: (section.layout_style as DetailSectionLayout) || 'white',
     theme: (section.theme as DetailSectionTheme) || 'dark',
   };
@@ -214,6 +235,88 @@ async function runGeneration(
       .eq('id', sectionId);
     if (updateErr) return { error: updateErr.message };
 
+    revalidatePath(PATH);
+    return { success: true, url: outputUrl };
+  } catch (e: any) {
+    const message = e?.message || String(e);
+    await supabase.from('detail_page_sections').update({ error: message }).eq('id', sectionId);
+    revalidatePath(PATH);
+    return { error: message };
+  }
+}
+
+// 섹션 순서 변경 - 위/아래 버튼으로 이웃 섹션과 position을 맞바꾼다.
+export async function moveSection(sectionId: string, direction: 'up' | 'down') {
+  const supabase = createClient();
+  const { data: section, error } = await supabase
+    .from('detail_page_sections')
+    .select('id, project_id, position')
+    .eq('id', sectionId)
+    .single();
+  if (error || !section) return { error: error?.message || '섹션을 찾을 수 없어요.' };
+
+  const { data: siblings, error: listErr } = await supabase
+    .from('detail_page_sections')
+    .select('id, position')
+    .eq('project_id', section.project_id)
+    .order('position', { ascending: true });
+  if (listErr || !siblings) return { error: listErr?.message || '섹션 목록을 불러오지 못했어요.' };
+
+  const idx = siblings.findIndex((s) => s.id === sectionId);
+  const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (idx === -1 || targetIdx < 0 || targetIdx >= siblings.length) {
+    return { error: null }; // 맨 위/아래라 이동 불가 - 조용히 무시
+  }
+  const target = siblings[targetIdx];
+
+  const [r1, r2] = await Promise.all([
+    supabase.from('detail_page_sections').update({ position: target.position }).eq('id', sectionId),
+    supabase.from('detail_page_sections').update({ position: section.position }).eq('id', target.id),
+  ]);
+  if (r1.error || r2.error) return { error: r1.error?.message || r2.error?.message };
+
+  revalidatePath(PATH);
+  return { error: null };
+}
+
+// "제품 사양" 표 섹션 - 마케팅 카피 섹션과 달리 AI 사진 생성이 필요
+// 없어서 별도 액션으로 분리한다 (라벨/값 배열을 그대로 렌더링).
+export async function addSpecSection(
+  projectId: string,
+  position: number,
+  input: { title: string; rows: SpecRow[] }
+): Promise<{ error: string } | { success: true; url: string }> {
+  const supabase = createClient();
+  const rows = input.rows.filter((r) => r.label.trim() || r.value.trim());
+  if (rows.length === 0) {
+    return { error: '표에 항목을 하나 이상 입력해주세요.' };
+  }
+  const sectionId = randomUUID();
+  const promptText = `제품 사양 표 (${rows.length}개 항목)`;
+
+  const { error: insertErr } = await supabase.from('detail_page_sections').insert({
+    id: sectionId,
+    project_id: projectId,
+    position,
+    prompt_text: promptText,
+    layout_style: 'spec',
+    theme: 'light',
+    spec_title: input.title || null,
+    spec_rows: rows,
+  });
+  if (insertErr) return { error: insertErr.message };
+
+  try {
+    const generated = await composeSpecTableSection(rows, input.title);
+    const outPath = `detail-pages/${projectId}/${sectionId}-output.jpg`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (upErr) throw new Error(upErr.message);
+    const outputUrl = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl;
+
+    await supabase.from('detail_page_sections').update({ output_image_url: outputUrl, error: null }).eq('id', sectionId);
     revalidatePath(PATH);
     return { success: true, url: outputUrl };
   } catch (e: any) {

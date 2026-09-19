@@ -523,6 +523,9 @@ export interface DetailCopyRecommendation {
   accentSubtitle: string;
   stat: string;
   statCaption: string;
+  badge: string;
+  bodyText: string;
+  listItems: string;
   layoutStyle: DetailLayoutStyle;
   theme: DetailTheme;
 }
@@ -549,11 +552,14 @@ ${input.extractedText ? `원본(1688) 사진에 있던 셀링 포인트 문구 (
 - accentSubtitle: accentTitle의 한글 표기 (accentTitle을 채웠으면 같이 채움)
 - stat: 강조할 숫자/통계 (선택, 예: "50% 할인", "리뷰 1,200+", 없으면 빈 문자열)
 - statCaption: stat 아래에 붙는 짧은 설명 (stat을 채웠을 때만)
+- badge: 헤드라인 아래 작은 뱃지/인증 문구 (선택, 예: "특허출원 신개념 처방", 없으면 빈 문자열)
+- bodyText: 스토리텔링/비교형 문단 카피 - 줄바꿈(\n)으로 2~4줄 구분 (선택, 없으면 빈 문자열)
+- listItems: 번호 매김 피처 리스트 - 줄바꿈(\n)으로 구분된 3~5개 짧은 문장 (선택, 없으면 빈 문자열). bodyText와 listItems는 보통 둘 중 하나만 채우세요.
 - keyword: AI가 배경 사진을 새로 생성/편집할 때 참고할 상황 키워드 (예: "원룸 현관")
 - mood: 배경 이미지의 분위기 (예: "따뜻한 우드톤 조명")
 
 레이아웃/테마도 상품 성격에 맞게 골라주세요:
-- layoutStyle: "white"(사진+흰 문구 섹션 분리 - 기능성/실용 상품에 무난), "overlay"(사진 위 그라데이션+문구 - 라이프스타일/감성 상품), "typography"(사진 없이 그라데이션 배경+문구만 - 브랜드/무드 강조용, stat이나 짧은 카피 위주 섹션에 적합)
+- layoutStyle: "white"(사진+흰 문구 섹션 분리 - 기능성/실용 상품에 무난), "overlay"(사진 위 그라데이션+문구 - 라이프스타일/감성 상품), "typography"(사진 없이 그라데이션 배경+문구만 - 브랜드/무드 강조용, stat/badge/bodyText/listItems 위주 섹션에 적합)
 - theme: "dark"(무난한 블랙), "purple"(고급스러운 톤), "light"(밝고 화사한 톤)
 
 문구는 실제 쿠팡 상세페이지에 바로 써도 될 만큼 자연스럽고 설득력 있는 한국어로 작성하세요. 과장 광고나 근거 없는 최상급 표현은 피하세요.
@@ -562,6 +568,7 @@ ${input.extractedText ? `원본(1688) 사진에 있던 셀링 포인트 문구 (
 {
   "keyword": "...", "mood": "...", "eyebrow": "...", "description": "...",
   "accentTitle": "...", "accentSubtitle": "...", "stat": "...", "statCaption": "...",
+  "badge": "...", "bodyText": "...", "listItems": "...",
   "layoutStyle": "white|overlay|typography", "theme": "dark|purple|light"
 }`;
 
@@ -576,6 +583,9 @@ ${input.extractedText ? `원본(1688) 사진에 있던 셀링 포인트 문구 (
     accentSubtitle: parsed.accentSubtitle || '',
     stat: parsed.stat || '',
     statCaption: parsed.statCaption || '',
+    badge: parsed.badge || '',
+    bodyText: parsed.bodyText || '',
+    listItems: parsed.listItems || '',
     layoutStyle: (['white', 'overlay', 'typography'] as const).includes(parsed.layoutStyle as any)
       ? (parsed.layoutStyle as DetailLayoutStyle)
       : 'white',

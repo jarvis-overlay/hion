@@ -9,6 +9,8 @@ import {
   deleteSection,
   extractImageText,
   recommendSectionCopy,
+  moveSection,
+  addSpecSection,
 } from '@/app/dashboard/sales/detail-pages/actions';
 
 // 이미지(왼쪽) - 문구(가운데) - 결과(오른쪽) - 관리 순서로 행이 쌓이는
@@ -33,6 +35,10 @@ interface Draft {
   accentSubtitle: string;
   stat: string;
   statCaption: string;
+  badge: string;
+  bodyText: string;
+  listItems: string;
+  colorPrompt: string;
   layoutStyle: LayoutStyle;
   theme: Theme;
   extractedTexts: { original: string; translated: string }[] | null;
@@ -54,6 +60,10 @@ function newDraft(): Draft {
     accentSubtitle: '',
     stat: '',
     statCaption: '',
+    badge: '',
+    bodyText: '',
+    listItems: '',
+    colorPrompt: '',
     layoutStyle: 'white',
     theme: 'dark',
     extractedTexts: null,
@@ -63,11 +73,33 @@ function newDraft(): Draft {
   };
 }
 
+interface SpecRowDraft {
+  label: string;
+  value: string;
+}
+
+interface SpecDraft {
+  id: string;
+  title: string;
+  rows: SpecRowDraft[];
+  generating: boolean;
+}
+
+function newSpecDraft(): SpecDraft {
+  return {
+    id: crypto.randomUUID(),
+    title: '제품 사양',
+    rows: [{ label: '', value: '' }],
+    generating: false,
+  };
+}
+
 function ProjectEditor({ project, onClose }: { project: any; onClose: () => void }) {
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null); // 재시도 중인 section id 또는 생성 중인 draft id
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([newDraft()]);
+  const [specDrafts, setSpecDrafts] = useState<SpecDraft[]>([]);
   const sections: any[] = [...(project.detail_page_sections || [])].sort((a, b) => a.position - b.position);
 
   function updateDraft(id: string, patch: Partial<Draft>) {
@@ -89,9 +121,12 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
       draft.description.trim() ||
       draft.eyebrow.trim() ||
       draft.accentTitle.trim() ||
-      draft.stat.trim();
+      draft.stat.trim() ||
+      draft.badge.trim() ||
+      draft.bodyText.trim() ||
+      draft.listItems.trim();
     if (!hasText) {
-      setError('문구 항목(설명/작은 문구/브랜드명/통계 중 하나)은 입력해주세요.');
+      setError('문구 항목 중 하나는 입력해주세요.');
       return;
     }
     setError(null);
@@ -104,6 +139,10 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     fd.set('accentSubtitle', draft.accentSubtitle);
     fd.set('stat', draft.stat);
     fd.set('statCaption', draft.statCaption);
+    fd.set('badge', draft.badge);
+    fd.set('bodyText', draft.bodyText);
+    fd.set('listItems', draft.listItems);
+    fd.set('colorPrompt', draft.colorPrompt);
     fd.set('layoutStyle', draft.layoutStyle);
     fd.set('theme', draft.theme);
     if (draft.file) fd.set('image', draft.file);
@@ -176,6 +215,59 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     });
   }
 
+  function handleMove(sectionId: string, direction: 'up' | 'down') {
+    startTransition(async () => {
+      await moveSection(sectionId, direction);
+    });
+  }
+
+  function updateSpecDraft(id: string, patch: Partial<SpecDraft>) {
+    setSpecDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  }
+
+  function updateSpecRow(draftId: string, rowIndex: number, patch: Partial<SpecRowDraft>) {
+    setSpecDrafts((prev) =>
+      prev.map((d) =>
+        d.id === draftId ? { ...d, rows: d.rows.map((r, i) => (i === rowIndex ? { ...r, ...patch } : r)) } : d
+      )
+    );
+  }
+
+  function addSpecRow(draftId: string) {
+    setSpecDrafts((prev) =>
+      prev.map((d) => (d.id === draftId ? { ...d, rows: [...d.rows, { label: '', value: '' }] } : d))
+    );
+  }
+
+  function removeSpecRow(draftId: string, rowIndex: number) {
+    setSpecDrafts((prev) =>
+      prev.map((d) => (d.id === draftId ? { ...d, rows: d.rows.filter((_, i) => i !== rowIndex) } : d))
+    );
+  }
+
+  function removeSpecDraft(id: string) {
+    setSpecDrafts((prev) => prev.filter((d) => d.id !== id));
+  }
+
+  function handleGenerateSpec(draft: SpecDraft) {
+    const rows = draft.rows.filter((r) => r.label.trim() || r.value.trim());
+    if (rows.length === 0) {
+      setError('표에 항목을 하나 이상 입력해주세요.');
+      return;
+    }
+    setError(null);
+    updateSpecDraft(draft.id, { generating: true });
+    startTransition(async () => {
+      const res = await addSpecSection(project.id, sections.length, { title: draft.title, rows });
+      updateSpecDraft(draft.id, { generating: false });
+      if ('error' in res) {
+        setError(res.error);
+        return;
+      }
+      removeSpecDraft(draft.id);
+    });
+  }
+
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between">
@@ -193,7 +285,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
           <div className="px-2 py-2" />
         </div>
 
-        {sections.map((s) => {
+        {sections.map((s, idx) => {
           const isRetrying = isPending && busyId === s.id;
           return (
             <div key={s.id} className={`grid ${GRID_COLS} border-t border-paperLine items-start`}>
@@ -248,7 +340,25 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                   </div>
                 )}
               </div>
-              <div className="p-2">
+              <div className="p-2 grid gap-1 justify-items-start">
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => handleMove(s.id, 'up')}
+                    disabled={idx === 0}
+                    className="text-[11px] text-inkSoft hover:text-ink disabled:opacity-30"
+                    title="위로 이동"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    onClick={() => handleMove(s.id, 'down')}
+                    disabled={idx === sections.length - 1}
+                    className="text-[11px] text-inkSoft hover:text-ink disabled:opacity-30"
+                    title="아래로 이동"
+                  >
+                    ▼
+                  </button>
+                </div>
                 <button
                   onClick={() => startTransition(() => deleteSection(s.id))}
                   className="text-[11px] text-inkSoft hover:text-red-700"
@@ -376,6 +486,12 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                       placeholder="분위기 (예: 시원한 파란 톤)"
                       className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
                     />
+                    <input
+                      value={d.colorPrompt}
+                      onChange={(e) => updateDraft(d.id, { colorPrompt: e.target.value })}
+                      placeholder="제품 색상 변경 지시 (선택, 예: 제품을 네이비 색상으로 바꿔줘)"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                    />
                   </>
                 )}
                 <input
@@ -393,7 +509,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 {d.layoutStyle !== 'white' && (
                   <details className="text-xs">
                     <summary className="cursor-pointer text-inkSoft select-none">
-                      고급 문구 (브랜드명/통계, 선택)
+                      고급 문구 (브랜드명/통계/리스트, 선택)
                     </summary>
                     <div className="grid gap-1.5 mt-1.5">
                       <input
@@ -420,6 +536,26 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                         placeholder="숫자 아래 설명 문구"
                         className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
                       />
+                      <input
+                        value={d.badge}
+                        onChange={(e) => updateDraft(d.id, { badge: e.target.value })}
+                        placeholder="작은 뱃지 문구 (예: 특허출원 신개념 처방)"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <textarea
+                        value={d.bodyText}
+                        onChange={(e) => updateDraft(d.id, { bodyText: e.target.value })}
+                        placeholder="문단형 카피 (여러 줄 입력 가능, 스토리텔링/비교 문구용)"
+                        rows={3}
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full resize-y"
+                      />
+                      <textarea
+                        value={d.listItems}
+                        onChange={(e) => updateDraft(d.id, { listItems: e.target.value })}
+                        placeholder={'번호 리스트 (한 줄에 한 항목)\n예) 하루의 시작과 끝, 나를 감싸는 향\n겹겹이 쌓이는 향, 깊어지는 여운'}
+                        rows={3}
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full resize-y"
+                      />
                     </div>
                   </details>
                 )}
@@ -445,6 +581,74 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         <div className="border-t border-paperLine p-2">
           <button onClick={addRow} className="text-xs text-accent font-semibold">
             + 행 추가
+          </button>
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="bg-paper text-[11px] font-semibold text-inkSoft px-2 py-2">
+          제품 사양 표 (사진 없이 라벨/값 목록으로 만드는 표)
+        </div>
+        {specDrafts.map((sd) => (
+          <div key={sd.id} className="border-t border-paperLine p-3 grid gap-2">
+            <div className="flex items-center gap-2">
+              <input
+                value={sd.title}
+                onChange={(e) => updateSpecDraft(sd.id, { title: e.target.value })}
+                placeholder="표 제목 (예: 제품 사양)"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1 font-semibold"
+              />
+              <button
+                onClick={() => removeSpecDraft(sd.id)}
+                className="text-[11px] text-inkSoft hover:text-red-700 shrink-0"
+              >
+                삭제
+              </button>
+            </div>
+            <div className="grid gap-1.5">
+              {sd.rows.map((row, i) => (
+                <div key={i} className="flex gap-1.5">
+                  <input
+                    value={row.label}
+                    onChange={(e) => updateSpecRow(sd.id, i, { label: e.target.value })}
+                    placeholder="항목 (예: 제품명)"
+                    className="border border-paperLine bg-white px-2 py-1.5 text-xs w-32"
+                  />
+                  <input
+                    value={row.value}
+                    onChange={(e) => updateSpecRow(sd.id, i, { value: e.target.value })}
+                    placeholder="값 (예: 히온 쿨링 에어 클립 프로 팬)"
+                    className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
+                  />
+                  <button
+                    onClick={() => removeSpecRow(sd.id, i)}
+                    className="text-[11px] text-inkSoft hover:text-red-700 shrink-0"
+                  >
+                    삭제
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between">
+              <button onClick={() => addSpecRow(sd.id)} className="text-[11px] text-accent font-semibold">
+                + 항목 추가
+              </button>
+              <button
+                onClick={() => handleGenerateSpec(sd)}
+                disabled={sd.generating}
+                className="btn-primary px-4 py-1.5 text-xs font-semibold disabled:opacity-50"
+              >
+                {sd.generating ? '생성 중...' : '표 생성'}
+              </button>
+            </div>
+          </div>
+        ))}
+        <div className="border-t border-paperLine p-2">
+          <button
+            onClick={() => setSpecDrafts((prev) => [...prev, newSpecDraft()])}
+            className="text-xs text-accent font-semibold"
+          >
+            + 제품 사양 표 추가
           </button>
         </div>
       </div>

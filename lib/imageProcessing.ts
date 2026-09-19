@@ -210,7 +210,10 @@ const IMAGE_GEN_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-imag
 // 'overlay': 사진 위에 그라데이션 스크림을 깔고 그 위에 문구를 얹는다.
 // 'typography': 사진 없이 그라데이션 배경 + 문구만으로 섹션 하나를 구성한다
 //   (향수 브랜드 레퍼런스처럼 사진 없는 "카피 전용" 화면).
-export type DetailSectionLayout = 'white' | 'overlay' | 'typography';
+// 'spec': 제품 사양 표 - 마케팅 문구가 아니라 라벨/값 목록을 입력받아
+//   composeSpecTableSection으로 별도 처리한다 (generateDetailSectionImage
+//   경로를 안 탐 - AI 사진 생성 자체가 필요 없음).
+export type DetailSectionLayout = 'white' | 'overlay' | 'typography' | 'spec';
 export type DetailSectionTheme = 'dark' | 'purple' | 'light';
 
 export interface DetailSectionInput {
@@ -222,6 +225,10 @@ export interface DetailSectionInput {
   accentSubtitle?: string; // accentTitle 아래 한글 표기 (선택)
   stat?: string; // 강조 숫자/퍼센트 (선택, 예: "110%")
   statCaption?: string; // stat 아래 설명 문구 (선택)
+  badge?: string; // 작은 뱃지/라벨 문구 (선택, 예: "특허출원 신개념 처방")
+  bodyText?: string; // 여러 줄 문단형 카피 (선택, 스토리텔링/비교 문구용)
+  listItems?: string; // 줄바꿈으로 구분된 번호 매김 리스트 항목 (선택)
+  colorPrompt?: string; // 제품 색상/디자인을 바꿔달라는 자유 지시 (선택)
   layoutStyle?: DetailSectionLayout;
   theme?: DetailSectionTheme;
 }
@@ -229,17 +236,26 @@ export interface DetailSectionInput {
 async function generateBackgroundImage(
   keyword: string,
   mood: string,
-  productImage: { buffer: Buffer; mimeType: string } | null
+  productImage: { buffer: Buffer; mimeType: string } | null,
+  colorPrompt?: string
 ): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
 
   const noTextRule =
     '**가장 중요한 규칙: 결과 이미지 안에는 그 어떤 문자·숫자·기호도 존재하면 안 됩니다.** 한국어든 중국어든 영어든 로고든 워터마크든 예외 없습니다. 이 규칙은 원본 사진에 이미 디자인 요소로 박혀 있는 텍스트(예: 판매용 사진에 얹혀있는 중국어 홍보 문구, 브랜드 로고, 워터마크, 각인, 라벨 글씨)에도 똑같이 적용됩니다 - 그런 텍스트가 보이면 지우거나 그리지 말고, 해당 영역을 자연스러운 배경/재질로 다시 채워서 완전히 안 보이게 만드세요. "글자를 다른 언어로 바꿔서 넣는 것"도 금지입니다 - 번역해서 넣는 게 아니라 아예 아무 글자도 없어야 합니다. 문구는 이후 단계에서 저희가 별도로 정확한 폰트로 합성할 예정이니, 지금 결과물은 순수하게 사진/배경/분위기만 있으면 됩니다.';
 
+  // 기본은 "형태·색상·디자인 유지"지만, 사용자가 색상 변경을 직접
+  // 요청했으면 그 지시를 우선한다 - 두 지시가 충돌하면 AI가 색을 안
+  // 바꾸는 쪽으로 보수적으로 행동하는 걸 실측으로 확인해서, 색상
+  // 유지 문구 자체를 조건부로 바꾼다.
+  const colorRule = colorPrompt?.trim()
+    ? `상품의 형태·디자인·구도는 그대로 유지하되, 색상은 다음 요청에 맞게 바꿔주세요: "${colorPrompt.trim()}"`
+    : '상품의 실제 형태·색상·디자인은 최대한 그대로 유지하면서';
+
   const instruction = productImage
     ? `${noTextRule}
 
-위 규칙을 지키면서, 아래 상품 사진을 그대로 활용해서 쿠팡 상세페이지에 들어갈 마케팅 배경 이미지를 만들어주세요. 상품의 실제 형태·색상·디자인은 최대한 그대로 유지하면서, 배경과 분위기만 아래 키워드/분위기에 맞게 합성/편집해주세요. 원본 사진에 있던 문구·워터마크·로고는 이번 결과물에 절대 나오면 안 됩니다.
+위 규칙을 지키면서, 아래 상품 사진을 그대로 활용해서 쿠팡 상세페이지에 들어갈 마케팅 배경 이미지를 만들어주세요. ${colorRule}, 배경과 분위기만 아래 키워드/분위기에 맞게 합성/편집해주세요. 원본 사진에 있던 문구·워터마크·로고는 이번 결과물에 절대 나오면 안 됩니다.
 
 키워드: ${keyword || '(없음)'}
 분위기: ${mood || '(없음)'}`
@@ -418,7 +434,34 @@ type ContentTier =
       lineHeight: number;
       gapBefore: number;
     }
-  | { kind: 'divider'; color: string; gapBefore: number };
+  | { kind: 'divider'; color: string; gapBefore: number }
+  | { kind: 'badge'; text: string; fontSize: number; textColor: string; bgColor: string; gapBefore: number }
+  | {
+      kind: 'list';
+      items: { number: string; lines: string[] }[];
+      fontSize: number;
+      numberColor: string;
+      textColor: string;
+      lineHeight: number;
+      itemGap: number;
+      gapBefore: number;
+    };
+
+// 둥근 사각형 경로 - node-canvas(이 버전)엔 ctx.roundRect가 없어서
+// arcTo로 직접 그린다. 뱃지(badge) 배경에만 쓰인다.
+function pathRoundedRect(ctx: CanvasCtx, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
 
 // eyebrow(작은 문구) - description(굵은 헤드라인) - 구분선 -
 // accentTitle(영문 이탤릭) - accentSubtitle(한글 표기) - stat(강조 숫자)
@@ -480,6 +523,17 @@ function buildContentTiers(
     gapBefore: 16,
   });
 
+  if (input.badge?.trim()) {
+    tiers.push({
+      kind: 'badge',
+      text: input.badge.trim(),
+      fontSize: 17,
+      textColor: colors.bgTop,
+      bgColor: colors.text,
+      gapBefore: tiers.length === 0 ? 0 : 20,
+    });
+  }
+
   const hasIntro = tiers.length > 0;
   const hasAccentBlock = !!(input.accentTitle?.trim() || input.stat?.trim());
   if (hasIntro && hasAccentBlock) {
@@ -532,17 +586,59 @@ function buildContentTiers(
     gapBefore: 10,
   });
 
+  // bodyText: 스토리텔링/비교 문구용 여러 줄 문단 (헤드라인보다 작고
+  // 옅은 톤). listItems: 줄바꿈으로 구분한 번호 매김 피처 리스트.
+  pushText(input.bodyText, {
+    font: FONT_BOLD,
+    fontSize: 20,
+    color: colors.textMuted,
+    tracking: 0,
+    lineHeight: 32,
+    maxCharsPerLine: 22,
+    maxLines: 6,
+    gapBefore: 24,
+  });
+
+  const listLines = (input.listItems || '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (listLines.length > 0) {
+    const items = listLines.map((line, i) => ({
+      number: String(i + 1).padStart(2, '0'),
+      lines: wrapText(line, 24).slice(0, 2),
+    }));
+    const lineHeight = 30;
+    const itemGap = 18;
+    tiers.push({
+      kind: 'list',
+      items,
+      fontSize: 20,
+      numberColor: colors.accent,
+      textColor: colors.text,
+      lineHeight,
+      itemGap,
+      gapBefore: tiers.length === 0 ? 0 : 28,
+    });
+  }
+
   let totalHeight = 0;
   for (const tier of tiers) {
-    totalHeight += tier.gapBefore + (tier.kind === 'divider' ? 24 : tier.lines.length * tier.lineHeight);
+    if (tier.kind === 'divider') totalHeight += tier.gapBefore + 24;
+    else if (tier.kind === 'badge') totalHeight += tier.gapBefore + tier.fontSize + 22;
+    else if (tier.kind === 'list') {
+      const itemsHeight = tier.items.reduce((sum, item) => sum + item.lines.length * tier.lineHeight, 0);
+      totalHeight += tier.gapBefore + itemsHeight + tier.itemGap * (tier.items.length - 1);
+    } else totalHeight += tier.gapBefore + tier.lines.length * tier.lineHeight;
   }
   return { tiers, totalHeight };
 }
 
-function paintContentTiers(ctx: CanvasCtx, tiers: ContentTier[], centerX: number, startY: number) {
+function paintContentTiers(ctx: CanvasCtx, tiers: ContentTier[], centerX: number, startY: number, width: number) {
   let y = startY;
   for (const tier of tiers) {
     y += tier.gapBefore;
+
     if (tier.kind === 'divider') {
       const dh = 24;
       ctx.fillStyle = tier.color;
@@ -550,6 +646,45 @@ function paintContentTiers(ctx: CanvasCtx, tiers: ContentTier[], centerX: number
       y += dh;
       continue;
     }
+
+    if (tier.kind === 'badge') {
+      ctx.font = `${tier.fontSize}px ${FONT_BOLD}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const textWidth = ctx.measureText(tier.text).width;
+      const padX = 20;
+      const badgeH = tier.fontSize + 22;
+      const badgeW = textWidth + padX * 2;
+      pathRoundedRect(ctx, centerX - badgeW / 2, y, badgeW, badgeH, badgeH / 2);
+      ctx.fillStyle = tier.bgColor;
+      ctx.fill();
+      ctx.fillStyle = tier.textColor;
+      ctx.fillText(tier.text, centerX, y + badgeH / 2);
+      y += badgeH;
+      continue;
+    }
+
+    if (tier.kind === 'list') {
+      const listMargin = 64;
+      const numColWidth = 44;
+      const textX = centerX - width / 2 + listMargin + numColWidth;
+      tier.items.forEach((item, idx) => {
+        ctx.font = `${tier.fontSize}px ${FONT_EXTRABOLD}`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = tier.numberColor;
+        ctx.fillText(item.number, centerX - width / 2 + listMargin, y + tier.lineHeight / 2);
+        ctx.font = `${tier.fontSize}px ${FONT_BOLD}`;
+        ctx.fillStyle = tier.textColor;
+        item.lines.forEach((line, i) => {
+          ctx.fillText(line, textX, y + tier.lineHeight / 2 + i * tier.lineHeight);
+        });
+        y += item.lines.length * tier.lineHeight;
+        if (idx < tier.items.length - 1) y += tier.itemGap;
+      });
+      continue;
+    }
+
     ctx.font = `${tier.fontSize}px ${tier.font}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -582,7 +717,7 @@ export async function composeTypographySection(input: DetailSectionInput): Promi
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
 
-  paintContentTiers(ctx, tiers, width / 2, padY);
+  paintContentTiers(ctx, tiers, width / 2, padY, width);
 
   return sharp(canvas.toBuffer('image/png')).jpeg({ quality: 92 }).toBuffer();
 }
@@ -616,12 +751,97 @@ export async function composeOverlaySection(imageBuffer: Buffer, input: DetailSe
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, scrimFadeHeight);
 
-  paintContentTiers(ctx, tiers, width / 2, padY);
+  paintContentTiers(ctx, tiers, width / 2, padY, width);
 
   return sharp(resizedImage)
     .composite([{ input: overlayCanvas.toBuffer('image/png'), top: 0, left: 0 }])
     .jpeg({ quality: 90 })
     .toBuffer();
+}
+
+export interface SpecRow {
+  label: string;
+  value: string;
+}
+
+// "제품 사양" 표 - 마케팅 카피 섹션들과 달리 AI 생성 사진이 필요 없는
+// 순수 정보 전달용 섹션이라 별도 함수로 분리한다. 레퍼런스(둥근 회색
+// 카드, 라벨/값 2열, 얇은 구분선)를 일반화한 단일 스타일로 구현 -
+// 레퍼런스 3종이 사실상 같은 "라벨:값" 구조라 스타일 선택지를 여러 개
+// 만드는 대신 하나로 통일함.
+export async function composeSpecTableSection(rows: SpecRow[], title?: string): Promise<Buffer> {
+  ensureKoreanFontRegistered();
+  const width = COUPANG_DETAIL_WIDTH;
+  const cardMargin = 20;
+  const cardPadX = 40;
+  const cardPadY = 36;
+  const titleFontSize = 28;
+  const titleBlockHeight = titleFontSize + 30;
+  const rowFontSize = 19;
+  const rowLineHeight = 28;
+  const rowPaddingY = 14;
+  const labelColWidth = 150;
+  const valueMaxCharsPerLine = 24;
+
+  const titleText = title?.trim() || '제품 사양';
+  const cardWidth = width - cardMargin * 2;
+  const rowsWithLines = rows.map((r) => ({
+    label: r.label.trim() || '-',
+    lines: wrapText(r.value.trim() || '-', valueMaxCharsPerLine),
+  }));
+  const rowsHeight = rowsWithLines.reduce(
+    (sum, r) => sum + Math.max(1, r.lines.length) * rowLineHeight + rowPaddingY * 2,
+    0
+  );
+  const cardHeight = cardPadY + titleBlockHeight + rowsHeight + cardPadY;
+  const height = cardMargin * 2 + cardHeight;
+
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+
+  const cardX = cardMargin;
+  const cardY = cardMargin;
+  pathRoundedRect(ctx, cardX, cardY, cardWidth, cardHeight, 20);
+  ctx.fillStyle = '#f5f4f2';
+  ctx.fill();
+
+  let y = cardY + cardPadY;
+  ctx.font = `${titleFontSize}px ${FONT_EXTRABOLD}`;
+  ctx.fillStyle = '#1c1c1c';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(titleText, cardX + cardPadX, y + titleFontSize);
+  y += titleBlockHeight;
+
+  for (const row of rowsWithLines) {
+    const rh = Math.max(1, row.lines.length) * rowLineHeight + rowPaddingY * 2;
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cardX + cardPadX, y);
+    ctx.lineTo(cardX + cardWidth - cardPadX, y);
+    ctx.stroke();
+
+    ctx.font = `${rowFontSize}px ${FONT_BOLD}`;
+    ctx.fillStyle = 'rgba(28,28,28,0.55)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(row.label, cardX + cardPadX, y + rh / 2);
+
+    ctx.fillStyle = '#1c1c1c';
+    const valueX = cardX + cardPadX + labelColWidth;
+    row.lines.forEach((line, i) => {
+      const ly = y + rowPaddingY + rowLineHeight / 2 + i * rowLineHeight;
+      ctx.fillText(line, valueX, ly);
+    });
+
+    y += rh;
+  }
+
+  return sharp(canvas.toBuffer('image/png')).jpeg({ quality: 92 }).toBuffer();
 }
 
 export async function generateDetailSectionImage(
@@ -634,7 +854,7 @@ export async function generateDetailSectionImage(
     return composeTypographySection(input);
   }
 
-  const background = await generateBackgroundImage(input.keyword, input.mood, productImage);
+  const background = await generateBackgroundImage(input.keyword, input.mood, productImage, input.colorPrompt);
 
   if (style === 'overlay') {
     return composeOverlaySection(background, input);
