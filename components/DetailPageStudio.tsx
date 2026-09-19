@@ -7,6 +7,7 @@ import {
   addSection,
   retrySection,
   deleteSection,
+  extractImageText,
 } from '@/app/dashboard/sales/detail-pages/actions';
 
 // 이미지(왼쪽) - 문구(가운데) - 결과(오른쪽) - 관리 순서로 행이 쌓이는
@@ -33,6 +34,9 @@ interface Draft {
   statCaption: string;
   layoutStyle: LayoutStyle;
   theme: Theme;
+  extractedTexts: { original: string; translated: string }[] | null;
+  extracting: boolean;
+  extractError: string | null;
 }
 
 function newDraft(): Draft {
@@ -50,6 +54,9 @@ function newDraft(): Draft {
     statCaption: '',
     layoutStyle: 'white',
     theme: 'dark',
+    extractedTexts: null,
+    extracting: false,
+    extractError: null,
   };
 }
 
@@ -116,6 +123,23 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     startTransition(async () => {
       await retrySection(sectionId);
       setBusyId(null);
+    });
+  }
+
+  // 첨부한 원본 사진에 박힌 중국어 문구가 뭐라고 써있는지 미리 뽑아서
+  // 보여준다 - 이걸 보고 사용자가 원하는 한국어 문구를 직접 입력한다.
+  function handleExtractText(draft: Draft) {
+    if (!draft.file) return;
+    updateDraft(draft.id, { extracting: true, extractError: null, extractedTexts: null });
+    const fd = new FormData();
+    fd.set('image', draft.file);
+    startTransition(async () => {
+      const res = await extractImageText(fd);
+      if ('error' in res) {
+        updateDraft(draft.id, { extracting: false, extractError: res.error });
+        return;
+      }
+      updateDraft(draft.id, { extracting: false, extractedTexts: res.texts });
     });
   }
 
@@ -238,10 +262,41 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                       className="hidden"
                       onChange={(e) => {
                         const f = e.target.files?.[0] || null;
-                        updateDraft(d.id, { file: f, previewUrl: f ? URL.createObjectURL(f) : null });
+                        updateDraft(d.id, {
+                          file: f,
+                          previewUrl: f ? URL.createObjectURL(f) : null,
+                          extractedTexts: null,
+                          extractError: null,
+                        });
                       }}
                     />
                   </label>
+                )}
+                {d.file && d.layoutStyle !== 'typography' && (
+                  <div className="mt-1.5">
+                    <button
+                      onClick={() => handleExtractText(d)}
+                      disabled={d.extracting}
+                      className="text-[11px] text-accent font-semibold underline disabled:opacity-50"
+                    >
+                      {d.extracting ? '텍스트 추출 중...' : '원본 사진 속 문구 추출'}
+                    </button>
+                    {d.extractError && <p className="text-[11px] text-warn mt-1">{d.extractError}</p>}
+                    {d.extractedTexts && (
+                      <div className="mt-1 bg-paper rounded p-1.5 text-[11px] leading-relaxed max-h-32 overflow-y-auto">
+                        {d.extractedTexts.length === 0 ? (
+                          <p className="text-inkSoft">인식된 문구가 없어요.</p>
+                        ) : (
+                          d.extractedTexts.map((t, i) => (
+                            <p key={i} className="mb-1 last:mb-0">
+                              <span className="text-inkSoft">{t.original}</span>
+                              <br />→ {t.translated}
+                            </p>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="p-2 grid gap-1.5">

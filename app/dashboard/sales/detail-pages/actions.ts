@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import {
   generateDetailSectionImage,
+  detectAndTranslateText,
   type DetailSectionInput,
   type DetailSectionLayout,
   type DetailSectionTheme,
@@ -17,6 +18,31 @@ function extFromContentType(contentType: string): string {
   if (contentType.includes('png')) return 'png';
   if (contentType.includes('webp')) return 'webp';
   return 'jpg';
+}
+
+// 원본(1688) 사진에 박혀있는 중국어 문구가 뭐라고 써있는지 미리 보여주는
+// 용도 - 사용자가 이걸 보고 원하는 한국어 문구를 직접 입력할 수 있게
+// 한다. 번역 기능에 이미 있는 OCR+번역 로직을 그대로 재사용.
+export async function extractImageText(
+  formData: FormData
+): Promise<{ error: string } | { success: true; texts: { original: string; translated: string }[] }> {
+  const file = formData.get('image') as File | null;
+  if (!file || file.size === 0) return { error: '이미지를 먼저 첨부해주세요.' };
+
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const mimeType = file.type || 'image/jpeg';
+    const regions = await detectAndTranslateText(buffer, mimeType);
+    if (regions.length === 0) {
+      return { success: true, texts: [] };
+    }
+    return {
+      success: true,
+      texts: regions.map((r) => ({ original: r.originalText, translated: r.translatedText })),
+    };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
 }
 
 export async function createProject(
