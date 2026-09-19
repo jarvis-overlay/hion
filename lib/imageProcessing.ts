@@ -264,11 +264,37 @@ ${noTextRule}
   return Buffer.from(imagePart.inlineData.data, 'base64');
 }
 
+// node-canvas(Cairo)는 CSS letter-spacing을 지원 안 해서(실측 확인 -
+// 'letterSpacing' in ctx === false), 자간을 좁히려면 글자를 하나씩
+// 직접 그려서 수동으로 간격을 조절해야 한다. 촘촘한 기본 자간이
+// 오히려 "안 다듬어진" 인상을 줘서, 살짝 좁혀서 더 정제된 느낌을 낸다.
+function fillTextTracked(
+  ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>,
+  text: string,
+  centerX: number,
+  y: number,
+  tracking: number
+) {
+  const chars = [...text];
+  const widths = chars.map((c) => ctx.measureText(c).width);
+  const totalWidth = widths.reduce((a, b) => a + b, 0) + tracking * (chars.length - 1);
+  const prevAlign = ctx.textAlign;
+  ctx.textAlign = 'left';
+  let x = centerX - totalWidth / 2;
+  chars.forEach((c, i) => {
+    ctx.fillText(c, x, y);
+    x += widths[i] + tracking;
+  });
+  ctx.textAlign = prevAlign;
+}
+
 // 실제 쿠팡/전문 상세페이지 레퍼런스를 참고해서 다시 만든 레이아웃 -
 // 문구를 사진 위에 얹지 않고, 흰 배경의 독립된 "문구 섹션"을 만들어서
 // 그 아래에 사진을 이어붙인다 (레퍼런스들도 전부 이 구조: 문구 구간과
-// 사진 구간이 분리돼있고, 사진 위에는 글자가 전혀 없음). 여백을
-// 넉넉하게 둬서 편집숍/브랜드 상세페이지 느낌을 낸다.
+// 사진 구간이 분리돼있고, 사진 위에는 글자가 전혀 없음). 레퍼런스
+// 대비 처음 버전은 글자가 너무 굵고 크고 여백이 좁아서 예스러워
+// 보인다는 피드백으로, 굵기를 낮추고(ExtraBold->Bold) 크기를
+// 줄이고 여백을 넓혀서 더 정제된 느낌으로 다시 조정함.
 export async function composeDetailSection(imageBuffer: Buffer, text: string): Promise<Buffer> {
   const resizedImage = await sharp(imageBuffer).resize({ width: COUPANG_DETAIL_WIDTH }).toBuffer();
   if (!text.trim()) {
@@ -281,11 +307,12 @@ export async function composeDetailSection(imageBuffer: Buffer, text: string): P
 
   ensureKoreanFontRegistered();
 
-  const maxCharsPerLine = 13;
+  const maxCharsPerLine = 15;
   const lines = wrapText(text, maxCharsPerLine).slice(0, 2);
-  const fontSize = Math.max(30, Math.min(46, (width / maxCharsPerLine) * 1.4));
-  const lineHeight = fontSize * 1.4;
-  const sectionPaddingY = fontSize * 1.7;
+  const fontSize = Math.max(26, Math.min(36, (width / maxCharsPerLine) * 1.15));
+  const tracking = -fontSize * 0.02;
+  const lineHeight = fontSize * 1.5;
+  const sectionPaddingY = fontSize * 2.6;
   const textSectionHeight = Math.round(lineHeight * lines.length + sectionPaddingY * 2);
 
   const textCanvas = createCanvas(width, textSectionHeight);
@@ -293,14 +320,14 @@ export async function composeDetailSection(imageBuffer: Buffer, text: string): P
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, textSectionHeight);
 
-  ctx.font = `${fontSize}px ${FONT_EXTRABOLD}`;
+  ctx.font = `${fontSize}px ${FONT_BOLD}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#191919';
+  ctx.fillStyle = '#1c1c1c';
   const textTop = sectionPaddingY;
   lines.forEach((line, i) => {
     const y = textTop + lineHeight / 2 + i * lineHeight;
-    ctx.fillText(line, width / 2, y);
+    fillTextTracked(ctx, line, width / 2, y, tracking);
   });
 
   const totalHeight = textSectionHeight + imgHeight;
