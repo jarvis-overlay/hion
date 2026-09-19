@@ -977,15 +977,67 @@ export async function applyThumbnailEffect(imageBuffer: Buffer, effectPrompt: st
     .toBuffer();
 }
 
+// 1688 원본 사진은 보통 (1) 중국어 홍보 문구/워터마크가 얹혀있고,
+// (2) 실제 판매 상품 옆에 다른 가구/소품이 같이 스타일링된 "연출컷"인
+// 경우가 많다. remove.bg는 단순히 "전경 vs 배경"만 구분하는 매팅
+// 도구라 이 두 문제를 둘 다 처리하지 못한다 - 실측해보니 (1) 문구가
+// 크면 전경 판단 자체가 흐트러져 누끼가 아예 안 따지고, (2) 상품과
+// 소품(예: 신발장 옆 책상)이 서로 맞닿아 있으면 소품까지 통째로
+// "전경"으로 인식해서 같이 남겨버린다. remove.bg가 애초에 모르는
+// "이 사진에서 실제로 파는 상품이 뭔지"는 Gemini가 훨씬 잘 판단하므로,
+// remove.bg를 부르기 전에 Gemini에게 "판매 상품만 남기고 나머지는
+// 전부 지워서 흰 배경으로" 정리를 맡긴다 - 그 결과물(이미 거의
+// 흰 배경)을 remove.bg에 넘기면 매팅이 훨씬 쉬워지고 정확해진다.
+async function cleanProductPhotoForCutout(
+  imageBuffer: Buffer,
+  mimeType: string
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const apiKey = requireEnv('GEMINI_API_KEY');
+  const instruction =
+    '이 사진은 이커머스에서 실제로 판매하는 상품 하나를 촬영한 사진입니다. 아래 작업을 해주세요:\n\n1. 사진에서 **실제로 판매하는 메인 상품 하나만** 남기고, 함께 연출된 다른 가구·소품·장식(예: 상품 옆에 놓인 책상/테이블/화분 등)은 전부 지워주세요.\n2. 지운 자리와 나머지 배경은 전부 **순백색(#FFFFFF)**으로 채워주세요.\n3. **어떤 문자·숫자·기호도 남기지 마세요** - 한국어든 중국어든 영어든 로고든 워터마크든 전부 지워주세요.\n4. 남기는 상품 자체의 실제 형태·색상·디자인·비율은 절대 바꾸지 마세요.\n\n결과물은 "상품 하나 + 순백색 배경"이어야 합니다.';
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [{ text: instruction }, { inlineData: { mimeType, data: imageBuffer.toString('base64') } }],
+          },
+        ],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      }),
+    }
+  );
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json?.error?.message || `Gemini 이미지 생성 오류 (HTTP ${res.status})`);
+  }
+  const imagePart = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
+  if (!imagePart) {
+    // 정리 단계는 실패해도 원본으로 계속 진행할 수 있게 폴백한다 -
+    // 누끼 자체가 아예 안 되는 것보다는 문구가 남더라도 진행하는 게 낫다.
+    return { buffer: imageBuffer, mimeType };
+  }
+  return {
+    buffer: Buffer.from(imagePart.inlineData.data, 'base64'),
+    mimeType: imagePart.inlineData.mimeType || 'image/png',
+  };
+}
+
 export interface GenerateThumbnailInput {
   productImage: { buffer: Buffer; mimeType: string };
   position: ThumbnailPosition;
   effectPrompt?: string;
 }
 
-// 누끼 -> 흰 배경 1000x1000 배치 -> (선택) 효과 추가, 순서로 처리한다.
+// 문구/워터마크 정리 -> 누끼 -> 흰 배경 1000x1000 배치 -> (선택) 효과
+// 추가, 순서로 처리한다.
 export async function generateThumbnailImage(input: GenerateThumbnailInput): Promise<Buffer> {
-  const cutout = await removeImageBackground(input.productImage.buffer, input.productImage.mimeType);
+  const cleaned = await cleanProductPhotoForCutout(input.productImage.buffer, input.productImage.mimeType);
+  const cutout = await removeImageBackground(cleaned.buffer, cleaned.mimeType);
   const base = await composeThumbnailImage(cutout, input.position);
   if (input.effectPrompt?.trim()) {
     return applyThumbnailEffect(base, input.effectPrompt.trim());
