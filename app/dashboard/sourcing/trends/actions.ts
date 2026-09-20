@@ -374,23 +374,28 @@ export async function runCategoryRecommendation(
   const round1 = await runOneRound(season, excludeCategories, strategy, stageStart);
   if ('error' in round1) return round1;
 
-  // 후보 8개 중 특정 전략(예: 골든타임)에 맞는 게 하나도 없는 경우가
-  // 실측으로 확인됨(후보 수를 10~12개에서 8개로 줄인 부작용) - 사용자가
-  // "다른 카테고리 더 보기"를 다시 누르게 만드는 대신, 시간이 남아있으면
-  // 서버에서 한 번 더 브레인스토밍해서 보강한다.
+  // 후보 8개 중 특정 전략(예: 골든타임)에 맞는 게 1개뿐이거나 아예
+  // 없는 경우가 실측으로 확인됨(후보 수를 10~12개에서 8개로 줄인
+  // 부작용 - "골든타임"처럼 원래 희소한 조합은 8개 표본으론 1개 나올까
+  // 말까임). 비교할 만한 개수가 모일 때까지, 시간이 남아있는 한
+  // 서버에서 자동으로 몇 번 더 브레인스토밍해서 누적한다 - 사용자가
+  // "다른 카테고리 더 보기"를 수동으로 여러 번 누를 필요 없게 함.
+  const MIN_RESULTS_FOR_STRATEGY = 3;
+  const MAX_ROUNDS = 3;
   let allConsidered = round1.consideredCategories;
   let categories = round1.categories;
-  if (
+  let roundsRun = 1;
+  while (
     strategy !== 'all' &&
-    categories.length === 0 &&
-    allConsidered.length > 0 &&
+    categories.length < MIN_RESULTS_FOR_STRATEGY &&
+    roundsRun < MAX_ROUNDS &&
     Date.now() - stageStart < CATEGORY_STAGE_BUDGET_MS - CATEGORY_RETRY_WORST_CASE_MS
   ) {
-    const round2 = await runOneRound(season, [...excludeCategories, ...allConsidered], strategy, stageStart);
-    if (!('error' in round2)) {
-      categories = round2.categories;
-      allConsidered = [...allConsidered, ...round2.consideredCategories];
-    }
+    const nextRound = await runOneRound(season, [...excludeCategories, ...allConsidered], strategy, stageStart);
+    roundsRun++;
+    if ('error' in nextRound) break; // 실패하면 지금까지 모은 것만이라도 보여준다
+    allConsidered = [...allConsidered, ...nextRound.consideredCategories];
+    categories = [...categories, ...nextRound.categories];
   }
 
   if (categories.length === 0) {
