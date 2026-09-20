@@ -63,7 +63,15 @@ export default function AiRecommendation() {
       if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
       else if ('error' in res) setError(res.error);
       else {
-        setCategories((prev) => [...(prev || []), ...res.categories]);
+        // 서버에서도 걸러주지만(코드 레벨), 혹시 모를 중복을 화면에서도
+        // 한 번 더 막는다 - 같은 카테고리명이 서로 다른 실시간 쿠팡
+        // 스크래핑 결과(=다른 badges)와 함께 두 번 쌓이면 골든타임/
+        // 레드오션처럼 모순된 전략에 동시에 나타나 보이는 버그가 있었음.
+        setCategories((prev) => {
+          const existing = new Set((prev || []).map((c) => c.category.trim().toLowerCase()));
+          const fresh = res.categories.filter((c) => !existing.has(c.category.trim().toLowerCase()));
+          return [...(prev || []), ...fresh];
+        });
         setSeenCategories((prev) => [...prev, ...res.consideredCategories]);
         setHasSearchedCategories(true);
       }
@@ -169,6 +177,13 @@ export default function AiRecommendation() {
           ? `${selectedStrategyOption.icon} 다른 카테고리 더 보기`
           : `${selectedStrategyOption.icon} 카테고리 추천받기`}
       </button>
+
+      {loadingCategories && (
+        <p className="text-sm text-inkSoft -mt-3 mb-5">
+          쿠팡 실제 판매 데이터를 카테고리 10여 개에 대해 실시간으로 조회하는 중이에요. 1분~1분
+          30초 정도 걸릴 수 있어요...
+        </p>
+      )}
 
       {error && (
         <p className="text-sm text-warn bg-warnBg rounded-md px-4 py-3 mb-4">{error}</p>

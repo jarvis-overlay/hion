@@ -155,15 +155,24 @@ async function fetchNaverTrendSummary(): Promise<string | null> {
     chunks.push(SHOPPING_CATEGORIES.slice(i, i + 3));
   }
 
+  // 예전엔 청크(3개씩)를 순차로 하나씩 await했는데, 네이버 데이터랩
+  // API 자체엔 그렇게 조심해야 할 요청량 제한이 없어서(Bright Data와
+  // 달리 실측으로 확인된 스로틀 문제가 없음) 그냥 관성적으로 순차
+  // 처리였던 것 - 병렬로 바꿔서 전체 대기 시간을 청크 개수(4개)만큼
+  // 줄인다.
   const summaries: string[] = [];
   try {
-    for (const chunk of chunks) {
-      const res = await fetchShoppingCategoryTrend({
-        startDate,
-        endDate,
-        timeUnit,
-        categories: chunk.map((c) => ({ name: c.name, param: [c.code] })),
-      });
+    const results = await Promise.all(
+      chunks.map((chunk) =>
+        fetchShoppingCategoryTrend({
+          startDate,
+          endDate,
+          timeUnit,
+          categories: chunk.map((c) => ({ name: c.name, param: [c.code] })),
+        })
+      )
+    );
+    for (const res of results) {
       for (const r of res.results) {
         const data = r.data;
         if (data.length < 2) continue;
@@ -234,6 +243,15 @@ export async function runCategoryRecommendation(
   } catch (e: any) {
     return { error: e?.message || String(e) };
   }
+
+  // "이미 봤던 카테고리는 다시 추천하지 마라"는 프롬프트 지시일 뿐이라
+  // AI가 가끔 어겨서, 같은 카테고리가 다른 실시간 쿠팡 스크래핑 결과와
+  // 묶여 골든타임/레드오션처럼 서로 모순되는 전략에 동시에 나타나는
+  // 버그가 실측으로 확인됨 - 여기서 코드로 한 번 더 걸러서 확실히
+  // 막는다 (공백/대소문자 차이는 무시하고 비교).
+  const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, '');
+  const excludeSet = new Set(excludeCategories.map(normalize));
+  candidates = candidates.filter((c) => !excludeSet.has(normalize(c.category)));
 
   if (candidates.length === 0) {
     return { categories: [], consideredCategories: [] };
