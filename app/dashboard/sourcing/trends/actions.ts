@@ -223,15 +223,17 @@ export interface NaverKeywordTrend {
 // 검증하도록 함. 우리 스토어의 과거 판매 데이터는 일부러 근거로 안 쓴다
 // - 이미 팔던 걸 근거 삼으면 새로운 소싱 기회를 찾는다는 목적과 순환논리가
 // 되기 때문.
-export async function runCategoryRecommendation(
+// 브레인스토밍 -> 쿠팡 실측 -> 확정 -> (특정 전략이면) 전략 필터링까지
+// 한 라운드를 처리한다. 특정 전략을 골랐을 때 이번 라운드에서 후보가
+// 전부 다른 전략으로 판정나면 결과가 0개일 수 있는데, 그건 이
+// 함수로는 정상 동작이다 - 바깥의 runCategoryRecommendation이 필요하면
+// 이 함수를 한 번 더 불러서 보강한다.
+async function runOneRound(
   season: Season,
-  excludeCategories: string[] = [],
-  strategy: StrategyKey | 'all' = 'all'
-): Promise<
-  | { categories: CategoryRecommendation[]; consideredCategories: string[] }
-  | { error: string }
-> {
-  const stageStart = Date.now();
+  excludeCategories: string[],
+  strategy: StrategyKey | 'all',
+  stageStart: number
+): Promise<{ categories: CategoryRecommendation[]; consideredCategories: string[] } | { error: string }> {
   const naverSummary = await fetchNaverTrendSummary();
   const contextSummary = naverSummary
     ? `[네이버 쇼핑인사이트 카테고리별 트렌드]\n${naverSummary}`
@@ -283,8 +285,6 @@ export async function runCategoryRecommendation(
   // 재시도해서 검증된 카테고리 수를 보강한다. 시간이 부족하면 건너뛰어서
   // 서버리스 타임아웃 위험을 피한다. (실측: 재시도 없이도 전체 171초
   // 수준이라 300초 한도 안에서 재시도 여유가 있음)
-  const CATEGORY_STAGE_BUDGET_MS = 270000;
-  const CATEGORY_RETRY_WORST_CASE_MS = 90000;
   const failedCandidates = candidates.filter(
     (c) => (coupangByCategory.get(c.category) || []).length === 0
   );
@@ -344,11 +344,57 @@ export async function runCategoryRecommendation(
 
   // 사용자가 처음부터 특정 전략(골든타임/니치/레드오션)을 선택했으면,
   // "우연히 나온 카테고리 중에 골라라"가 아니라 실데이터로 검증된
-  // 카테고리 중 그 전략에 해당하는 것만 걸러서 보여준다. 하나도 없으면
-  // (AI 추측이 아니라) 정직하게 빈 배열을 반환 - 클라이언트에서 "이번엔
-  // 없었어요, 더 찾아볼까요?" 안내로 이어짐.
+  // 카테고리 중 그 전략에 해당하는 것만 걸러서 보여준다.
   if (strategy !== 'all') {
     categories = categories.filter((c) => c.badges && strategyBucket(c.badges).key === strategy);
+  }
+
+  return { categories, consideredCategories };
+}
+
+const CATEGORY_STAGE_BUDGET_MS = 270000;
+const CATEGORY_RETRY_WORST_CASE_MS = 90000;
+
+// 1단계: 시즌 선택 + 네이버 트렌드(되면)로 카테고리 후보를 먼저
+// 브레인스토밍한 다음, 후보마다 그 이름으로 실제 쿠팡 검색을 해서
+// 시장규모/경쟁강도를 실측하고, 그 실데이터로 최종 카테고리를 확정한다.
+// "주 판매 채널이 쿠팡"이라는 요청에 맞춰 카테고리 단계부터 실데이터로
+// 검증하도록 함. 우리 스토어의 과거 판매 데이터는 일부러 근거로 안 쓴다
+// - 이미 팔던 걸 근거 삼으면 새로운 소싱 기회를 찾는다는 목적과 순환논리가
+// 되기 때문.
+export async function runCategoryRecommendation(
+  season: Season,
+  excludeCategories: string[] = [],
+  strategy: StrategyKey | 'all' = 'all'
+): Promise<
+  | { categories: CategoryRecommendation[]; consideredCategories: string[] }
+  | { error: string }
+> {
+  const stageStart = Date.now();
+  const round1 = await runOneRound(season, excludeCategories, strategy, stageStart);
+  if ('error' in round1) return round1;
+
+  // 후보 8개 중 특정 전략(예: 골든타임)에 맞는 게 하나도 없는 경우가
+  // 실측으로 확인됨(후보 수를 10~12개에서 8개로 줄인 부작용) - 사용자가
+  // "다른 카테고리 더 보기"를 다시 누르게 만드는 대신, 시간이 남아있으면
+  // 서버에서 한 번 더 브레인스토밍해서 보강한다.
+  let allConsidered = round1.consideredCategories;
+  let categories = round1.categories;
+  if (
+    strategy !== 'all' &&
+    categories.length === 0 &&
+    allConsidered.length > 0 &&
+    Date.now() - stageStart < CATEGORY_STAGE_BUDGET_MS - CATEGORY_RETRY_WORST_CASE_MS
+  ) {
+    const round2 = await runOneRound(season, [...excludeCategories, ...allConsidered], strategy, stageStart);
+    if (!('error' in round2)) {
+      categories = round2.categories;
+      allConsidered = [...allConsidered, ...round2.consideredCategories];
+    }
+  }
+
+  if (categories.length === 0) {
+    return { categories: [], consideredCategories: allConsidered };
   }
 
   // 쿠팡뿐 아니라 네이버에서도 판매하므로, 최종 확정된 카테고리에는
@@ -364,7 +410,7 @@ export async function runCategoryRecommendation(
   );
   categories = categories.map((c, i) => ({ ...c, naverTrend: naverTrends[i] }));
 
-  return { categories, consideredCategories };
+  return { categories, consideredCategories: allConsidered };
 }
 
 export interface ProductRecommendation {
