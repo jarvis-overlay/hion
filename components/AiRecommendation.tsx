@@ -180,8 +180,8 @@ export default function AiRecommendation() {
 
       {loadingCategories && (
         <p className="text-sm text-inkSoft -mt-3 mb-5">
-          쿠팡 실제 판매 데이터를 카테고리 10여 개에 대해 실시간으로 조회하는 중이에요. 1분~1분
-          30초 정도 걸릴 수 있어요...
+          쿠팡 실제 판매 데이터를 카테고리 8개에 대해 실시간으로 조회하는 중이에요. 1분 내외로
+          걸릴 수 있어요...
         </p>
       )}
 
