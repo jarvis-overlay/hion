@@ -6,7 +6,9 @@
 // - 비즈 앱 검수를 안 받은 앱이라 카카오 개발자센터에 "팀원"으로 등록된
 //   계정만 로그인/메시지 전송이 가능하다.
 
-const APP_URL = 'https://hion.vercel.app';
+// 도메인이 바뀌면(Vercel -> 맥북 자체 호스팅 등) 코드 수정 없이 환경변수만
+// 바꾸면 되도록 뺐다. 카카오 개발자센터의 Redirect URI 등록도 같이 바꿔야 함.
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://hion.vercel.app';
 export const KAKAO_REDIRECT_URI = `${APP_URL}/api/kakao/callback`;
 
 function requireEnv(name: string): string {

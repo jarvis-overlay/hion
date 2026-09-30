@@ -26,14 +26,14 @@ export default async function DashboardHome() {
   const [
     { count: productCount },
     { data: stockRows },
-    { data: sourcingPosts },
+    { data: sourcingItems },
     { data: channels },
     { count: marginCount },
     { data: recentMovements },
   ] = await Promise.all([
     supabase.from('products').select('id', { count: 'exact', head: true }),
     supabase.from('warehouse_stock').select('warehouse, quantity'),
-    supabase.from('sourcing_posts').select('status'),
+    supabase.from('sourcing_items').select('status'),
     supabase.from('channel_credentials').select('channel, connected'),
     supabase.from('margin_entries').select('id', { count: 'exact', head: true }),
     supabase
@@ -54,7 +54,7 @@ export default async function DashboardHome() {
     string,
     number
   >;
-  for (const p of sourcingPosts || []) {
+  for (const p of sourcingItems || []) {
     statusCount[p.status] = (statusCount[p.status] || 0) + 1;
   }
 

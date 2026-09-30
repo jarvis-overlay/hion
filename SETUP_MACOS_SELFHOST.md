@@ -13,16 +13,21 @@
 ## 0. 준비물
 - 도메인 하나 (어디서 사도 상관없음 - Namecheap, 가비아, Cloudflare 등)
 - Cloudflare 계정 (무료)
-- Vercel 대시보드(Settings → Environment Variables)에서 값을 복사해와야
-  하는 환경변수들 (.env.local.example엔 이름만 있고 실제 값은 Vercel에만
-  있는 것들):
+- Vercel 대시보드(Settings → Environment Variables)에서 값을 그대로 복사해와야
+  하는 환경변수 전체 목록은 `.env.local.example` 참고. 최소한 아래 값들은
+  실제 서비스 키라 Vercel에만 있고 로컬 `.env.local.example`엔 이름만 있음:
   - `ANTHROPIC_API_KEY`
+  - `GEMINI_API_KEY`
+  - `REMOVE_BG_API_KEY`
   - `BRIGHTDATA_API_KEY`
   - `BRIGHTDATA_UNLOCKER_ZONE`
   - `SUPABASE_SERVICE_ROLE_KEY` (Supabase 대시보드 → Project Settings →
     API → service_role 키에서도 직접 확인 가능)
   - `COUPANG_SYNC_SECRET` (외부 스케줄러 인증용 - 이미 cron-job.org 등을
     쓰고 있다면 거기 등록된 것과 반드시 같은 값이어야 함)
+  - `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET`
+  - `KAKAO_REST_API_KEY` / `KAKAO_CLIENT_SECRET`
+  - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`
 
 ## 1. 도메인을 Cloudflare에 연결
 1. 어디서든 도메인을 하나 구입한다 (예: `mystore.com`)
@@ -103,6 +108,13 @@ HTTPS 인증서는 Cloudflare가 자동으로 처리해준다.
   당장 지우지 말고 병행 - 문제 생기면 롤백 가능하게)
 - **Supabase 대시보드** → Authentication → URL Configuration →
   Site URL / Redirect URLs에 같은 주소 추가
+- **카카오 알림("나에게 보내기") 연동**: `.env.local`의 `NEXT_PUBLIC_APP_URL`을
+  `https://hion.mystore.com`으로 설정 (카카오 로그인 콜백 주소 + 메시지 링크에
+  쓰임 - 안 채우면 기존 vercel.app 주소로 동작해서 콜백이 실패함).
+  1. **카카오 개발자센터** (developers.kakao.com) → 해당 앱 → 카카오 로그인
+     → Redirect URI에 `https://hion.mystore.com/api/kakao/callback` 추가
+  2. 기존에 연동해둔 알림 수신자가 있다면, `/dashboard/notifications`에서
+     재연동(카카오 로그인 다시 진행) 필요할 수 있음
 
 ## 6. 쿠팡 동기화 크론 - 사실 손댈 게 없음
 확인해보니 이 앱은 Vercel Cron을 아예 쓴 적이 없다(`vercel.json`이
