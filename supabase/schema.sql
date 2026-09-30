@@ -137,7 +137,9 @@ create table if not exists sourcing_items (
   stage text not null default 'candidate',    -- candidate | confirmed
   coupon numeric,
   fee_rate numeric not null default 10.8,
-  shipping numeric,
+  shipping numeric,          -- 쿠팡 국내배송비 (정산 내역 기준 직접입력)
+  intl_shipping numeric,      -- 해외배송비 (중국->한국, CBM 계산기로 채움) - shipping과 별개
+  intl_shipping_calc jsonb,   -- CBM 계산기 원본 입력값 (재수정 시 복원용)
   ad_cost numeric,
   etc_cost numeric,
   output_vat numeric,

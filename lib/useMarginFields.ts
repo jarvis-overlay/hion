@@ -22,6 +22,7 @@ export interface MarginFieldsInit {
   feeRatePct?: number | null;
   adRatePct?: number | null;
   shipping?: number | null;
+  intlShipping?: number | null;
   etcCost?: number | null;
 }
 
@@ -42,6 +43,7 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
     init.adRatePct != null ? String(init.adRatePct) : '10'
   );
   const [shipping, setShipping] = useState(toStr(init.shipping));
+  const [intlShipping, setIntlShipping] = useState(toStr(init.intlShipping));
   const [etcCost, setEtcCost] = useState(toStr(init.etcCost));
 
   const priceNum = parseFloat(price) || 0;
@@ -66,11 +68,12 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
         importVat: importVat === '' ? null : parseFloat(importVat) || 0,
         coupangFee: price === '' ? null : coupangFee,
         shipping: shipping === '' ? null : parseFloat(shipping) || 0,
+        intlShipping: intlShipping === '' ? null : parseFloat(intlShipping) || 0,
         adCost: price === '' ? null : adCost,
         etcCost: etcCost === '' ? null : parseFloat(etcCost) || 0,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [price, couponMode, couponValue, cost, importVat, shipping, etcCost, feeRatePct, adRatePct]
+    [price, couponMode, couponValue, cost, importVat, shipping, intlShipping, etcCost, feeRatePct, adRatePct]
   );
 
   // 최종 마진 옆에 "광고비를 뺀 순수 마진"도 참고용으로 같이 보여준다
@@ -86,6 +89,7 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
     setFeeRatePct('8.6');
     setAdRatePct('10');
     setShipping('');
+    setIntlShipping('');
     setEtcCost('');
   }
 
@@ -107,6 +111,8 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
     setAdRatePct,
     shipping,
     setShipping,
+    intlShipping,
+    setIntlShipping,
     etcCost,
     setEtcCost,
     outputVat,

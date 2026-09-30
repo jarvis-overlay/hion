@@ -10,6 +10,19 @@ function numOrNull(fd: FormData, key: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// ShippingCostCalculator가 hidden input에 JSON 문자열로 담아 보낸다 -
+// jsonb 컬럼에는 파싱한 객체로 넣어야 나중에 읽을 때(Supabase가 자동
+// 파싱) 다시 그대로 쓸 수 있다.
+function jsonOrNull(fd: FormData, key: string): unknown | null {
+  const v = fd.get(key);
+  if (v == null || v === '') return null;
+  try {
+    return JSON.parse(String(v));
+  } catch {
+    return null;
+  }
+}
+
 // 비교 상품군 링크 하나 - 쿠팡/네이버에서 관찰한 가격대·시장규모를 각각
 // 여러 건 남길 수 있다(같은 플랫폼 안에서도 가격대별 시장규모가 다르게
 // 형성돼 있을 수 있어서).
@@ -90,6 +103,8 @@ export async function addSourcingItem(
       import_vat: numOrNull(formData, 'import_vat'),
       coupang_fee: numOrNull(formData, 'coupang_fee'),
       shipping: numOrNull(formData, 'shipping'),
+      intl_shipping: numOrNull(formData, 'intl_shipping'),
+      intl_shipping_calc: jsonOrNull(formData, 'intl_shipping_calc'),
       ad_cost: numOrNull(formData, 'ad_cost'),
       etc_cost: numOrNull(formData, 'etc_cost'),
       cost_fx_currency: String(formData.get('cost_fx_currency') || '').trim() || null,
@@ -194,6 +209,8 @@ export async function updateSourcingItem(
       import_vat: numOrNull(formData, 'import_vat'),
       coupang_fee: numOrNull(formData, 'coupang_fee'),
       shipping: numOrNull(formData, 'shipping'),
+      intl_shipping: numOrNull(formData, 'intl_shipping'),
+      intl_shipping_calc: jsonOrNull(formData, 'intl_shipping_calc'),
       ad_cost: numOrNull(formData, 'ad_cost'),
       etc_cost: numOrNull(formData, 'etc_cost'),
       cost_fx_currency: String(formData.get('cost_fx_currency') || '').trim() || null,

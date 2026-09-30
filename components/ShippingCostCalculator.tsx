@@ -22,6 +22,19 @@ interface ExtraFeeRow {
   basis: FeeBasis;
 }
 
+// 계산기에 입력한 원본 값들 (박스크기/CBM/수량/부가서비스 목록) - 계산
+// 결과(개당 금액)와 별개로 이것도 저장해뒀다가, 폼을 다시 열었을 때 매번
+// 처음부터 다시 입력하지 않고 그대로 복원되게 하기 위한 스냅샷.
+export interface ShippingCalcState {
+  mode: CbmMode;
+  cbmDirect: string;
+  length: string;
+  width: string;
+  height: string;
+  quantity: string;
+  extraFees: { label: string; amount: string; basis: FeeBasis }[];
+}
+
 // LCL(해상 혼적) 배송비를 CBM 기준으로 계산해서, 그 결과를 "배송비" 입력칸에
 // 바로 채워넣을 수 있게 해주는 계산기. 마진계산기/소싱리스트/상품관리 카드
 // 세 군데의 "배송비" 입력칸에 똑같이 붙여서 쓴다 (onApply로 결과값만 전달 -
@@ -34,8 +47,10 @@ interface ExtraFeeRow {
 // 리스트 방식으로 만들었다.
 export default function ShippingCostCalculator({
   onApply,
+  initial,
 }: {
   onApply: (totalKrw: number) => void;
+  initial?: ShippingCalcState | null;
 }) {
   const presetListId = useId();
   const rowIdCounter = useRef(0);
@@ -44,18 +59,31 @@ export default function ShippingCostCalculator({
     return `fee-${rowIdCounter.current}`;
   }
 
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<CbmMode>('dims');
+  const hasInitial =
+    !!initial &&
+    (!!initial.cbmDirect ||
+      !!initial.length ||
+      !!initial.width ||
+      !!initial.height ||
+      initial.extraFees.some((f) => f.amount));
 
-  const [cbmDirect, setCbmDirect] = useState('');
-  const [length, setLength] = useState('');
-  const [width, setWidth] = useState('');
-  const [height, setHeight] = useState('');
-  const [quantity, setQuantity] = useState('1');
+  const [open, setOpen] = useState(hasInitial);
+  const [mode, setMode] = useState<CbmMode>(initial?.mode || 'dims');
 
-  const [extraFees, setExtraFees] = useState<ExtraFeeRow[]>([
-    { id: nextRowId(), label: '', amount: '', basis: 'total' },
-  ]);
+  const [cbmDirect, setCbmDirect] = useState(initial?.cbmDirect || '');
+  const [length, setLength] = useState(initial?.length || '');
+  const [width, setWidth] = useState(initial?.width || '');
+  const [height, setHeight] = useState(initial?.height || '');
+  const [quantity, setQuantity] = useState(initial?.quantity || '1');
+
+  // 지연 초기화(함수형 초기값)로 넣어야 nextRowId()가 최초 렌더에서 딱
+  // 한 번만 호출된다 - 배열 리터럴을 그대로 넘기면 매 렌더마다 호출되어
+  // 카운터가 불필요하게 계속 증가한다.
+  const [extraFees, setExtraFees] = useState<ExtraFeeRow[]>(() =>
+    initial && initial.extraFees.length > 0
+      ? initial.extraFees.map((f) => ({ id: nextRowId(), ...f }))
+      : [{ id: nextRowId(), label: '', amount: '', basis: 'total' }]
+  );
 
   function addFeeRow() {
     setExtraFees((rows) => [...rows, { id: nextRowId(), label: '', amount: '', basis: 'total' }]);
@@ -109,20 +137,47 @@ export default function ShippingCostCalculator({
 
   const inputCls = 'border border-paperLine bg-white px-2 py-1.5 text-xs font-mono w-full';
 
+  // 계산기 자체가 접혀있어도(open=false) 이 hidden input은 항상 폼에 남아있어야
+  // 다시 열지 않고 그냥 저장해도 입력값이 안 사라진다.
+  const hasContent = hasInitial || cbmDirect || length || width || height || extraFees.some((f) => f.amount);
+  const calcStateHiddenInput = (
+    <input
+      type="hidden"
+      name="intl_shipping_calc"
+      value={
+        hasContent
+          ? JSON.stringify({
+              mode,
+              cbmDirect,
+              length,
+              width,
+              height,
+              quantity,
+              extraFees: extraFees.map(({ label, amount, basis }) => ({ label, amount, basis })),
+            } as ShippingCalcState)
+          : ''
+      }
+    />
+  );
+
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="text-[11px] text-accent underline text-left"
-      >
-        📦 CBM 해외 배송비 계산기 열기
-      </button>
+      <div>
+        {calcStateHiddenInput}
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-[11px] text-accent underline text-left"
+        >
+          📦 CBM 해외 배송비 계산기 열기
+        </button>
+      </div>
     );
   }
 
   return (
     <div className="border border-paperLine bg-[#FAFAFB] p-3 grid gap-2.5 text-xs">
+      {calcStateHiddenInput}
       <div className="flex items-center justify-between">
         <span className="font-semibold text-inkSoft">CBM 해외 배송비 계산기 (LCL해운)</span>
         <button type="button" onClick={() => setOpen(false)} className="text-inkSoft hover:text-ink">
@@ -272,7 +327,7 @@ export default function ShippingCostCalculator({
         disabled={perUnit <= 0}
         className="btn-primary py-1.5 text-xs disabled:opacity-40"
       >
-        배송비 칸에 개당 금액 채우기
+        해외배송비 칸에 개당 금액 채우기
       </button>
     </div>
   );

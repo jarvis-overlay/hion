@@ -8,7 +8,8 @@ export interface MarginInputs {
   outputVat: number | null;
   importVat: number | null;
   coupangFee: number | null;
-  shipping: number | null;
+  shipping: number | null; // 쿠팡 국내배송비 (정산 내역 기준)
+  intlShipping?: number | null; // 해외배송비 (중국->한국, CBM 계산기로 채움) - shipping과 별개 항목. 아직 이 개념이 없는 호출부(옵션 등)도 있어서 선택 필드로 둠
   adCost: number | null; // 광고비 (선택)
   etcCost: number | null;
 }
@@ -28,9 +29,10 @@ export function computeMargin(inputs: MarginInputs): MarginResult {
   const iv = inputs.importVat ?? 0;
   const fee = inputs.coupangFee ?? 0;
   const s = inputs.shipping ?? 0;
+  const is = inputs.intlShipping ?? 0;
   const a = inputs.adCost ?? 0;
   const e = inputs.etcCost ?? 0;
-  const profit = p - ov - c + iv - fee - s - a - e;
+  const profit = p - ov - c + iv - fee - s - is - a - e;
   const marginPct = lp > 0 ? (profit / p) * 100 : null;
   return { actualPrice: p, profit, marginPct };
 }

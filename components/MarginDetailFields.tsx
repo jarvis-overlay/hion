@@ -1,19 +1,33 @@
 'use client';
 
 import type { useMarginFields } from '@/lib/useMarginFields';
-import ShippingCostCalculator from '@/components/ShippingCostCalculator';
+import ShippingCostCalculator, { type ShippingCalcState } from '@/components/ShippingCostCalculator';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
 type Fields = ReturnType<typeof useMarginFields>;
 
 // 등록/수정/옵션추가 폼 세 군데서 똑같이 쓰는 "마진 상세 항목" 블록.
-// 순서: 매입부가세 - 수수료(%) - 배송비 - 광고비(%) - 쿠폰 할인(정률/정액) -
-// 기타비용. 매출부가세는 상단(판매가 옆)에서 따로 보여주므로 여기 없음.
-// 쿠팡수수료/광고비는 비율(기본 8.6%/10%, 조절 가능) 입력으로 자동
-// 계산해서 hidden input으로 제출하고, 쿠폰 할인은 정률/정액을 골라서
-// 입력하면 그 결과 금액을 hidden input으로 제출한다.
-export function MarginDetailFields({ fields, compact = false }: { fields: Fields; compact?: boolean }) {
+// 순서: 매입부가세 - 수수료(%) - 배송비(쿠팡 국내) - 광고비(%) - 쿠폰
+// 할인(정률/정액) - 기타비용 - 해외배송비(CBM). 매출부가세는 상단(판매가
+// 옆)에서 따로 보여주므로 여기 없음. 쿠팡수수료/광고비는 비율(기본
+// 8.6%/10%, 조절 가능) 입력으로 자동 계산해서 hidden input으로 제출하고,
+// 쿠폰 할인은 정률/정액을 골라서 입력하면 그 결과 금액을 hidden input으로
+// 제출한다.
+//
+// 배송비(쿠팡이 정산에서 떼는 국내 배송비)와 해외배송비(중국->한국 CBM
+// 운임)는 완전히 다른 비용이라 별도 항목으로 뺐다 - 예전엔 CBM 계산기
+// 결과가 배송비 칸을 덮어써서 원래 있던 쿠팡 배송비 값이 사라지는 문제가
+// 있었다.
+export function MarginDetailFields({
+  fields,
+  compact = false,
+  intlShippingCalcInitial,
+}: {
+  fields: Fields;
+  compact?: boolean;
+  intlShippingCalcInitial?: ShippingCalcState | null;
+}) {
   const inputCls = compact
     ? 'border border-paperLine bg-white px-2 py-1.5 text-xs font-mono'
     : 'border border-paperLine bg-white px-3 py-2 text-sm font-mono';
@@ -97,8 +111,20 @@ export function MarginDetailFields({ fields, compact = false }: { fields: Fields
           placeholder="기타 비용"
           className={inputCls}
         />
+        <input
+          name="intl_shipping"
+          value={fields.intlShipping}
+          onChange={(e) => fields.setIntlShipping(e.target.value)}
+          type="number"
+          step="0.01"
+          placeholder="해외배송비 (중국→한국)"
+          className={inputCls}
+        />
       </div>
-      <ShippingCostCalculator onApply={(v) => fields.setShipping(String(Math.round(v)))} />
+      <ShippingCostCalculator
+        onApply={(v) => fields.setIntlShipping(String(Math.round(v)))}
+        initial={intlShippingCalcInitial}
+      />
       {hasPrice && (
         <p className={suffixCls}>
           자동 계산 - 쿠팡수수료 {fmt(fields.coupangFee)} (판매가의 {fields.feeRatePct || 0}%) · 광고비{' '}

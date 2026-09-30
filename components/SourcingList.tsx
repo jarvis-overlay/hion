@@ -20,6 +20,7 @@ import { computeMargin as computeMarginShared } from '@/lib/marginCalc';
 import { useMarginFields } from '@/lib/useMarginFields';
 import FxCalculator from '@/components/FxCalculator';
 import { MarginDetailFields } from '@/components/MarginDetailFields';
+import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
 
 const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
@@ -61,6 +62,7 @@ function computeMargin(it: any) {
     importVat: it.import_vat ?? null,
     coupangFee: it.coupang_fee ?? null,
     shipping: it.shipping ?? null,
+    intlShipping: it.intl_shipping ?? null,
     adCost: it.ad_cost ?? null,
     etcCost: it.etc_cost ?? null,
   });
@@ -71,6 +73,7 @@ function computeMargin(it: any) {
     outputVat: it.output_vat ?? 0,
     importVat: it.import_vat ?? 0,
     s: it.shipping ?? 0,
+    is: it.intl_shipping ?? 0,
     a: it.ad_cost ?? 0,
     e: it.etc_cost ?? 0,
     profit: result.profit,
@@ -179,8 +182,12 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
         ? Number(((item.ad_cost / (item.price - (item.coupon || 0))) * 100).toFixed(2))
         : null,
     shipping: item.shipping,
+    intlShipping: item.intl_shipping,
     etcCost: item.etc_cost,
   });
+
+  // jsonb 컬럼이라 Supabase 클라이언트가 이미 객체로 파싱해서 준다.
+  const intlShippingCalcInitial: ShippingCalcState | null = item.intl_shipping_calc || null;
 
   return (
     <form
@@ -254,7 +261,7 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
         }}
       />
 
-      <MarginDetailFields fields={f} />
+      <MarginDetailFields fields={f} intlShippingCalcInitial={intlShippingCalcInitial} />
 
       {f.price && (
         <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1">
@@ -1027,8 +1034,8 @@ export default function SourcingList({ items }: { items: any[] }) {
                       <dd className="font-mono">+{fmt(m.importVat)}</dd>
                     </div>
                     <div className="flex justify-between gap-2">
-                      <dt className="text-inkSoft">배송·광고·기타</dt>
-                      <dd className="font-mono">-{fmt(m.s + m.a + m.e)}</dd>
+                      <dt className="text-inkSoft">배송(국내+해외)·광고·기타</dt>
+                      <dd className="font-mono">-{fmt(m.s + m.is + m.a + m.e)}</dd>
                     </div>
                     <div className="flex justify-between gap-2 col-span-2 sm:col-span-3 pt-1 border-t border-paperLine font-semibold">
                       <dt>순이익</dt>
