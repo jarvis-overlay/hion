@@ -27,11 +27,30 @@ export function cbmFromDimensions(
   return (lengthCm * widthCm * heightCm * quantity) / 1_000_000;
 }
 
-// 목록통관 배제/금액초과로 일반(간이)통관 진행 시 붙는 관세사 수임료
-// (사용자 제공 요금 안내 기준 고정값)
-export const CUSTOMS_BROKER_FEE = {
-  none: 0,
-  personal: 3650, // 개인
-  business: 22000, // 사업자
-} as const;
-export type CustomsBrokerFeeType = keyof typeof CUSTOMS_BROKER_FEE;
+// LCL 배송비 외에 실제 청구서에 따로 잡히는 부가서비스 항목들 - 화물마다
+// 조합이 달라서 고정폼 대신 자유 추가형 리스트로 쓴다. 여기 목록은 항목명
+// 자동완성용 프리셋일 뿐이고, amount가 있는 항목(관세사 수임료)만 첫 선택
+// 시 참고용으로 금액을 미리 채워준다 - 나머지는 매번 실비가 달라서 직접
+// 입력해야 한다.
+export interface ShippingExtraFeePreset {
+  label: string;
+  amount?: number;
+}
+
+export const SHIPPING_EXTRA_FEE_PRESETS: ShippingExtraFeePreset[] = [
+  { label: '기본검수' },
+  { label: '포장보완' },
+  { label: '원산지 표시' },
+  { label: '원산지 증명 (C/O)' },
+  { label: 'B/L' },
+  { label: 'D/O' },
+  { label: '입고완료' },
+  { label: '밀크런 택배' },
+  { label: '화물택배 (착불)' },
+  { label: '창고료' },
+  { label: '관·부가세' },
+  // 목록통관 배제/금액초과로 일반(간이)통관 진행 시 붙는 관세사 수임료
+  // (사용자 제공 요금 안내 기준 고정값)
+  { label: '관세사 수임료 (개인)', amount: 3650 },
+  { label: '관세사 수임료 (사업자)', amount: 22000 },
+];
