@@ -7,13 +7,33 @@ import type { FxRates } from '@/lib/fx';
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 const fmtRate = (n: number) => n.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
 
+export interface FxCalculatorInitial {
+  currency?: 'CNY' | 'USD' | null;
+  amount?: number | null;
+  rate?: number | null;
+}
+
 // 1688/알리바바는 위안/달러로 가격이 나오니, 현지 금액+환율을 넣으면
 // 원화로 환산해준다. 등록/수정/옵션 추가 폼 세 군데서 공용으로 씀.
-export default function FxCalculator({ onApply }: { onApply: (krw: number) => void }) {
-  const [show, setShow] = useState(false);
-  const [currency, setCurrency] = useState<'CNY' | 'USD'>('CNY');
-  const [amount, setAmount] = useState('');
-  const [rate, setRate] = useState('300');
+//
+// 계산에 쓴 현지 금액/환율 자체는 이 컴포넌트가 항상 hidden input(이름
+// cost_fx_currency/cost_fx_amount/cost_fx_rate)으로 들고 있다가 폼 제출
+// 시 같이 전송한다 - 수정 폼을 다시 열었을 때 "얼마를 얼마 환율로
+// 계산했었는지"가 사라지지 않고 그대로 보이게 하기 위함(예전엔 계산
+// 결과(원화 매입가)만 저장하고 이 값은 안 남겨서, 재수정 시 매번 처음부터
+// 다시 입력해야 했음).
+export default function FxCalculator({
+  onApply,
+  initial,
+}: {
+  onApply: (krw: number) => void;
+  initial?: FxCalculatorInitial;
+}) {
+  const hasInitial = initial?.amount != null;
+  const [show, setShow] = useState(hasInitial);
+  const [currency, setCurrency] = useState<'CNY' | 'USD'>(initial?.currency || 'CNY');
+  const [amount, setAmount] = useState(initial?.amount != null ? String(initial.amount) : '');
+  const [rate, setRate] = useState(initial?.rate != null ? String(initial.rate) : '300');
   const [liveRates, setLiveRates] = useState<FxRates | null>(null);
   const [loadingRates, setLoadingRates] = useState(false);
   const [ratesFailed, setRatesFailed] = useState(false);
@@ -37,6 +57,9 @@ export default function FxCalculator({ onApply }: { onApply: (krw: number) => vo
 
   return (
     <div>
+      <input type="hidden" name="cost_fx_currency" value={amount ? currency : ''} />
+      <input type="hidden" name="cost_fx_amount" value={amount} />
+      <input type="hidden" name="cost_fx_rate" value={amount ? rate : ''} />
       <button
         type="button"
         onClick={() => setShow((v) => !v)}

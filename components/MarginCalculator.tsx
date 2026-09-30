@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { addMarginEntry, deleteMarginEntry } from '@/app/dashboard/margin/actions';
+import ShippingCostCalculator from '@/components/ShippingCostCalculator';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
@@ -201,6 +202,7 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
               placeholder="0"
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
             />
+            <ShippingCostCalculator onApply={(v) => setShip(String(Math.round(v)))} />
             <label className="text-xs text-inkSoft -mb-2">
               광고비 (선택, 건당 평균)
             </label>

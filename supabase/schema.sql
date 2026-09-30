@@ -129,6 +129,9 @@ create table if not exists sourcing_items (
   content text,
   price numeric,        -- 참고 판매가 (마진 계산용)
   cost numeric,          -- 매입 원가 (마진 계산용)
+  cost_fx_currency text,  -- "환율로 매입 원가 계산하기"에 입력한 통화 (CNY|USD, 계산 안 썼으면 null)
+  cost_fx_amount numeric, -- 위 계산에 입력한 현지 금액 (재수정 시 복원용)
+  cost_fx_rate numeric,   -- 위 계산에 입력한 환율 (재수정 시 복원용)
   moq text,
   status text not null default 'checking',    -- checking | ordered | hold
   stage text not null default 'candidate',    -- candidate | confirmed

@@ -245,7 +245,14 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
         />
       </div>
 
-      <FxCalculator onApply={(krw) => f.setCost(String(Math.round(krw)))} />
+      <FxCalculator
+        onApply={(krw) => f.setCost(String(Math.round(krw)))}
+        initial={{
+          currency: item.cost_fx_currency,
+          amount: item.cost_fx_amount,
+          rate: item.cost_fx_rate,
+        }}
+      />
 
       <MarginDetailFields fields={f} />
 

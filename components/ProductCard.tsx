@@ -12,6 +12,7 @@ import {
   updateReturnGrade,
   splitVendorItemToNewProduct,
 } from '@/app/dashboard/inventory/products/actions';
+import ShippingCostCalculator from '@/components/ShippingCostCalculator';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR');
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString('ko-KR');
@@ -458,6 +459,9 @@ export default function ProductCard({
               >
                 저장
               </button>
+            </div>
+            <div className="mt-2">
+              <ShippingCostCalculator onApply={(v) => setShipping(String(Math.round(v)))} />
             </div>
           </div>
         )}

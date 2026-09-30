@@ -92,6 +92,9 @@ export async function addSourcingItem(
       shipping: numOrNull(formData, 'shipping'),
       ad_cost: numOrNull(formData, 'ad_cost'),
       etc_cost: numOrNull(formData, 'etc_cost'),
+      cost_fx_currency: String(formData.get('cost_fx_currency') || '').trim() || null,
+      cost_fx_amount: numOrNull(formData, 'cost_fx_amount'),
+      cost_fx_rate: numOrNull(formData, 'cost_fx_rate'),
       author_email: user.email,
     })
     .select('id')
@@ -193,6 +196,9 @@ export async function updateSourcingItem(
       shipping: numOrNull(formData, 'shipping'),
       ad_cost: numOrNull(formData, 'ad_cost'),
       etc_cost: numOrNull(formData, 'etc_cost'),
+      cost_fx_currency: String(formData.get('cost_fx_currency') || '').trim() || null,
+      cost_fx_amount: numOrNull(formData, 'cost_fx_amount'),
+      cost_fx_rate: numOrNull(formData, 'cost_fx_rate'),
     })
     .eq('id', id);
 

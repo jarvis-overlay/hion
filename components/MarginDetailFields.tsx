@@ -1,6 +1,7 @@
 'use client';
 
 import type { useMarginFields } from '@/lib/useMarginFields';
+import ShippingCostCalculator from '@/components/ShippingCostCalculator';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
@@ -97,6 +98,7 @@ export function MarginDetailFields({ fields, compact = false }: { fields: Fields
           className={inputCls}
         />
       </div>
+      <ShippingCostCalculator onApply={(v) => fields.setShipping(String(Math.round(v)))} />
       {hasPrice && (
         <p className={suffixCls}>
           자동 계산 - 쿠팡수수료 {fmt(fields.coupangFee)} (판매가의 {fields.feeRatePct || 0}%) · 광고비{' '}
