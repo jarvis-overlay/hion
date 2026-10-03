@@ -252,8 +252,17 @@ async function generateBackgroundImage(
     ? `상품의 형태·디자인·구도는 그대로 유지하되, 색상은 다음 요청에 맞게 바꿔주세요: "${colorPrompt.trim()}"`
     : '상품의 실제 형태·색상·디자인은 최대한 그대로 유지하면서';
 
+  // 실측: "형태 유지"만 적으면 모델이 상품을 단순화해서 새로 그려버려
+  // 발받침대/다리/손잡이/뚜껑 같은 작은 부품이 사라졌다. 판매 상품은
+  // 실물과 다르면 안 되므로(허위 표시·반품 사유), 구조 요소를 명시적으로
+  // 나열해서 하나도 빼거나 바꾸지 못하게 못박는다.
+  const fidelityRule =
+    '**상품 외형 보존 규칙(필수):** 첨부된 상품 사진 속 상품은 실제 판매할 실물이므로, 새로 디자인하거나 단순화하지 말고 사진 속 그 물건을 그대로 옮겨오세요. 특히 바닥의 발받침대·고무발·다리·받침, 손잡이, 뚜껑, 주름·골·홈 같은 표면 질감, 모서리 형태, 비율, 개수, 색상은 하나도 빼거나 바꾸거나 추가하지 마세요. 원본에서 작은 부품이 보이면 결과물에서도 반드시 같은 모양·위치로 보여야 하며, 부품이 보이도록 상품을 약간 위에서 내려다보거나 바닥면이 드러나는 각도로 배치해도 좋습니다. 상품이 여러 개 나오는 구도라도 모든 상품이 원본과 동일한 외형이어야 합니다.';
+
   const instruction = productImage
     ? `${noTextRule}
+
+${fidelityRule}
 
 위 규칙을 지키면서, 아래 상품 사진을 그대로 활용해서 쿠팡 상세페이지에 들어갈 마케팅 배경 이미지를 만들어주세요. ${colorRule}, 배경과 분위기만 아래 키워드/분위기에 맞게 합성/편집해주세요. 원본 사진에 있던 문구·워터마크·로고는 이번 결과물에 절대 나오면 안 됩니다.
 
@@ -266,10 +275,13 @@ async function generateBackgroundImage(
 키워드: ${keyword || '(없음)'}
 분위기: ${mood || '(없음)'}`;
 
-  const parts: Record<string, unknown>[] = [{ text: instruction }];
+  // 상품 사진을 먼저, 지시문을 뒤에 둔다 - 이미지 편집 계열 모델은 이
+  // 순서일 때 원본 이미지를 더 충실히 따른다.
+  const parts: Record<string, unknown>[] = [];
   if (productImage) {
     parts.push({ inlineData: { mimeType: productImage.mimeType, data: productImage.buffer.toString('base64') } });
   }
+  parts.push({ text: instruction });
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
