@@ -233,6 +233,52 @@ export interface DetailSectionInput {
   theme?: DetailSectionTheme;
 }
 
+// 이미지 생성 모델은 "그대로 유지하라"는 지시만으로는 발받침대 같은 작은
+// 부품을 자주 놓친다(실측: 프롬프트 강화 후에도 트레이의 바닥 발이
+// 사라짐). 그래서 생성 전에 비전 모델이 상품 사진의 구조를 먼저 글로
+// 정확히 명세하게 하고, 그 명세를 생성 지시에 박아 넣는다. 실패해도
+// 생성 자체는 막지 않도록 null을 돌려준다.
+async function describeProductAppearance(productImage: {
+  buffer: Buffer;
+  mimeType: string;
+}): Promise<string | null> {
+  try {
+    const apiKey = requireEnv('GEMINI_API_KEY');
+    const prompt = `이 사진 속 판매 상품의 외형을 다른 사람이 사진 없이도 똑같이 그릴 수 있도록 한국어 글머리표로 정확히 명세해주세요. 사진 속 글자·로고·배경은 언급하지 마세요.
+반드시 포함할 항목:
+- 전체 형태와 대략적인 비율 (예: 원형 트레이, 높이 대비 지름)
+- 주 재질/색상과 표면 질감 (주름·골·광택 등)
+- 바닥의 발받침대·고무발·다리·받침: 있으면 개수, 색, 모양, 위치, 바닥에서 얼마나 띄우는지
+- 손잡이·뚜껑·구멍·홈·테두리 등 작은 부품이 있으면 각각의 위치와 모양
+- 사진에서 가려져 있거나 일부만 보이는 부품이 있으면 그렇다고 명시
+없는 부품을 지어내지 말고 보이는 것만 적으세요. 10줄 이내.`;
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${VISION_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { inlineData: { mimeType: productImage.mimeType, data: productImage.buffer.toString('base64') } },
+                { text: prompt },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+    const json = await res.json();
+    if (!res.ok) return null;
+    const text: string = (json.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join('').trim();
+    return text || null;
+  } catch (e) {
+    console.error('[imageProcessing] 상품 외형 명세 실패:', e);
+    return null;
+  }
+}
+
 async function generateBackgroundImage(
   keyword: string,
   mood: string,
@@ -240,6 +286,7 @@ async function generateBackgroundImage(
   colorPrompt?: string
 ): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
+  const appearanceSpec = productImage ? await describeProductAppearance(productImage) : null;
 
   const noTextRule =
     '**가장 중요한 규칙: 결과 이미지 안에는 그 어떤 문자·숫자·기호도 존재하면 안 됩니다.** 한국어든 중국어든 영어든 로고든 워터마크든 예외 없습니다. 이 규칙은 원본 사진에 이미 디자인 요소로 박혀 있는 텍스트(예: 판매용 사진에 얹혀있는 중국어 홍보 문구, 브랜드 로고, 워터마크, 각인, 라벨 글씨)에도 똑같이 적용됩니다 - 그런 텍스트가 보이면 지우거나 그리지 말고, 해당 영역을 자연스러운 배경/재질로 다시 채워서 완전히 안 보이게 만드세요. "글자를 다른 언어로 바꿔서 넣는 것"도 금지입니다 - 번역해서 넣는 게 아니라 아예 아무 글자도 없어야 합니다. 문구는 이후 단계에서 저희가 별도로 정확한 폰트로 합성할 예정이니, 지금 결과물은 순수하게 사진/배경/분위기만 있으면 됩니다.';
@@ -262,7 +309,11 @@ async function generateBackgroundImage(
   const instruction = productImage
     ? `${noTextRule}
 
-${fidelityRule}
+${fidelityRule}${
+        appearanceSpec
+          ? `\n\n[상품 외형 명세 - 결과물 속 모든 상품이 반드시 이 명세와 일치해야 합니다. 특히 바닥 부품은 상품과 바닥면 사이에 눈에 보이게 그려주세요]\n${appearanceSpec}`
+          : ''
+      }
 
 위 규칙을 지키면서, 아래 상품 사진을 그대로 활용해서 쿠팡 상세페이지에 들어갈 마케팅 배경 이미지를 만들어주세요. ${colorRule}, 배경과 분위기만 아래 키워드/분위기에 맞게 합성/편집해주세요. 원본 사진에 있던 문구·워터마크·로고는 이번 결과물에 절대 나오면 안 됩니다.
 
