@@ -9,11 +9,15 @@ export const LCL_RATE_PER_CBM = 99000;
 export const LCL_MIN_CHARGE = 59000;
 export const LCL_CBM_STEP = 0.5;
 
-// cbm을 0.5 단위로 올림한 뒤 요율 곱하고, 최소 청구금액과 비교해 큰 쪽을 반환.
+// cbm을 0.5 단위로 올림한다 (청구 기준 CBM).
+export function roundLclCbm(cbm: number): number {
+  return Math.ceil(cbm / LCL_CBM_STEP) * LCL_CBM_STEP;
+}
+
+// 올림한 CBM에 요율을 곱하고, 최소 청구금액과 비교해 큰 쪽을 반환.
 export function computeLclFreightKrw(cbm: number): number {
   if (!cbm || cbm <= 0) return 0;
-  const roundedCbm = Math.ceil(cbm / LCL_CBM_STEP) * LCL_CBM_STEP;
-  return Math.max(LCL_MIN_CHARGE, roundedCbm * LCL_RATE_PER_CBM);
+  return Math.max(LCL_MIN_CHARGE, roundLclCbm(cbm) * LCL_RATE_PER_CBM);
 }
 
 // 박스 가로/세로/높이(cm) x 수량으로 총 CBM 계산 (1,000,000cm³ = 1m³)

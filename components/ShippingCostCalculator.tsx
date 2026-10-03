@@ -6,6 +6,7 @@ import {
   computeLclFreightKrw,
   LCL_MIN_CHARGE,
   LCL_RATE_PER_CBM,
+  roundLclCbm,
   SHIPPING_EXTRA_FEE_PRESETS,
 } from '@/lib/shippingCalc';
 
@@ -299,6 +300,13 @@ export default function ShippingCostCalculator({
           <span>해상운임(LCL, 전체 화물)</span>
           <span className="font-mono text-ink">{fmt(freight)}</span>
         </div>
+        {cbm > 0 && (
+          <p className="text-[11px] text-inkSoft leading-relaxed">
+            계산: 총 CBM {cbm.toFixed(2)}m³ → 0.5CBM 단위 올림 {roundLclCbm(cbm).toFixed(1)} × {LCL_RATE_PER_CBM.toLocaleString('ko-KR')}원 = {fmt(roundLclCbm(cbm) * LCL_RATE_PER_CBM)}
+            {roundLclCbm(cbm) * LCL_RATE_PER_CBM < LCL_MIN_CHARGE &&
+              ` → 최소 청구금액 ${LCL_MIN_CHARGE.toLocaleString('ko-KR')}원 적용`}
+          </p>
+        )}
         {extrasTotalBasis > 0 && (
           <div className="flex justify-between text-inkSoft">
             <span>부가서비스 - 전체금액 합계</span>
