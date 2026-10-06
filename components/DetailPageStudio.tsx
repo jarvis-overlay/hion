@@ -825,7 +825,7 @@ export default function DetailPageStudio({ projects }: { projects: any[] }) {
                 <button onClick={() => setActiveId(p.id)} className="min-w-0 flex-1 text-left">
                   <p className="font-semibold text-sm truncate">{p.title || '제목 없는 프로젝트'}</p>
                   <p className="text-xs text-inkSoft">
-                    섹션 {sections.length}개 · {new Date(p.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
+                    섹션 {sections.length}개 · {p.created_label}
                   </p>
                 </button>
                 <button
