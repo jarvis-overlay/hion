@@ -1078,7 +1078,7 @@ export default function SourcingList({ items }: { items: any[] }) {
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
                   <span className="text-[11px] text-inkSoft">
                     {it.author_email?.split('@')[0]} ·{' '}
-                    {new Date(it.created_at).toLocaleDateString('ko-KR')}
+                    {new Date(it.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
                   </span>
                   <div className="flex gap-2 text-xs items-center">
                     <select

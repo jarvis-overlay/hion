@@ -197,7 +197,7 @@ export default async function DashboardHome() {
                   {m.quantity}
                 </span>
                 <span className="text-[11px] text-inkSoft whitespace-nowrap">
-                  {new Date(m.occurred_at || m.created_at).toLocaleDateString('ko-KR')}
+                  {new Date(m.occurred_at || m.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
                 </span>
               </div>
             ))}

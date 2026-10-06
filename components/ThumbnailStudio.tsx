@@ -373,7 +373,7 @@ export default function ThumbnailStudio({ projects }: { projects: any[] }) {
                 <button onClick={() => setActiveId(p.id)} className="min-w-0 flex-1 text-left">
                   <p className="font-semibold text-sm truncate">{p.title || '제목 없는 프로젝트'}</p>
                   <p className="text-xs text-inkSoft">
-                    이미지 {images.length}개 · {new Date(p.created_at).toLocaleDateString('ko-KR')}
+                    이미지 {images.length}개 · {new Date(p.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
                   </p>
                 </button>
                 <button
