@@ -176,8 +176,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     startTransition(async () => {
       const res = await addThumbnailImage(project.id, 'main', 0, fd);
       setBusyId(null);
-      if ('error' in res) {
-        setError(res.error);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
       }
       setMainDraft(newImageDraft());
@@ -195,8 +195,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     startTransition(async () => {
       const res = await addThumbnailImage(project.id, 'additional', additionalImages.length, fd);
       setBusyId(null);
-      if ('error' in res) {
-        setError(res.error);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
       }
       setAdditionalDrafts((prev) => prev.filter((d) => d.id !== draft.id));
@@ -324,8 +324,8 @@ export default function ThumbnailStudio({ projects }: { projects: any[] }) {
     setError(null);
     startTransition(async () => {
       const res = await createProject(newTitle);
-      if ('error' in res) {
-        setError(res.error);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
       }
       setActiveId(res.id);

@@ -232,8 +232,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     startTransition(async () => {
       const res = await addSection(project.id, sections.length, fd);
       setBusyId(null);
-      if ('error' in res) {
-        setError(res.error);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
       }
       removeDraft(draft.id);
@@ -259,7 +259,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     fd.set('image', draft.file);
     startTransition(async () => {
       const res = await extractImageText(fd);
-      if ('error' in res) {
+      if (!res || 'error' in res) {
         updateDraft(draft.id, { extracting: false, extractError: res.error });
         return;
       }
@@ -288,9 +288,9 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         extractedText,
         existingHints,
       });
-      if ('error' in res) {
+      if (!res || 'error' in res) {
         updateDraft(draft.id, { recommending: false });
-        setError(res.error);
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
       }
       updateDraft(draft.id, { recommending: false, ...res.data });
@@ -342,8 +342,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     startTransition(async () => {
       const res = await addSpecSection(project.id, sections.length, { title: draft.title, rows });
       updateSpecDraft(draft.id, { generating: false });
-      if ('error' in res) {
-        setError(res.error);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
       }
       removeSpecDraft(draft.id);
@@ -776,8 +776,8 @@ export default function DetailPageStudio({ projects }: { projects: any[] }) {
     setError(null);
     startTransition(async () => {
       const res = await createProject(newTitle);
-      if ('error' in res) {
-        setError(res.error);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
       }
       setActiveId(res.id);
