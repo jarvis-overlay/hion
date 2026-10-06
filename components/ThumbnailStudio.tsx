@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { shrinkImageForUpload } from '@/lib/clientImage';
 import {
   createProject,
   deleteProject,
@@ -72,8 +73,9 @@ function DraftForm({
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0] || null;
+          onChange={async (e) => {
+            const raw = e.target.files?.[0] || null;
+            const f = raw ? await shrinkImageForUpload(raw) : null;
             onChange({ file: f, previewUrl: f ? URL.createObjectURL(f) : null });
           }}
         />

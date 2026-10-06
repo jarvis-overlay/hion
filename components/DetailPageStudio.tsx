@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { shrinkImageForUpload } from '@/lib/clientImage';
 import {
   createProject,
   deleteProject,
@@ -485,8 +486,9 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                       type="file"
                       accept="image/*"
                       className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0] || null;
+                      onChange={async (e) => {
+                        const raw = e.target.files?.[0] || null;
+                        const f = raw ? await shrinkImageForUpload(raw) : null;
                         updateDraft(d.id, {
                           file: f,
                           previewUrl: f ? URL.createObjectURL(f) : null,
