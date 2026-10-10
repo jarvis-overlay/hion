@@ -57,7 +57,9 @@ create table if not exists margin_entries (
   margin_pct numeric not null,
   output_vat numeric,                        -- 매출부가세 (실제 정산 내역 기반 직접입력)
   import_vat numeric,                        -- 매입부가세
-  coupang_fee numeric                        -- 쿠팡수수료 (실액)
+  coupang_fee numeric,                       -- 쿠팡수수료 (실액)
+  coupon numeric,                            -- 쿠폰 할인액
+  intl_shipping numeric                      -- 해외배송비 (중국->한국, CBM)
 );
 
 alter table margin_entries enable row level security;
