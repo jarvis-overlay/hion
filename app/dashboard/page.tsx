@@ -77,12 +77,12 @@ export default async function DashboardHome() {
           </div>
         </Link>
 
-        <Link href="/dashboard/inventory/stock" className="card p-5">
+        <Link href="/dashboard/inventory/stock?tab=products" className="card p-5">
           <div className="text-xs text-inkSoft mb-2">쿠팡 창고 재고</div>
           <div className="text-2xl font-bold font-mono">{coupangStock}개</div>
         </Link>
 
-        <Link href="/dashboard/inventory/stock" className="card p-5">
+        <Link href="/dashboard/inventory/stock?tab=products" className="card p-5">
           <div className="text-xs text-inkSoft mb-2">자사 물류창고 재고</div>
           <div className="text-2xl font-bold font-mono">{ownStock}개</div>
         </Link>
@@ -206,7 +206,7 @@ export default async function DashboardHome() {
           <p className="text-sm text-inkSoft">아직 히스토리가 없어요.</p>
         )}
         <Link
-          href="/dashboard/inventory/stock"
+          href="/dashboard/inventory/stock?tab=history"
           className="text-xs text-accent hover:underline mt-4 inline-block"
         >
           전체 히스토리 보기 →

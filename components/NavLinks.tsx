@@ -34,7 +34,7 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
     items: [
       { href: '/dashboard/inventory/products', label: '상품 관리' },
       { href: '/dashboard/inventory/orders', label: '발주·입고' },
-      { href: '/dashboard/inventory/stock', label: '재고 현황' },
+      { href: '/dashboard/inventory/stock', label: '재고·판매 현황' },
       { href: '/dashboard/inventory/channels', label: '채널 연동' },
     ],
   },
