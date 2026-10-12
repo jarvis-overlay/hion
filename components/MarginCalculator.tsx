@@ -1,8 +1,10 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { addMarginEntry, deleteMarginEntry } from '@/app/dashboard/margin/actions';
-import ShippingCostCalculator from '@/components/ShippingCostCalculator';
+import { useMarginFields } from '@/lib/useMarginFields';
+import FxCalculator from '@/components/FxCalculator';
+import { MarginDetailFields } from '@/components/MarginDetailFields';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
@@ -12,113 +14,52 @@ function badgeClass(pct: number) {
   return 'bg-profitBg text-profit';
 }
 
-// 매출부가세/매입부가세/쿠팡수수료는 환차·프로모션·카테고리별 수수료
-// 차이로 공식과 실제 정산 금액이 다를 수 있어서, 자동계산 대신 직접
-// 입력받는다. 아래는 "이 정도일 것이다"라는 제안값일 뿐 - 눌러서
-// 채우고 실제 정산서 보고 고치면 된다.
-function SuggestField({
-  label,
-  hint,
-  value,
-  onChange,
-  suggested,
-  suggestedLabel,
-}: {
-  label: string;
-  hint?: string;
-  value: string;
-  onChange: (v: string) => void;
-  suggested: number;
-  suggestedLabel: string;
-}) {
-  return (
-    <div className="grid gap-1">
-      <label className="text-xs text-inkSoft">{label}</label>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        type="number"
-        placeholder="0"
-        className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-      />
-      {suggested > 0 && (
-        <button
-          type="button"
-          onClick={() => onChange(String(Math.round(suggested)))}
-          className="text-[11px] text-accent underline text-left"
-        >
-          제안값 {fmt(suggested)} ({suggestedLabel}) · 채우기
-        </button>
-      )}
-      {hint && !suggested && <span className="text-[11px] text-inkSoft">{hint}</span>}
-    </div>
-  );
-}
-
+// 소싱 리스트(EditForm)와 완전히 같은 입력 구성·계산식을 쓴다 - 둘 다
+// useMarginFields(동일 훅) -> lib/marginCalc.ts의 computeMargin으로
+// 계산한다. 소싱 리스트는 상품 레코드에 값을 저장하지만, 이 페이지는
+// "이름 붙여서 따로 저장"(margin_entries)하는 독립 계산기라는 점만
+// 다르다.
 export default function MarginCalculator({ entries }: { entries: any[] }) {
   const [name, setName] = useState('');
-  const [cost, setCost] = useState('');
-  const [listPrice, setListPrice] = useState('');
-  const [coupon, setCoupon] = useState('');
-  const [outputVat, setOutputVat] = useState('');
-  const [importVat, setImportVat] = useState('');
-  const [coupangFee, setCoupangFee] = useState('');
-  const [ship, setShip] = useState('');
-  const [ad, setAd] = useState('');
-  const [etc, setEtc] = useState('');
+  const f = useMarginFields();
   const [isPending, startTransition] = useTransition();
 
-  const result = useMemo(() => {
-    const lp = parseFloat(listPrice) || 0;
-    const cp = parseFloat(coupon) || 0;
-    const p = Math.max(0, lp - cp); // 실제 판매가 (쿠폰 할인 적용 후) - 이 값 기준으로 계산해야 마진이 정확함
-    const c = parseFloat(cost) || 0; // 매입가 (부가세 제외)
-    const ov = parseFloat(outputVat) || 0;
-    const iv = parseFloat(importVat) || 0;
-    const fee = parseFloat(coupangFee) || 0;
-    const s = parseFloat(ship) || 0;
-    const a = parseFloat(ad) || 0;
-    const e = parseFloat(etc) || 0;
-    // 판매가 - 매출부가세 - 매입가 + 매입부가세(매입세액공제로 돌려받으니
-    // 다시 더함) - 쿠팡수수료 - 배송비 - (선택)광고비/기타. 각 항목은
-    // 직접 입력값을 그대로 쓴다.
-    const profit = p - ov - c + iv - fee - s - a - e;
-    const marginPct = p > 0 ? (profit / p) * 100 : 0;
-    return { lp, cp, p, c, ov, iv, fee, s, a, e, profit, marginPct };
-  }, [cost, listPrice, coupon, outputVat, importVat, coupangFee, ship, ad, etc]);
+  const stampTone =
+    f.margin.marginPct == null
+      ? 'border-paperLine text-inkSoft'
+      : f.margin.marginPct < 0
+      ? 'border-red-600 text-red-600'
+      : f.margin.marginPct < 15
+      ? 'border-warn text-warn'
+      : 'border-profit text-profit';
+
+  const costNum = parseFloat(f.cost) || 0;
+  const importVatNum = parseFloat(f.importVat) || 0;
+  const shippingNum = parseFloat(f.shipping) || 0;
+  const intlShippingNum = parseFloat(f.intlShipping) || 0;
+  const etcCostNum = parseFloat(f.etcCost) || 0;
 
   function handleSave() {
     startTransition(async () => {
       await addMarginEntry({
         name,
-        price: result.p,
-        cost: result.c,
-        output_vat: result.ov,
-        import_vat: result.iv,
-        coupang_fee: result.fee,
-        shipping: result.s,
-        ad_cost: result.a,
-        etc_cost: result.e,
-        profit: result.profit,
-        margin_pct: result.marginPct,
+        price: f.margin.actualPrice,
+        cost: costNum,
+        output_vat: f.outputVat,
+        import_vat: importVatNum,
+        coupang_fee: f.coupangFee,
+        shipping: shippingNum,
+        intl_shipping: intlShippingNum,
+        coupon: f.couponAmount,
+        ad_cost: f.adCost,
+        etc_cost: etcCostNum,
+        profit: f.margin.profit,
+        margin_pct: f.margin.marginPct ?? 0,
       });
       setName('');
-      setCost('');
-      setListPrice('');
-      setCoupon('');
-      setOutputVat('');
-      setImportVat('');
-      setCoupangFee('');
-      setShip('');
-      setAd('');
-      setEtc('');
+      f.reset();
     });
   }
-
-  const stampTone =
-    result.marginPct < 0 ? 'border-red-600 text-red-600' :
-    result.marginPct < 15 ? 'border-warn text-warn' :
-    'border-profit text-profit';
 
   return (
     <div>
@@ -134,93 +75,36 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
               placeholder="상품명"
               className="border border-paperLine bg-white px-3 py-2 text-sm"
             />
-            <label className="text-xs text-inkSoft -mb-2">정가 (쿠폰 적용 전)</label>
-            <input
-              value={listPrice}
-              onChange={(e) => setListPrice(e.target.value)}
-              type="number"
-              placeholder="0"
-              className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-            />
-            <label className="text-xs text-inkSoft -mb-2">
-              쿠폰 할인액 (선택)
-            </label>
-            <input
-              value={coupon}
-              onChange={(e) => setCoupon(e.target.value)}
-              type="number"
-              placeholder="0"
-              className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-            />
-            <div className="text-xs text-inkSoft -mb-2 flex justify-between">
-              <span>→ 실제 판매가 (마진 계산 기준)</span>
-              <span className="font-mono font-semibold text-ink">{fmt(result.p)}</span>
+
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                value={f.price}
+                onChange={(e) => f.setPrice(e.target.value)}
+                type="number"
+                step="0.01"
+                placeholder="판매가"
+                className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+              />
+              <input
+                readOnly
+                value={f.price !== '' ? Math.round(f.outputVat) : ''}
+                placeholder="매출부가세 (자동)"
+                title="판매가 / 11로 자동 계산돼요"
+                className="border border-paperLine bg-paper text-inkSoft px-3 py-2 text-sm font-mono cursor-not-allowed"
+              />
             </div>
-
-            <SuggestField
-              label="매출부가세"
-              value={outputVat}
-              onChange={setOutputVat}
-              suggested={result.p / 11}
-              suggestedLabel="판매가 ÷ 11"
-            />
-
-            <label className="text-xs text-inkSoft -mb-2">
-              매입가 (중국에서 가져온 총액, 부가세 제외)
-            </label>
             <input
-              value={cost}
-              onChange={(e) => setCost(e.target.value)}
+              value={f.cost}
+              onChange={(e) => f.setCost(e.target.value)}
               type="number"
-              placeholder="0"
+              step="0.01"
+              placeholder="매입 원가"
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
             />
 
-            <SuggestField
-              label="매입부가세 (환급분)"
-              hint="매입 송금 금액의 10% - 환차로 실제 값과 다를 수 있어요"
-              value={importVat}
-              onChange={setImportVat}
-              suggested={result.c * 0.1}
-              suggestedLabel="매입가의 10%"
-            />
+            <FxCalculator onApply={(krw) => f.setCost(String(Math.round(krw)))} />
 
-            <SuggestField
-              label="쿠팡수수료 (수수료+결제수수료)"
-              hint="카테고리마다 수수료율이 달라요 - 정산서 보고 입력해주세요"
-              value={coupangFee}
-              onChange={setCoupangFee}
-              suggested={result.p * 0.086}
-              suggestedLabel="판매가의 8.6% (참고용)"
-            />
-
-            <label className="text-xs text-inkSoft -mb-2">배송비</label>
-            <input
-              value={ship}
-              onChange={(e) => setShip(e.target.value)}
-              type="number"
-              placeholder="0"
-              className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-            />
-            <ShippingCostCalculator onApply={(v) => setShip(String(Math.round(v)))} />
-            <label className="text-xs text-inkSoft -mb-2">
-              광고비 (선택, 건당 평균)
-            </label>
-            <input
-              value={ad}
-              onChange={(e) => setAd(e.target.value)}
-              type="number"
-              placeholder="0"
-              className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-            />
-            <label className="text-xs text-inkSoft -mb-2">기타 비용 (선택)</label>
-            <input
-              value={etc}
-              onChange={(e) => setEtc(e.target.value)}
-              type="number"
-              placeholder="0"
-              className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-            />
+            <MarginDetailFields fields={f} />
           </div>
         </div>
 
@@ -233,7 +117,7 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
               className={`w-28 h-28 rounded-full border-[3px] flex flex-col items-center justify-center -rotate-6 ${stampTone}`}
             >
               <span className="font-mono font-bold text-xl">
-                {result.marginPct.toFixed(1)}%
+                {f.margin.marginPct != null ? `${f.margin.marginPct.toFixed(1)}%` : '-'}
               </span>
               <span className="text-[10px] uppercase tracking-wide mt-1">
                 마진율
@@ -242,31 +126,39 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
           </div>
 
           <div className="text-sm grid gap-1.5">
-            {result.cp > 0 && (
+            {f.couponAmount > 0 && (
               <>
-                <Line label="정가" value={fmt(result.lp)} />
-                <Line label="쿠폰 할인" value={'-' + fmt(result.cp)} />
+                <Line label="판매가" value={fmt(parseFloat(f.price) || 0)} />
+                <Line label="쿠폰 할인" value={'-' + fmt(f.couponAmount)} />
               </>
             )}
-            <Line label="실제 판매가" value={fmt(result.p)} />
-            <Line label="매출부가세" value={'-' + fmt(result.ov)} />
-            <Line label="매입가" value={'-' + fmt(result.c)} />
-            <Line label="매입부가세" value={'+' + fmt(result.iv)} />
-            <Line label="쿠팡수수료" value={'-' + fmt(result.fee)} />
-            <Line label="배송비" value={'-' + fmt(result.s)} />
-            {result.a > 0 && <Line label="광고비" value={'-' + fmt(result.a)} />}
-            {result.e > 0 && <Line label="기타" value={'-' + fmt(result.e)} />}
+            <Line label="실제 판매가" value={fmt(f.margin.actualPrice)} />
+            <Line label="매출부가세" value={'-' + fmt(f.outputVat)} />
+            <Line label="매입가" value={'-' + fmt(costNum)} />
+            <Line label="매입부가세" value={'+' + fmt(importVatNum)} />
+            <Line label="쿠팡수수료" value={'-' + fmt(f.coupangFee)} />
+            <Line label="배송비 (국내)" value={'-' + fmt(shippingNum)} />
+            {intlShippingNum > 0 && <Line label="해외배송비" value={'-' + fmt(intlShippingNum)} />}
+            {f.adCost > 0 && <Line label="광고비" value={'-' + fmt(f.adCost)} />}
+            {etcCostNum > 0 && <Line label="기타" value={'-' + fmt(etcCostNum)} />}
             <div className="flex justify-between pt-2 mt-1 border-t-2 border-ink font-bold">
-              <span>총마진</span>
-              <span className={result.profit < 0 ? 'text-red-700' : 'text-profit'}>
-                {(result.profit < 0 ? '-' : '') + fmt(Math.abs(result.profit))}
+              <span>예상 마진 (광고비 적용)</span>
+              <span className={f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}>
+                {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
+              </span>
+            </div>
+            <div className="flex justify-between text-xs text-inkSoft">
+              <span>예상 마진 (광고비 미적용)</span>
+              <span>
+                {(f.pureProfit < 0 ? '-' : '') + fmt(Math.abs(f.pureProfit))}
+                {f.pureMarginPct != null && ` (${f.pureMarginPct.toFixed(1)}%)`}
               </span>
             </div>
           </div>
 
           <button
             onClick={handleSave}
-            disabled={isPending || !name.trim() || result.p <= 0}
+            disabled={isPending || !name.trim() || f.margin.actualPrice <= 0}
             className="btn-primary w-full py-2.5 text-sm font-semibold mt-5 disabled:opacity-40"
           >
             {isPending ? '저장 중...' : '이 계산 저장하기'}
