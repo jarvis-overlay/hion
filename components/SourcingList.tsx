@@ -22,6 +22,7 @@ import {
   deleteChecklistItem,
   generateChecklistMessage,
 } from '@/app/dashboard/sourcing/list/checklistActions';
+import { runTranslateToChinese, runTranslateToKorean } from '@/app/dashboard/sourcing/translate/actions';
 import { computeMargin as computeMarginShared } from '@/lib/marginCalc';
 import { useMarginFields } from '@/lib/useMarginFields';
 import FxCalculator from '@/components/FxCalculator';
@@ -698,6 +699,142 @@ function ChecklistCopyButton({ text }: { text: string }) {
   );
 }
 
+type FreeTranslateDirection = 'ko-zh' | 'zh-ko';
+interface FreeTranslateEntry {
+  id: string;
+  direction: FreeTranslateDirection;
+  input: string;
+  casual?: string;
+  formal?: string;
+  translation?: string;
+}
+
+// 체크리스트 항목뿐 아니라, 공장과 주고받는 그때그때의 메시지(주문
+// 확인, 가격 문의, 답장 해석 등)도 이 화면을 안 벗어나고 바로 번역할
+// 수 있게 하는 자유 입력 번역기 - /dashboard/sourcing/translate 페이지와
+// 같은 서버 액션을 그대로 재사용한다.
+function FreeTranslateBox() {
+  const [direction, setDirection] = useState<FreeTranslateDirection>('ko-zh');
+  const [text, setText] = useState('');
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<FreeTranslateEntry[]>([]);
+
+  function handleTranslate() {
+    setError(null);
+    const inputSnapshot = text;
+    startTransition(async () => {
+      if (direction === 'ko-zh') {
+        const res = await runTranslateToChinese(inputSnapshot);
+        if ('error' in res) {
+          setError(res.error);
+          return;
+        }
+        setHistory((prev) => [
+          { id: crypto.randomUUID(), direction, input: inputSnapshot, casual: res.data.casual, formal: res.data.formal },
+          ...prev,
+        ]);
+      } else {
+        const res = await runTranslateToKorean(inputSnapshot);
+        if ('error' in res) {
+          setError(res.error);
+          return;
+        }
+        setHistory((prev) => [
+          { id: crypto.randomUUID(), direction, input: inputSnapshot, translation: res.translation },
+          ...prev,
+        ]);
+      }
+      setText('');
+    });
+  }
+
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-inkSoft">자유 번역 (공장과 주고받는 메시지)</span>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setDirection('ko-zh')}
+            className={`px-2 py-1 text-[11px] font-semibold border ${
+              direction === 'ko-zh' ? 'bg-ink text-white border-ink' : 'border-paperLine text-inkSoft'
+            }`}
+          >
+            한→중
+          </button>
+          <button
+            type="button"
+            onClick={() => setDirection('zh-ko')}
+            className={`px-2 py-1 text-[11px] font-semibold border ${
+              direction === 'zh-ko' ? 'bg-ink text-white border-ink' : 'border-paperLine text-inkSoft'
+            }`}
+          >
+            중→한
+          </button>
+        </div>
+      </div>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={2}
+        placeholder={
+          direction === 'ko-zh' ? '보낼 메시지를 한국어로 입력하세요' : '공장이 보낸 중국어 메시지를 붙여넣으세요'
+        }
+        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+      />
+      <button
+        onClick={handleTranslate}
+        disabled={isPending || !text.trim()}
+        className="btn-primary px-3 py-1.5 text-xs font-semibold justify-self-start disabled:opacity-40"
+      >
+        {isPending ? '번역 중...' : '번역하기'}
+      </button>
+      {error && <p className="text-[11px] text-warn">{error}</p>}
+
+      {history.length > 0 && (
+        <div className="grid gap-2">
+          {history.map((h) => (
+            <div key={h.id} className="bg-paper rounded px-2 py-1.5 text-xs grid gap-1.5">
+              <p className="text-inkSoft whitespace-pre-wrap">{h.input}</p>
+              {h.direction === 'ko-zh' ? (
+                <>
+                  {h.casual && (
+                    <div className="bg-white rounded px-2 py-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[10px] text-inkSoft font-semibold uppercase">편한 톤</span>
+                        <ChecklistCopyButton text={h.casual} />
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap">{h.casual}</p>
+                    </div>
+                  )}
+                  {h.formal && (
+                    <div className="bg-white rounded px-2 py-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[10px] text-inkSoft font-semibold uppercase">격식 톤</span>
+                        <ChecklistCopyButton text={h.formal} />
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap">{h.formal}</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="bg-white rounded px-2 py-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[10px] text-inkSoft font-semibold uppercase">번역</span>
+                    <ChecklistCopyButton text={h.translation || ''} />
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap">{h.translation}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ChecklistRow {
   id: string | null;
   itemKey: string;
@@ -780,7 +917,9 @@ function ChecklistSection({ item }: { item: any }) {
 
   return (
     <div className="rounded-md ring-1 ring-paperLine p-3">
-      <p className="text-[11px] text-inkSoft mb-2">
+      <FreeTranslateBox />
+
+      <p className="text-[11px] text-inkSoft mb-2 mt-3 pt-3 border-t border-paperLine">
         항목을 체크하면서 공장과 확인하세요. 항목을 누르면 바로 쓸 수 있는 중국어 문구가 펼쳐져요.
       </p>
       <div className="grid gap-1.5">
