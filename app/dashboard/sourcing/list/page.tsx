@@ -22,6 +22,15 @@ export default async function SourcingPage() {
     items = fallback.data;
   }
 
+  // 체크리스트 기본 항목(모든 소싱 아이템 공통) - 마이그레이션 전이면
+  // 빈 배열로 두고, 화면에서는 그냥 기본 항목 없이 커스텀 항목만 쓸 수
+  // 있게 한다 (위 items 쿼리와 같은 "마이그레이션 안 돌렸을 수도 있음"
+  // 방어 패턴).
+  const { data: checklistTemplate } = await supabase
+    .from('sourcing_checklist_templates')
+    .select('*')
+    .order('position', { ascending: true });
+
   return (
     <div className="max-w-2xl">
       <h1 className="font-display text-2xl font-bold mb-1">소싱 리스트</h1>
@@ -29,7 +38,7 @@ export default async function SourcingPage() {
         소싱 후보 상품을 등록하고 상태 · 마진까지 한 곳에서 관리해요
       </p>
       <SourcingForm />
-      <SourcingList items={items || []} />
+      <SourcingList items={items || []} checklistTemplate={checklistTemplate || []} />
     </div>
   );
 }

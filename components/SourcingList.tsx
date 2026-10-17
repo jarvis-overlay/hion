@@ -20,6 +20,8 @@ import {
   upsertChecklistItem,
   addCustomChecklistItem,
   deleteChecklistItem,
+  addChecklistTemplateItem,
+  deleteChecklistTemplateItem,
   generateChecklistMessage,
 } from '@/app/dashboard/sourcing/list/checklistActions';
 import { runTranslateToChinese, runTranslateToKorean } from '@/app/dashboard/sourcing/translate/actions';
@@ -29,7 +31,6 @@ import FxCalculator from '@/components/FxCalculator';
 import { MarginDetailFields } from '@/components/MarginDetailFields';
 import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
-import { SOURCING_CHECKLIST_TEMPLATE } from '@/lib/sourcingChecklist';
 import type { SourcingZhTranslation } from '@/lib/ai';
 
 const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
@@ -845,11 +846,13 @@ interface ChecklistRow {
   zhHint: string;
 }
 
-// 1688 공장 담당자에게 매번 확인해야 하는 표준 항목(lib/sourcingChecklist.ts)
-// + 이 아이템에서만 쓰는 커스텀 항목을 함께 보여준다. 템플릿 항목은
-// 아직 DB에 행이 없어도(한 번도 안 건드렸어도) 화면엔 미체크 상태로
-// 항상 보인다 - 체크하거나 메모를 남기는 순간에만 실제로 저장됨.
-function ChecklistSection({ item }: { item: any }) {
+// 1688 공장 담당자에게 매번 확인해야 하는 기본 항목(모든 아이템 공통,
+// DB의 sourcing_checklist_templates에서 관리 - 화면에서 추가/삭제
+// 가능) + 이 아이템에서만 쓰는 커스텀 항목을 함께 보여준다. 기본
+// 항목은 아직 체크/메모 행이 없어도(한 번도 안 건드렸어도) 화면엔
+// 미체크 상태로 항상 보인다 - 체크하거나 메모를 남기는 순간에만 실제로
+// 저장됨.
+function ChecklistSection({ item, template }: { item: any; template: any[] }) {
   const [isPending, startTransition] = useTransition();
   const [addingCustom, setAddingCustom] = useState(false);
   const [customLabel, setCustomLabel] = useState('');
@@ -857,20 +860,23 @@ function ChecklistSection({ item }: { item: any }) {
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState<SourcingZhTranslation | null>(null);
   const [messageError, setMessageError] = useState<string | null>(null);
+  const [managingTemplate, setManagingTemplate] = useState(false);
+  const [newTemplateLabel, setNewTemplateLabel] = useState('');
+  const [newTemplateZh, setNewTemplateZh] = useState('');
 
   const dbRows: any[] = item.sourcing_item_checklist || [];
   const dbByKey = new Map(dbRows.map((r) => [r.item_key, r]));
 
-  const templateRows: ChecklistRow[] = SOURCING_CHECKLIST_TEMPLATE.map((t) => {
-    const db = dbByKey.get(t.key);
+  const templateRows: ChecklistRow[] = template.map((t) => {
+    const db = dbByKey.get(t.item_key);
     return {
       id: db?.id ?? null,
-      itemKey: t.key,
+      itemKey: t.item_key,
       label: t.label,
       checked: db?.checked ?? false,
       note: db?.note ?? '',
       isCustom: false,
-      zhHint: t.zhHint,
+      zhHint: t.zh_hint || '',
     };
   });
   const customRows: ChecklistRow[] = dbRows
@@ -899,6 +905,12 @@ function ChecklistSection({ item }: { item: any }) {
     startTransition(() => addCustomChecklistItem(item.id, customLabel.trim()));
     setCustomLabel('');
     setAddingCustom(false);
+  }
+  function handleAddTemplate() {
+    if (!newTemplateLabel.trim()) return;
+    startTransition(() => addChecklistTemplateItem(newTemplateLabel.trim(), newTemplateZh.trim()));
+    setNewTemplateLabel('');
+    setNewTemplateZh('');
   }
   function handleGenerateMessage() {
     const checkedLabels = rows.filter((r) => r.checked).map((r) => r.label);
@@ -994,8 +1006,53 @@ function ChecklistSection({ item }: { item: any }) {
             onClick={() => setAddingCustom(true)}
             className="text-xs text-accent font-semibold text-left"
           >
-            + 커스텀 항목 추가
+            + 커스텀 항목 추가 (이 상품에만)
           </button>
+        )}
+      </div>
+
+      <div className="border-t border-paperLine pt-2 mt-2">
+        <button
+          onClick={() => setManagingTemplate((v) => !v)}
+          className="text-xs text-inkSoft hover:text-ink font-semibold"
+        >
+          ⚙️ 기본 항목 관리 (모든 상품 공통) {managingTemplate ? '▲' : '▼'}
+        </button>
+        {managingTemplate && (
+          <div className="grid gap-1.5 mt-2">
+            {template.map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-2 bg-paper rounded px-2 py-1.5 text-xs">
+                <span className="text-ink">{t.label}</span>
+                <button
+                  onClick={() => startTransition(() => deleteChecklistTemplateItem(t.id))}
+                  className="text-inkSoft hover:text-red-700 shrink-0"
+                >
+                  삭제
+                </button>
+              </div>
+            ))}
+            <div className="grid gap-1.5 bg-paper rounded px-2 py-1.5">
+              <input
+                value={newTemplateLabel}
+                onChange={(e) => setNewTemplateLabel(e.target.value)}
+                placeholder="새 기본 항목 (한국어 설명)"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+              />
+              <input
+                value={newTemplateZh}
+                onChange={(e) => setNewTemplateZh(e.target.value)}
+                placeholder="중국어 문구 (선택)"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+              />
+              <button
+                onClick={handleAddTemplate}
+                disabled={!newTemplateLabel.trim()}
+                className="text-xs text-accent font-semibold text-left disabled:opacity-40"
+              >
+                + 기본 항목으로 추가 (모든 상품에 적용)
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
@@ -1164,7 +1221,13 @@ function ComparisonsSection({ item }: { item: any }) {
   );
 }
 
-export default function SourcingList({ items }: { items: any[] }) {
+export default function SourcingList({
+  items,
+  checklistTemplate,
+}: {
+  items: any[];
+  checklistTemplate: any[];
+}) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
@@ -1445,7 +1508,7 @@ export default function SourcingList({ items }: { items: any[] }) {
                 {isOptionsExpanded && <OptionsSection item={it} />}
                 {isComparisonsExpanded && <ComparisonsSection item={it} />}
                 {isSuppliersExpanded && <SuppliersSection item={it} />}
-                {isChecklistExpanded && <ChecklistSection item={it} />}
+                {isChecklistExpanded && <ChecklistSection item={it} template={checklistTemplate} />}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
                   <span className="text-[11px] text-inkSoft">
