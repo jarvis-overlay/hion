@@ -21,6 +21,7 @@ import {
   addCustomChecklistItem,
   deleteChecklistItem,
   addChecklistTemplateItem,
+  updateChecklistTemplateItem,
   deleteChecklistTemplateItem,
   generateChecklistMessage,
 } from '@/app/dashboard/sourcing/list/checklistActions';
@@ -862,7 +863,10 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
   const [messageError, setMessageError] = useState<string | null>(null);
   const [managingTemplate, setManagingTemplate] = useState(false);
   const [newTemplateLabel, setNewTemplateLabel] = useState('');
-  const [newTemplateZh, setNewTemplateZh] = useState('');
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editTemplateLabel, setEditTemplateLabel] = useState('');
+  const [editingCustomId, setEditingCustomId] = useState<string | null>(null);
+  const [editCustomLabel, setEditCustomLabel] = useState('');
 
   const dbRows: any[] = item.sourcing_item_checklist || [];
   const dbByKey = new Map(dbRows.map((r) => [r.item_key, r]));
@@ -908,9 +912,18 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
   }
   function handleAddTemplate() {
     if (!newTemplateLabel.trim()) return;
-    startTransition(() => addChecklistTemplateItem(newTemplateLabel.trim(), newTemplateZh.trim()));
+    startTransition(() => addChecklistTemplateItem(newTemplateLabel.trim()));
     setNewTemplateLabel('');
-    setNewTemplateZh('');
+  }
+  function handleSaveTemplateEdit(id: string) {
+    if (!editTemplateLabel.trim()) return;
+    startTransition(() => updateChecklistTemplateItem(id, editTemplateLabel.trim()));
+    setEditingTemplateId(null);
+  }
+  function handleSaveCustomEdit(row: ChecklistRow) {
+    if (!editCustomLabel.trim() || !row.id) return;
+    startTransition(() => upsertChecklistItem(item.id, row.itemKey, editCustomLabel.trim(), {}));
+    setEditingCustomId(null);
   }
   function handleGenerateMessage() {
     const checkedLabels = rows.filter((r) => r.checked).map((r) => r.label);
@@ -944,20 +957,53 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
                 onChange={() => toggle(row)}
                 className="mt-0.5 shrink-0"
               />
-              <button
-                type="button"
-                onClick={() => setExpandedKey((k) => (k === row.itemKey ? null : row.itemKey))}
-                className="flex-1 text-left"
-              >
-                <span className={row.checked ? 'line-through text-inkSoft' : 'text-ink'}>{row.label}</span>
-              </button>
-              {row.isCustom && row.id && (
-                <button
-                  onClick={() => startTransition(() => deleteChecklistItem(row.id as string))}
-                  className="text-inkSoft hover:text-red-700 shrink-0"
-                >
-                  삭제
-                </button>
+              {editingCustomId === row.id ? (
+                <>
+                  <input
+                    value={editCustomLabel}
+                    onChange={(e) => setEditCustomLabel(e.target.value)}
+                    autoFocus
+                    className="flex-1 border border-paperLine bg-white px-1.5 py-1 text-xs"
+                  />
+                  <button
+                    onClick={() => handleSaveCustomEdit(row)}
+                    className="text-accent font-semibold shrink-0"
+                  >
+                    저장
+                  </button>
+                  <button onClick={() => setEditingCustomId(null)} className="text-inkSoft shrink-0">
+                    취소
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedKey((k) => (k === row.itemKey ? null : row.itemKey))}
+                    className="flex-1 text-left"
+                  >
+                    <span className={row.checked ? 'line-through text-inkSoft' : 'text-ink'}>{row.label}</span>
+                  </button>
+                  {row.isCustom && row.id && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setEditingCustomId(row.id);
+                          setEditCustomLabel(row.label);
+                        }}
+                        className="text-inkSoft hover:text-ink shrink-0"
+                      >
+                        수정
+                      </button>
+                      <button
+                        onClick={() => startTransition(() => deleteChecklistItem(row.id as string))}
+                        className="text-inkSoft hover:text-red-700 shrink-0"
+                      >
+                        삭제
+                      </button>
+                    </>
+                  )}
+                </>
               )}
             </div>
             {expandedKey === row.itemKey && (
@@ -1020,36 +1066,68 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
         </button>
         {managingTemplate && (
           <div className="grid gap-1.5 mt-2">
-            {template.map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-2 bg-paper rounded px-2 py-1.5 text-xs">
-                <span className="text-ink">{t.label}</span>
-                <button
-                  onClick={() => startTransition(() => deleteChecklistTemplateItem(t.id))}
-                  className="text-inkSoft hover:text-red-700 shrink-0"
+            <p className="text-[11px] text-inkSoft">
+              한국어 설명만 입력하면 공장에 바로 쓸 수 있는 중국어 문구가 자동으로 만들어져요.
+            </p>
+            {template.map((t) =>
+              editingTemplateId === t.id ? (
+                <div key={t.id} className="flex items-center gap-1.5 bg-paper rounded px-2 py-1.5 text-xs">
+                  <input
+                    value={editTemplateLabel}
+                    onChange={(e) => setEditTemplateLabel(e.target.value)}
+                    autoFocus
+                    className="flex-1 border border-paperLine bg-white px-1.5 py-1 text-xs"
+                  />
+                  <button
+                    onClick={() => handleSaveTemplateEdit(t.id)}
+                    disabled={isPending}
+                    className="text-accent font-semibold shrink-0 disabled:opacity-40"
+                  >
+                    {isPending ? '저장 중...' : '저장'}
+                  </button>
+                  <button onClick={() => setEditingTemplateId(null)} className="text-inkSoft shrink-0">
+                    취소
+                  </button>
+                </div>
+              ) : (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between gap-2 bg-paper rounded px-2 py-1.5 text-xs"
                 >
-                  삭제
-                </button>
-              </div>
-            ))}
-            <div className="grid gap-1.5 bg-paper rounded px-2 py-1.5">
+                  <span className="text-ink">{t.label}</span>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        setEditingTemplateId(t.id);
+                        setEditTemplateLabel(t.label);
+                      }}
+                      className="text-inkSoft hover:text-ink"
+                    >
+                      수정
+                    </button>
+                    <button
+                      onClick={() => startTransition(() => deleteChecklistTemplateItem(t.id))}
+                      className="text-inkSoft hover:text-red-700"
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
+            <div className="flex gap-1.5 bg-paper rounded px-2 py-1.5">
               <input
                 value={newTemplateLabel}
                 onChange={(e) => setNewTemplateLabel(e.target.value)}
                 placeholder="새 기본 항목 (한국어 설명)"
-                className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-              />
-              <input
-                value={newTemplateZh}
-                onChange={(e) => setNewTemplateZh(e.target.value)}
-                placeholder="중국어 문구 (선택)"
-                className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
               />
               <button
                 onClick={handleAddTemplate}
-                disabled={!newTemplateLabel.trim()}
-                className="text-xs text-accent font-semibold text-left disabled:opacity-40"
+                disabled={!newTemplateLabel.trim() || isPending}
+                className="text-xs text-accent font-semibold shrink-0 disabled:opacity-40"
               >
-                + 기본 항목으로 추가 (모든 상품에 적용)
+                {isPending ? '추가 중...' : '+ 추가'}
               </button>
             </div>
           </div>

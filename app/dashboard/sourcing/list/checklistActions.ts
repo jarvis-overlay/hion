@@ -53,10 +53,24 @@ export async function deleteChecklistItem(id: string) {
   revalidatePath(PATH);
 }
 
+// 라벨(한국어)만 받아서 중국어 문구를 자동으로 만든다 - 기본 항목을
+// 추가/수정할 때마다 직접 중국어를 입력할 필요 없게 하기 위함. 번역
+// 실패해도(키 문제 등) 항목 추가/수정 자체는 막지 않고 zh_hint만
+// null로 둔다 - 나중에 라벨을 다시 저장하면 그때 재시도된다.
+async function translateLabelToZhHint(label: string): Promise<string | null> {
+  try {
+    const translated = await translateToChineseForSourcing(label);
+    return translated.formal || translated.casual || null;
+  } catch (e) {
+    console.error('[sourcing checklist] 중국어 자동 번역 실패:', e);
+    return null;
+  }
+}
+
 // 기본 체크리스트 항목(모든 소싱 아이템에 공통 적용) 관리 - 개별
 // 아이템에만 붙는 커스텀 항목(addCustomChecklistItem)과 달리, 여기서
-// 추가/삭제하면 모든 상품의 체크리스트에 반영된다.
-export async function addChecklistTemplateItem(label: string, zhHint: string) {
+// 추가/삭제/수정하면 모든 상품의 체크리스트에 반영된다.
+export async function addChecklistTemplateItem(label: string) {
   if (!label.trim()) return;
   const supabase = createClient();
   const { data: maxRow } = await supabase
@@ -66,13 +80,26 @@ export async function addChecklistTemplateItem(label: string, zhHint: string) {
     .limit(1)
     .maybeSingle();
   const nextPosition = (maxRow?.position ?? -1) + 1;
+  const zhHint = await translateLabelToZhHint(label.trim());
   const { error } = await supabase.from('sourcing_checklist_templates').insert({
     item_key: `tpl-${randomUUID()}`,
     label: label.trim(),
-    zh_hint: zhHint.trim() || null,
+    zh_hint: zhHint,
     position: nextPosition,
   });
   if (error) console.error('[sourcing checklist] 기본 항목 추가 실패:', error.message);
+  revalidatePath(PATH);
+}
+
+export async function updateChecklistTemplateItem(id: string, label: string) {
+  if (!label.trim()) return;
+  const supabase = createClient();
+  const zhHint = await translateLabelToZhHint(label.trim());
+  const { error } = await supabase
+    .from('sourcing_checklist_templates')
+    .update({ label: label.trim(), zh_hint: zhHint })
+    .eq('id', id);
+  if (error) console.error('[sourcing checklist] 기본 항목 수정 실패:', error.message);
   revalidatePath(PATH);
 }
 
