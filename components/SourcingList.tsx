@@ -957,7 +957,7 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
                 onChange={() => toggle(row)}
                 className="mt-0.5 shrink-0"
               />
-              {editingCustomId === row.id ? (
+              {row.isCustom && editingCustomId === row.id ? (
                 <>
                   <input
                     value={editCustomLabel}
@@ -971,7 +971,13 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
                   >
                     저장
                   </button>
-                  <button onClick={() => setEditingCustomId(null)} className="text-inkSoft shrink-0">
+                  <button
+                    onClick={() => {
+                      setEditingCustomId(null);
+                      setEditCustomLabel('');
+                    }}
+                    className="text-inkSoft shrink-0"
+                  >
                     취소
                   </button>
                 </>
@@ -1085,7 +1091,13 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
                   >
                     {isPending ? '저장 중...' : '저장'}
                   </button>
-                  <button onClick={() => setEditingTemplateId(null)} className="text-inkSoft shrink-0">
+                  <button
+                    onClick={() => {
+                      setEditingTemplateId(null);
+                      setEditTemplateLabel('');
+                    }}
+                    className="text-inkSoft shrink-0"
+                  >
                     취소
                   </button>
                 </div>
