@@ -19,6 +19,7 @@ import {
 import {
   upsertChecklistItem,
   addCustomChecklistItem,
+  updateCustomChecklistItem,
   deleteChecklistItem,
   addChecklistTemplateItem,
   updateChecklistTemplateItem,
@@ -892,7 +893,7 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
       checked: r.checked,
       note: r.note || '',
       isCustom: true,
-      zhHint: '',
+      zhHint: r.zh_hint || '',
     }));
   const rows = [...templateRows, ...customRows];
   const checkedCount = rows.filter((r) => r.checked).length;
@@ -922,7 +923,7 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
   }
   function handleSaveCustomEdit(row: ChecklistRow) {
     if (!editCustomLabel.trim() || !row.id) return;
-    startTransition(() => upsertChecklistItem(item.id, row.itemKey, editCustomLabel.trim(), {}));
+    startTransition(() => updateCustomChecklistItem(item.id, row.itemKey, editCustomLabel.trim()));
     setEditingCustomId(null);
   }
   function handleGenerateMessage() {

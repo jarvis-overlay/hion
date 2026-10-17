@@ -36,13 +36,32 @@ export async function addCustomChecklistItem(sourcingItemId: string, label: stri
   if (!label.trim()) return;
   const supabase = createClient();
   const itemKey = `custom-${randomUUID()}`;
+  const zhHint = await translateLabelToZhHint(label.trim());
   const { error } = await supabase.from('sourcing_item_checklist').insert({
     sourcing_item_id: sourcingItemId,
     item_key: itemKey,
     label: label.trim(),
     checked: false,
+    zh_hint: zhHint,
   });
   if (error) console.error('[sourcing checklist] 커스텀 항목 추가 실패:', error.message);
+  revalidatePath(PATH);
+}
+
+// 커스텀 항목의 라벨을 바꿀 때도 기본 항목과 동일하게 중국어 문구를
+// 다시 번역한다. 체크/메모만 바꾸는 upsertChecklistItem과 분리한
+// 이유: 그쪽은 체크박스 클릭마다 호출되는데, 라벨이 안 바뀌는데도
+// 매번 번역 API를 다시 부르면 낭비이기 때문.
+export async function updateCustomChecklistItem(sourcingItemId: string, itemKey: string, label: string) {
+  if (!label.trim()) return;
+  const supabase = createClient();
+  const zhHint = await translateLabelToZhHint(label.trim());
+  const { error } = await supabase
+    .from('sourcing_item_checklist')
+    .update({ label: label.trim(), zh_hint: zhHint })
+    .eq('sourcing_item_id', sourcingItemId)
+    .eq('item_key', itemKey);
+  if (error) console.error('[sourcing checklist] 커스텀 항목 수정 실패:', error.message);
   revalidatePath(PATH);
 }
 
