@@ -19,6 +19,7 @@ const GROUPS: { label: string | null; items: { href: string; label: string }[] }
       { href: '/dashboard/sourcing/list', label: '소싱 리스트' },
       { href: '/dashboard/sourcing/trends', label: 'AI 소싱 추천' },
       { href: '/dashboard/sourcing/compare', label: '키워드 리서치' },
+      { href: '/dashboard/sourcing/translate', label: '중국어 번역기' },
     ],
   },
   {

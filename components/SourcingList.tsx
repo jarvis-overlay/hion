@@ -16,12 +16,20 @@ import {
   updateSourcingComparison,
   deleteSourcingComparison,
 } from '@/app/dashboard/sourcing/list/actions';
+import {
+  upsertChecklistItem,
+  addCustomChecklistItem,
+  deleteChecklistItem,
+  generateChecklistMessage,
+} from '@/app/dashboard/sourcing/list/checklistActions';
 import { computeMargin as computeMarginShared } from '@/lib/marginCalc';
 import { useMarginFields } from '@/lib/useMarginFields';
 import FxCalculator from '@/components/FxCalculator';
 import { MarginDetailFields } from '@/components/MarginDetailFields';
 import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
+import { SOURCING_CHECKLIST_TEMPLATE } from '@/lib/sourcingChecklist';
+import type { SourcingZhTranslation } from '@/lib/ai';
 
 const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
 
@@ -669,6 +677,221 @@ function SuppliersSection({ item }: { item: any }) {
   );
 }
 
+function ChecklistCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          // 클립보드 권한 없는 브라우저 - 조용히 무시 (텍스트는 화면에 그대로 있어서 직접 선택 복사 가능)
+        }
+      }}
+      className="text-[10px] text-accent font-semibold underline shrink-0"
+    >
+      {copied ? '복사됨' : '복사'}
+    </button>
+  );
+}
+
+interface ChecklistRow {
+  id: string | null;
+  itemKey: string;
+  label: string;
+  checked: boolean;
+  note: string;
+  isCustom: boolean;
+  zhHint: string;
+}
+
+// 1688 공장 담당자에게 매번 확인해야 하는 표준 항목(lib/sourcingChecklist.ts)
+// + 이 아이템에서만 쓰는 커스텀 항목을 함께 보여준다. 템플릿 항목은
+// 아직 DB에 행이 없어도(한 번도 안 건드렸어도) 화면엔 미체크 상태로
+// 항상 보인다 - 체크하거나 메모를 남기는 순간에만 실제로 저장됨.
+function ChecklistSection({ item }: { item: any }) {
+  const [isPending, startTransition] = useTransition();
+  const [addingCustom, setAddingCustom] = useState(false);
+  const [customLabel, setCustomLabel] = useState('');
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [message, setMessage] = useState<SourcingZhTranslation | null>(null);
+  const [messageError, setMessageError] = useState<string | null>(null);
+
+  const dbRows: any[] = item.sourcing_item_checklist || [];
+  const dbByKey = new Map(dbRows.map((r) => [r.item_key, r]));
+
+  const templateRows: ChecklistRow[] = SOURCING_CHECKLIST_TEMPLATE.map((t) => {
+    const db = dbByKey.get(t.key);
+    return {
+      id: db?.id ?? null,
+      itemKey: t.key,
+      label: t.label,
+      checked: db?.checked ?? false,
+      note: db?.note ?? '',
+      isCustom: false,
+      zhHint: t.zhHint,
+    };
+  });
+  const customRows: ChecklistRow[] = dbRows
+    .filter((r) => r.item_key.startsWith('custom-'))
+    .map((r) => ({
+      id: r.id,
+      itemKey: r.item_key,
+      label: r.label,
+      checked: r.checked,
+      note: r.note || '',
+      isCustom: true,
+      zhHint: '',
+    }));
+  const rows = [...templateRows, ...customRows];
+  const checkedCount = rows.filter((r) => r.checked).length;
+
+  function toggle(row: ChecklistRow) {
+    startTransition(() => upsertChecklistItem(item.id, row.itemKey, row.label, { checked: !row.checked }));
+  }
+  function saveNote(row: ChecklistRow, note: string) {
+    if (note === row.note) return;
+    startTransition(() => upsertChecklistItem(item.id, row.itemKey, row.label, { note }));
+  }
+  function handleAddCustom() {
+    if (!customLabel.trim()) return;
+    startTransition(() => addCustomChecklistItem(item.id, customLabel.trim()));
+    setCustomLabel('');
+    setAddingCustom(false);
+  }
+  function handleGenerateMessage() {
+    const checkedLabels = rows.filter((r) => r.checked).map((r) => r.label);
+    setMessageError(null);
+    setGenerating(true);
+    startTransition(async () => {
+      const res = await generateChecklistMessage(checkedLabels);
+      setGenerating(false);
+      if ('error' in res) {
+        setMessageError(res.error);
+        return;
+      }
+      setMessage(res.data);
+    });
+  }
+
+  return (
+    <div className="rounded-md ring-1 ring-paperLine p-3">
+      <p className="text-[11px] text-inkSoft mb-2">
+        항목을 체크하면서 공장과 확인하세요. 항목을 누르면 바로 쓸 수 있는 중국어 문구가 펼쳐져요.
+      </p>
+      <div className="grid gap-1.5">
+        {rows.map((row) => (
+          <div key={row.itemKey} className="bg-paper rounded px-2 py-1.5 text-xs">
+            <div className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={row.checked}
+                onChange={() => toggle(row)}
+                className="mt-0.5 shrink-0"
+              />
+              <button
+                type="button"
+                onClick={() => setExpandedKey((k) => (k === row.itemKey ? null : row.itemKey))}
+                className="flex-1 text-left"
+              >
+                <span className={row.checked ? 'line-through text-inkSoft' : 'text-ink'}>{row.label}</span>
+              </button>
+              {row.isCustom && row.id && (
+                <button
+                  onClick={() => startTransition(() => deleteChecklistItem(row.id as string))}
+                  className="text-inkSoft hover:text-red-700 shrink-0"
+                >
+                  삭제
+                </button>
+              )}
+            </div>
+            {expandedKey === row.itemKey && (
+              <div className="mt-1.5 ml-5 grid gap-1.5">
+                {row.zhHint && (
+                  <div className="flex items-start justify-between gap-2 bg-white rounded px-2 py-1.5">
+                    <span className="text-inkSoft">{row.zhHint}</span>
+                    <ChecklistCopyButton text={row.zhHint} />
+                  </div>
+                )}
+                <textarea
+                  defaultValue={row.note}
+                  onBlur={(e) => saveNote(row, e.target.value)}
+                  placeholder="메모 (공장 답변, 특이사항 등)"
+                  rows={2}
+                  className="border border-paperLine bg-white px-2 py-1 text-xs w-full"
+                />
+              </div>
+            )}
+          </div>
+        ))}
+
+        {addingCustom ? (
+          <div className="flex gap-1.5">
+            <input
+              value={customLabel}
+              onChange={(e) => setCustomLabel(e.target.value)}
+              placeholder="커스텀 확인 항목"
+              className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
+            />
+            <button onClick={handleAddCustom} className="text-xs text-accent font-semibold shrink-0">
+              추가
+            </button>
+            <button
+              onClick={() => {
+                setAddingCustom(false);
+                setCustomLabel('');
+              }}
+              className="text-xs text-inkSoft shrink-0"
+            >
+              취소
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAddingCustom(true)}
+            className="text-xs text-accent font-semibold text-left"
+          >
+            + 커스텀 항목 추가
+          </button>
+        )}
+      </div>
+
+      <div className="border-t border-paperLine pt-2 mt-2">
+        <button
+          onClick={handleGenerateMessage}
+          disabled={generating || isPending || checkedCount === 0}
+          className="btn-primary px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
+        >
+          {generating ? '메시지 생성 중...' : `체크한 ${checkedCount}개 항목 중국어 메시지로 만들기`}
+        </button>
+        {messageError && <p className="text-[11px] text-warn mt-1">{messageError}</p>}
+        {message && (
+          <div className="grid gap-1.5 mt-2">
+            <div className="bg-paper rounded px-2 py-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-[10px] text-inkSoft font-semibold uppercase tracking-wide">편한 톤</span>
+                <ChecklistCopyButton text={message.casual} />
+              </div>
+              <p className="text-xs mt-1 whitespace-pre-wrap">{message.casual}</p>
+            </div>
+            <div className="bg-paper rounded px-2 py-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-[10px] text-inkSoft font-semibold uppercase tracking-wide">격식 톤</span>
+                <ChecklistCopyButton text={message.formal} />
+              </div>
+              <p className="text-xs mt-1 whitespace-pre-wrap">{message.formal}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // 경쟁/비교 상품군 링크 - 쿠팡·네이버에서 관찰한 가격대·시장규모를
 // 남겨서 이 후보가 시장에서 어느 위치인지 참고하려는 목적으로 추가함.
 function ComparisonsSection({ item }: { item: any }) {
@@ -813,6 +1036,7 @@ export default function SourcingList({ items }: { items: any[] }) {
   const [expandedOptionsId, setExpandedOptionsId] = useState<string | null>(null);
   const [expandedSuppliersId, setExpandedSuppliersId] = useState<string | null>(null);
   const [expandedComparisonsId, setExpandedComparisonsId] = useState<string | null>(null);
+  const [expandedChecklistId, setExpandedChecklistId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const rows = useMemo(() => {
@@ -934,9 +1158,11 @@ export default function SourcingList({ items }: { items: any[] }) {
             const isOptionsExpanded = expandedOptionsId === it.id;
             const isSuppliersExpanded = expandedSuppliersId === it.id;
             const isComparisonsExpanded = expandedComparisonsId === it.id;
+            const isChecklistExpanded = expandedChecklistId === it.id;
             const optionCount = (it.sourcing_item_options || []).length;
             const supplierCount = (it.sourcing_item_suppliers || []).length;
             const comparisonCount = (it.sourcing_item_comparisons || []).length;
+            const checklistCheckedCount = (it.sourcing_item_checklist || []).filter((c: any) => c.checked).length;
 
             if (isEditing) {
               return (
@@ -1069,11 +1295,18 @@ export default function SourcingList({ items }: { items: any[] }) {
                   >
                     비교 상품군 {comparisonCount > 0 && `(${comparisonCount})`} {isComparisonsExpanded ? '▲' : '▼'}
                   </button>
+                  <button
+                    onClick={() => setExpandedChecklistId(isChecklistExpanded ? null : it.id)}
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                  >
+                    소싱 체크리스트 {checklistCheckedCount > 0 && `(${checklistCheckedCount})`} {isChecklistExpanded ? '▲' : '▼'}
+                  </button>
                 </div>
 
                 {isOptionsExpanded && <OptionsSection item={it} />}
                 {isComparisonsExpanded && <ComparisonsSection item={it} />}
                 {isSuppliersExpanded && <SuppliersSection item={it} />}
+                {isChecklistExpanded && <ChecklistSection item={it} />}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
                   <span className="text-[11px] text-inkSoft">

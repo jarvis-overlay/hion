@@ -594,3 +594,56 @@ ${input.extractedText ? `원본(1688) 사진에 있던 셀링 포인트 문구 (
       : 'dark',
   };
 }
+
+export interface SourcingZhTranslation {
+  casual: string;
+  formal: string;
+}
+
+// 1688/알리바바 공장 담당자와의 실제 채팅(웨이신 등)에서 바로 쓸 수
+// 있는 번역을 만든다 - 구글 번역 같은 직역이 아니라 비즈니스 바이어
+// 말투로 다듬는다. 여러 줄/여러 조건이 섞여 있으면(예: 체크리스트에서
+// 고른 항목 여러 개) 번호를 매기거나 자연스럽게 하나의 메시지로
+// 엮어서 정리해준다 - 그래서 소싱 체크리스트의 "선택 항목 메시지
+// 생성" 기능도 이 함수를 그대로 재사용한다.
+export async function translateToChineseForSourcing(koreanText: string): Promise<SourcingZhTranslation> {
+  const prompt = `당신은 중국 1688/알리바바 공급업체와 소싱 비즈니스 채팅(웨이신/1688 메신저)을 하는 한국인 바이어를 돕는 번역가입니다.
+
+아래 한국어 메시지를 중국어로 번역해주세요. 공장 담당자와의 실제 채팅에서 바로 쓸 문장이니, 직역이 아니라 자연스럽고 매끄러운 비즈니스 중국어로 다듬어주세요. 여러 줄이나 여러 조건이 나열되어 있으면, 번호를 매기거나 자연스럽게 이어서 하나의 정리된 메시지로 구성해주세요. 숫자·제품 사양·금액·주문번호·고유명사는 정확히 그대로 보존하세요.
+
+번역할 한국어:
+"""
+${koreanText}
+"""
+
+두 가지 톤으로 각각 번역해주세요:
+- casual: 이미 대화를 이어오던 상대에게 편하게 쓰는, 예의 바른 비즈니스 채팅 톤
+- formal: 처음 조건을 정리해서 보내거나 좀 더 격식을 차려야 할 때 쓰는 정중한 톤
+
+반드시 아래 JSON 객체 형식으로만 응답하세요:
+{ "casual": "...", "formal": "..." }`;
+
+  const cleaned = await callClaude(prompt);
+  const parsed = parseJsonObject(cleaned) as Partial<SourcingZhTranslation>;
+  return { casual: parsed.casual || '', formal: parsed.formal || '' };
+}
+
+// 공장 담당자가 보내온 중국어 답장을 자연스러운 한국어로 - 숫자/금액/
+// 주문번호 등은 그대로 보존.
+export async function translateToKoreanForSourcing(chineseText: string): Promise<string> {
+  const prompt = `당신은 중국 1688/알리바바 공급업체 담당자가 보낸 중국어 메시지를, 소싱하는 한국인 바이어에게 번역해주는 번역가입니다.
+
+아래 중국어 메시지를 자연스러운 한국어로 번역해주세요. 배송/통관/결제 같은 비즈니스 용어는 정확하게, 숫자·금액·주문번호·고유명사는 그대로 보존해주세요.
+
+번역할 중국어:
+"""
+${chineseText}
+"""
+
+반드시 아래 JSON 객체 형식으로만 응답하세요:
+{ "translation": "..." }`;
+
+  const cleaned = await callClaude(prompt);
+  const parsed = parseJsonObject(cleaned) as { translation?: string };
+  return parsed.translation || '';
+}
