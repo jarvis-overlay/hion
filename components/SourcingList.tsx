@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useTransition } from 'react';
 import {
   updateSourcingStatus,
   updateSourcingStage,
+  updateSourcingPriority,
   updateSourcingInputStatus,
   updateSourcingItem,
   deleteSourcingItem,
@@ -57,6 +58,18 @@ const STAGE_LABEL: Record<string, string> = {
 const STAGE_STYLE: Record<string, string> = {
   candidate: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
   confirmed: 'bg-accentBg text-accent ring-1 ring-inset ring-accent/20',
+};
+
+const PRIORITY_LABEL: Record<string, string> = {
+  '1': '1순위',
+  '2': '2순위',
+  '3': '3순위',
+};
+
+const PRIORITY_STYLE: Record<string, string> = {
+  '1': 'bg-red-50 text-red-700',
+  '2': 'bg-warnBg text-warn',
+  '3': 'bg-paperLine text-inkSoft',
 };
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
@@ -1322,6 +1335,7 @@ export default function SourcingList({
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
+  const [priorityFilter, setPriorityFilter] = useState('all');
   const [enteredFilter, setEnteredFilter] = useState('all');
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1343,6 +1357,7 @@ export default function SourcingList({
     const filtered = withMargin.filter((it) => {
       if (statusFilter !== 'all' && (it.status || 'checking') !== statusFilter) return false;
       if (stageFilter !== 'all' && (it.stage || 'candidate') !== stageFilter) return false;
+      if (priorityFilter !== 'all' && (it.priority || 'none') !== priorityFilter) return false;
       if (enteredFilter !== 'all' && (it.input_status || 'not_entered') !== enteredFilter) return false;
       if (!q) return true;
       return (
@@ -1379,7 +1394,7 @@ export default function SourcingList({
     });
 
     return sorted;
-  }, [items, search, statusFilter, stageFilter, enteredFilter, sortKey]);
+  }, [items, search, statusFilter, stageFilter, priorityFilter, enteredFilter, sortKey]);
 
   return (
     <div>
@@ -1419,6 +1434,17 @@ export default function SourcingList({
           <option value="hold">보류</option>
         </select>
         <select
+          value={priorityFilter}
+          onChange={(e) => setPriorityFilter(e.target.value)}
+          className="border border-paperLine bg-white px-2 py-2 text-sm"
+        >
+          <option value="all">우선순위 전체</option>
+          <option value="1">1순위</option>
+          <option value="2">2순위</option>
+          <option value="3">3순위</option>
+          <option value="none">미지정</option>
+        </select>
+        <select
           value={sortKey}
           onChange={(e) => setSortKey(e.target.value as SortKey)}
           className="border border-paperLine bg-white px-2 py-2 text-sm"
@@ -1440,6 +1466,7 @@ export default function SourcingList({
           {rows.map((it) => {
             const status = it.status || 'checking';
             const stage = it.stage || 'candidate';
+            const priority: string | null = it.priority || null;
             // 등록 시점엔 판매가·원가가 둘 다 있으면 "입력"으로
             // 시작하지만, 그 뒤로는 카드에서 직접 바꿀 수 있는 독립적인
             // 값이다 (input_status 컬럼 - 가격을 나중에 고쳐도 자동으로
@@ -1471,6 +1498,15 @@ export default function SourcingList({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <h3 className="font-semibold text-sm">{it.title}</h3>
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
+                          priority
+                            ? PRIORITY_STYLE[priority]
+                            : 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine'
+                        }`}
+                      >
+                        {priority ? PRIORITY_LABEL[priority] : '우선순위 미지정'}
+                      </span>
                       <span
                         className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_STYLE[status]}`}
                       >
@@ -1617,6 +1653,19 @@ export default function SourcingList({
                     >
                       <option value="not_entered">미입력</option>
                       <option value="entered">입력</option>
+                    </select>
+                    <select
+                      value={priority ?? ''}
+                      disabled={isPending}
+                      onChange={(e) =>
+                        startTransition(() => updateSourcingPriority(it.id, e.target.value))
+                      }
+                      className="border border-paperLine bg-white text-xs px-1 py-0.5"
+                    >
+                      <option value="">우선순위 미지정</option>
+                      <option value="1">1순위</option>
+                      <option value="2">2순위</option>
+                      <option value="3">3순위</option>
                     </select>
                     <select
                       value={stage}

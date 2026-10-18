@@ -239,6 +239,17 @@ export async function updateSourcingStage(id: string, stage: string) {
   revalidatePath('/dashboard/sourcing/list');
 }
 
+// priority: '1' | '2' | '3' | '' (빈 문자열 = 미지정, null로 저장)
+export async function updateSourcingPriority(id: string, priority: string) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('sourcing_items')
+    .update({ priority: priority || null })
+    .eq('id', id);
+  if (error) console.error('[sourcing] updateSourcingPriority 실패:', error.message);
+  revalidatePath('/dashboard/sourcing/list');
+}
+
 export async function updateSourcingInputStatus(id: string, inputStatus: string) {
   const supabase = createClient();
   const { error } = await supabase
