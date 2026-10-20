@@ -1336,6 +1336,7 @@ export default function SourcingList({
   const [statusFilter, setStatusFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [priorityError, setPriorityError] = useState<string | null>(null);
   const [enteredFilter, setEnteredFilter] = useState('all');
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1456,6 +1457,12 @@ export default function SourcingList({
           ))}
         </select>
       </div>
+
+      {priorityError && (
+        <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2 mb-3">
+          우선순위 저장 실패: {priorityError}
+        </p>
+      )}
 
       {rows.length === 0 ? (
         <p className="text-sm text-inkSoft">
@@ -1657,9 +1664,14 @@ export default function SourcingList({
                     <select
                       value={priority ?? ''}
                       disabled={isPending}
-                      onChange={(e) =>
-                        startTransition(() => updateSourcingPriority(it.id, e.target.value))
-                      }
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setPriorityError(null);
+                        startTransition(async () => {
+                          const res = await updateSourcingPriority(it.id, next);
+                          if (res && 'error' in res) setPriorityError(res.error);
+                        });
+                      }}
                       className="border border-paperLine bg-white text-xs px-1 py-0.5"
                     >
                       <option value="">우선순위 미지정</option>
