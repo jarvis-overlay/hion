@@ -39,6 +39,14 @@ export default async function SourcingPage() {
     .select('*')
     .order('created_at', { ascending: false });
 
+  // 메모 카테고리(가격/재고/품질 등) - 체크리스트 기본 항목처럼 화면에서
+  // 직접 추가/삭제 가능 (마이그레이션 전이면 빈 배열, 카테고리 없이도
+  // 메모 자체는 그대로 쓸 수 있음).
+  const { data: noteCategories } = await supabase
+    .from('item_note_categories')
+    .select('*')
+    .order('position', { ascending: true });
+
   return (
     <div className="max-w-2xl">
       <h1 className="font-display text-2xl font-bold mb-1">소싱 리스트</h1>
@@ -50,6 +58,7 @@ export default async function SourcingPage() {
         items={items || []}
         checklistTemplate={checklistTemplate || []}
         notes={notes || []}
+        noteCategories={noteCategories || []}
       />
     </div>
   );

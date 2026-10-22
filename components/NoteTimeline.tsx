@@ -1,41 +1,45 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
-import { addItemNote, deleteItemNote, setItemNotePinned } from '@/app/dashboard/sourcing/list/noteActions';
+import {
+  addItemNote,
+  deleteItemNote,
+  setItemNotePinned,
+  addNoteCategory,
+  deleteNoteCategory,
+} from '@/app/dashboard/sourcing/list/noteActions';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 
-const CATEGORY_LABEL: Record<string, string> = {
-  price: '가격',
-  stock: '재고',
-  quality: '품질',
-  payment: '결제',
-  schedule: '일정',
-  etc: '기타',
-};
+// 라벨은 자유롭게 추가/삭제하니 색은 고정 매핑 대신 순서대로 돌려쓴다.
+const COLOR_CYCLE = [
+  'bg-profitBg text-profit',
+  'bg-accentBg text-accent',
+  'bg-warnBg text-warn',
+  'bg-paperLine text-inkSoft',
+];
 
-const CATEGORY_STYLE: Record<string, string> = {
-  price: 'bg-profitBg text-profit',
-  stock: 'bg-accentBg text-accent',
-  quality: 'bg-warnBg text-warn',
-  payment: 'bg-paperLine text-inkSoft',
-  schedule: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
-  etc: 'bg-paperLine text-inkSoft',
-};
-
-const CATEGORY_KEYS = Object.keys(CATEGORY_LABEL);
+function colorFor(categories: { id: string; label: string }[], label: string): string {
+  const idx = categories.findIndex((c) => c.label === label);
+  if (idx === -1) return 'bg-paperLine text-inkSoft';
+  return COLOR_CYCLE[idx % COLOR_CYCLE.length];
+}
 
 // 소싱 아이템/공급처 등 여러 대상에 재사용하는 메모 타임라인 - 단일
 // 텍스트 필드(content/notes)와 달리 날짜별로 여러 건을 계속 쌓을 수
 // 있고, 사진도 같이 남길 수 있다. 동업자와 같이 보는 걸 전제로, 쌓일수록
-// 찾기 쉽도록 카테고리 필터와 중요 메모 고정 기능을 더했다.
+// 찾기 쉽도록 카테고리 필터와 중요 메모 고정 기능을 더했다. 카테고리는
+// 코드에 고정하지 않고(사용자마다 메모 성격이 달라서) 체크리스트 기본
+// 항목처럼 화면에서 직접 추가/삭제한다.
 export default function NoteTimeline({
   entityType,
   entityId,
   notes,
+  categories,
 }: {
   entityType: string;
   entityId: string;
   notes: any[];
+  categories: { id: string; label: string }[];
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
@@ -45,6 +49,8 @@ export default function NoteTimeline({
   const [newCategory, setNewCategory] = useState<string | null>(null);
   const [newPinned, setNewPinned] = useState(false);
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
+  const [managingCategories, setManagingCategories] = useState(false);
+  const [newCategoryLabel, setNewCategoryLabel] = useState('');
 
   const visible = filterCategory ? notes.filter((n) => n.category === filterCategory) : notes;
   const pinned = [...visible.filter((n) => n.pinned)].sort(
@@ -64,8 +70,8 @@ export default function NoteTimeline({
               {n.author_email && ` · ${n.author_email.split('@')[0]}`}
             </span>
             {n.category && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${CATEGORY_STYLE[n.category]}`}>
-                {CATEGORY_LABEL[n.category]}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${colorFor(categories, n.category)}`}>
+                {n.category}
               </span>
             )}
           </div>
@@ -103,7 +109,7 @@ export default function NoteTimeline({
         <span className="text-xs font-semibold text-inkSoft">메모 기록 ({notes.length})</span>
       </div>
 
-      <div className="flex flex-wrap gap-1 mb-2">
+      <div className="flex flex-wrap items-center gap-1 mb-2">
         <button
           onClick={() => setFilterCategory(null)}
           className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
@@ -112,15 +118,15 @@ export default function NoteTimeline({
         >
           전체
         </button>
-        {CATEGORY_KEYS.map((c) => (
+        {categories.map((c) => (
           <button
-            key={c}
-            onClick={() => setFilterCategory(filterCategory === c ? null : c)}
+            key={c.id}
+            onClick={() => setFilterCategory(filterCategory === c.label ? null : c.label)}
             className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
-              filterCategory === c ? 'bg-accent text-white' : 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine'
+              filterCategory === c.label ? 'bg-accent text-white' : 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine'
             }`}
           >
-            {CATEGORY_LABEL[c]}
+            {c.label}
           </button>
         ))}
       </div>
@@ -176,16 +182,18 @@ export default function NoteTimeline({
         />
 
         <div className="flex flex-wrap gap-1">
-          {CATEGORY_KEYS.map((c) => (
+          {categories.map((c) => (
             <button
-              key={c}
+              key={c.id}
               type="button"
-              onClick={() => setNewCategory(newCategory === c ? null : c)}
+              onClick={() => setNewCategory(newCategory === c.label ? null : c.label)}
               className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
-                newCategory === c ? CATEGORY_STYLE[c] + ' ring-1 ring-inset ring-accent' : 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine'
+                newCategory === c.label
+                  ? colorFor(categories, c.label) + ' ring-1 ring-inset ring-accent'
+                  : 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine'
               }`}
             >
-              {CATEGORY_LABEL[c]}
+              {c.label}
             </button>
           ))}
         </div>
@@ -240,6 +248,55 @@ export default function NoteTimeline({
         </div>
         {error && <p className="text-[11px] text-warn bg-warnBg rounded px-2 py-1">{error}</p>}
       </form>
+
+      <div className="mt-3 pt-3 border-t border-paperLine">
+        <button
+          type="button"
+          onClick={() => setManagingCategories((v) => !v)}
+          className="text-[11px] text-inkSoft hover:text-ink"
+        >
+          ⚙️ 카테고리 관리 (모든 메모 공통) {managingCategories ? '▲' : '▼'}
+        </button>
+        {managingCategories && (
+          <div className="mt-2 grid gap-1.5">
+            {categories.map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-2 bg-paper rounded px-2 py-1 text-xs">
+                <span>{c.label}</span>
+                <button
+                  onClick={() => startTransition(() => deleteNoteCategory(c.id))}
+                  disabled={isPending}
+                  className="text-inkSoft hover:text-red-700"
+                >
+                  삭제
+                </button>
+              </div>
+            ))}
+            <form
+              action={() =>
+                startTransition(async () => {
+                  await addNoteCategory(newCategoryLabel);
+                  setNewCategoryLabel('');
+                })
+              }
+              className="flex gap-2"
+            >
+              <input
+                value={newCategoryLabel}
+                onChange={(e) => setNewCategoryLabel(e.target.value)}
+                placeholder="새 카테고리 (예: 선적, 발주확정)"
+                className="border border-paperLine bg-white px-2 py-1 text-xs flex-1"
+              />
+              <button
+                type="submit"
+                disabled={isPending || !newCategoryLabel.trim()}
+                className="text-xs text-accent font-semibold disabled:opacity-50"
+              >
+                + 추가
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

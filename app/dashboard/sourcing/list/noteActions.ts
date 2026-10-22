@@ -77,3 +77,32 @@ export async function setItemNotePinned(id: string, pinned: boolean) {
   if (error) console.error('[item notes] 고정 변경 실패:', error.message);
   revalidatePath(PATH);
 }
+
+// 메모 카테고리(가격/재고/품질 등)를 코드에 고정하지 않고 체크리스트
+// 기본 항목처럼 화면에서 직접 추가/삭제할 수 있게 함 - 소싱마다 메모
+// 내용 성격이 달라서(이 사용자는 발주 진행 위주) 고정된 분류가 안 맞을
+// 수 있기 때문.
+export async function addNoteCategory(label: string) {
+  if (!label.trim()) return;
+  const supabase = createClient();
+  const { data: maxRow } = await supabase
+    .from('item_note_categories')
+    .select('position')
+    .order('position', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextPosition = (maxRow?.position ?? -1) + 1;
+  const { error } = await supabase.from('item_note_categories').insert({
+    label: label.trim(),
+    position: nextPosition,
+  });
+  if (error) console.error('[item notes] 카테고리 추가 실패:', error.message);
+  revalidatePath(PATH);
+}
+
+export async function deleteNoteCategory(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from('item_note_categories').delete().eq('id', id);
+  if (error) console.error('[item notes] 카테고리 삭제 실패:', error.message);
+  revalidatePath(PATH);
+}

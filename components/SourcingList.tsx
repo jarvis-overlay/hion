@@ -603,7 +603,15 @@ function SupplierAddForm({
   );
 }
 
-function SuppliersSection({ item, notes }: { item: any; notes: any[] }) {
+function SuppliersSection({
+  item,
+  notes,
+  noteCategories,
+}: {
+  item: any;
+  notes: any[];
+  noteCategories: { id: string; label: string }[];
+}) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
@@ -697,7 +705,12 @@ function SuppliersSection({ item, notes }: { item: any; notes: any[] }) {
                   </div>
                 </div>
                 {isNoteExpanded && (
-                  <NoteTimeline entityType="supplier" entityId={s.id} notes={supplierNotes} />
+                  <NoteTimeline
+                    entityType="supplier"
+                    entityId={s.id}
+                    notes={supplierNotes}
+                    categories={noteCategories}
+                  />
                 )}
               </div>
             );
@@ -1345,10 +1358,12 @@ export default function SourcingList({
   items,
   checklistTemplate,
   notes,
+  noteCategories,
 }: {
   items: any[];
   checklistTemplate: any[];
   notes: any[];
+  noteCategories: { id: string; label: string }[];
 }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -1670,10 +1685,17 @@ export default function SourcingList({
 
                 {isOptionsExpanded && <OptionsSection item={it} />}
                 {isComparisonsExpanded && <ComparisonsSection item={it} />}
-                {isSuppliersExpanded && <SuppliersSection item={it} notes={notes} />}
+                {isSuppliersExpanded && (
+                  <SuppliersSection item={it} notes={notes} noteCategories={noteCategories} />
+                )}
                 {isChecklistExpanded && <ChecklistSection item={it} template={checklistTemplate} />}
                 {isNotesExpanded && (
-                  <NoteTimeline entityType="sourcing_item" entityId={it.id} notes={itemNotes} />
+                  <NoteTimeline
+                    entityType="sourcing_item"
+                    entityId={it.id}
+                    notes={itemNotes}
+                    categories={noteCategories}
+                  />
                 )}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
