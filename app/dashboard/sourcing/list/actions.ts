@@ -240,14 +240,30 @@ export async function updateSourcingStage(id: string, stage: string) {
 }
 
 // priority: '1' | '2' | '3' | '' (빈 문자열 = 미지정, null로 저장)
-export async function updateSourcingPriority(id: string, priority: string) {
+// 저장에 실패하면 화면에 원인을 보여줘야 한다 - 예전엔 서버 로그에만 남겨서
+// DB에 priority 컬럼이 없어도 값이 조용히 "미지정"으로 되돌아갈 뿐이라
+// 원인을 알 수 없었다.
+export async function updateSourcingPriority(
+  id: string,
+  priority: string
+): Promise<{ error: string } | { success: true }> {
   const supabase = createClient();
   const { error } = await supabase
     .from('sourcing_items')
     .update({ priority: priority || null })
     .eq('id', id);
-  if (error) console.error('[sourcing] updateSourcingPriority 실패:', error.message);
+  if (error) {
+    console.error('[sourcing] updateSourcingPriority 실패:', error.message);
+    if (/priority/i.test(error.message) && /column|schema cache/i.test(error.message)) {
+      return {
+        error:
+          '우선순위를 저장할 DB 컬럼이 아직 없어요. Supabase SQL Editor에서 supabase/sourcing_items_add_priority.sql을 실행해주세요.',
+      };
+    }
+    return { error: error.message };
+  }
   revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
 }
 
 export async function updateSourcingInputStatus(id: string, inputStatus: string) {

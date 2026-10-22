@@ -33,6 +33,7 @@ export function computeMargin(inputs: MarginInputs): MarginResult {
   const a = inputs.adCost ?? 0;
   const e = inputs.etcCost ?? 0;
   const profit = p - ov - c + iv - fee - s - is - a - e;
-  const marginPct = lp > 0 ? (profit / p) * 100 : null;
+  // 쿠폰이 판매가 전액이면 실제 판매가 p가 0이라 0으로 나누게 되므로 막는다
+  const marginPct = p > 0 ? (profit / p) * 100 : null;
   return { actualPrice: p, profit, marginPct };
 }

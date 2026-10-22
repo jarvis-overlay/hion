@@ -11,7 +11,12 @@ export const maxDuration = 60;
 // 기록은 그걸 넘길 수 있어서, 넘기면 조용히 잘려서 숫자가 틀려지므로
 // 페이지를 나눠 끝까지 가져온다.
 const PAGE = 1000;
-async function fetchAllMovements(supabase: ReturnType<typeof createClient>, fromIso: string) {
+// 조회 중 일부 페이지가 실패해도 화면 전체를 에러로 만들지 않고, 가져온 만큼만
+// 쓰면서 경고 문구를 띄운다.
+async function fetchAllMovements(
+  supabase: ReturnType<typeof createClient>,
+  fromIso: string
+): Promise<{ rows: any[]; error: string | null }> {
   const rows: any[] = [];
   for (let page = 0; page < 30; page++) {
     const { data, error } = await supabase
@@ -23,11 +28,11 @@ async function fetchAllMovements(supabase: ReturnType<typeof createClient>, from
       .order('occurred_at', { ascending: false })
       .order('id', { ascending: false })
       .range(page * PAGE, page * PAGE + PAGE - 1);
-    if (error) throw new Error(error.message);
+    if (error) return { rows, error: error.message };
     rows.push(...(data || []));
     if (!data || data.length < PAGE) break;
   }
-  return rows;
+  return { rows, error: null };
 }
 
 export default async function StockPage({
@@ -38,7 +43,7 @@ export default async function StockPage({
   const supabase = createClient();
   const todayStr = kstDateStr(new Date());
 
-  const [{ data: products }, { data: stockRows }, { data: channels }, { data: history }, seriesRows] =
+  const [productsRes, stockRes, { data: channels }, { data: history }, series] =
     await Promise.all([
       supabase.from('products').select('*').order('name'),
       supabase.from('warehouse_stock').select('product_id, warehouse, quantity'),
@@ -53,10 +58,15 @@ export default async function StockPage({
 
   const coupangConnected = channels?.find((c) => c.channel === 'coupang')?.connected || false;
 
+  const products = productsRes.data;
+  const stockRows = stockRes.data;
+  // 상품/재고/판매 중 하나라도 못 불러왔으면 숫자가 실제와 달라 보이므로 알려준다.
+  const loadError = productsRes.error?.message || stockRes.error?.message || series.error;
+
   const stats = buildStockStats({
     products: products || [],
     stockRows: stockRows || [],
-    movements: seriesRows,
+    movements: series.rows,
     todayStr,
   });
 
@@ -73,6 +83,13 @@ export default async function StockPage({
         </a>
         에서 해요.
       </p>
+
+      {loadError && (
+        <div className="rounded-xl bg-warnBg text-warn text-xs px-4 py-3 mb-4">
+          일부 데이터를 불러오지 못해 숫자가 실제와 다를 수 있어요. 새로고침해보시고, 계속되면
+          알려주세요. ({loadError})
+        </div>
+      )}
 
       <StockDashboard
         stats={stats}

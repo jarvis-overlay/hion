@@ -151,7 +151,10 @@ export function buildStockStats(input: {
   >();
   const dayTotals = dates.map((date) => ({ date, qty: 0, amount: 0, returns: 0 }));
 
-  for (const m of movements) {
+  for (const raw of movements) {
+    // 날짜가 비었거나 깨진 행 하나 때문에 화면 전체가 죽지 않게 건너뛴다
+    if (!raw.occurred_at || Number.isNaN(new Date(raw.occurred_at).getTime())) continue;
+    const m = { ...raw, quantity: Number(raw.quantity) || 0 };
     const idx = dateIndex.get(kstDateStr(m.occurred_at));
     if (idx === undefined) continue;
     let p = perProduct.get(m.product_id);
