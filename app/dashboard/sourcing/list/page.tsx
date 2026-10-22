@@ -31,6 +31,14 @@ export default async function SourcingPage() {
     .select('*')
     .order('position', { ascending: true });
 
+  // 메모 타임라인(item_notes) - sourcing_item/supplier 등 여러 대상에
+  // 재사용하는 테이블이라 FK 조인이 안 되니, 통째로 가져와서 화면에서
+  // entity_type/entity_id로 직접 매칭한다 (마이그레이션 전이면 빈 배열).
+  const { data: notes } = await supabase
+    .from('item_notes')
+    .select('*')
+    .order('created_at', { ascending: false });
+
   return (
     <div className="max-w-2xl">
       <h1 className="font-display text-2xl font-bold mb-1">소싱 리스트</h1>
@@ -38,7 +46,11 @@ export default async function SourcingPage() {
         소싱 후보 상품을 등록하고 상태 · 마진까지 한 곳에서 관리해요
       </p>
       <SourcingForm />
-      <SourcingList items={items || []} checklistTemplate={checklistTemplate || []} />
+      <SourcingList
+        items={items || []}
+        checklistTemplate={checklistTemplate || []}
+        notes={notes || []}
+      />
     </div>
   );
 }

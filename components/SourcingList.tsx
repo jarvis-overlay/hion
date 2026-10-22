@@ -34,6 +34,7 @@ import FxCalculator from '@/components/FxCalculator';
 import { MarginDetailFields } from '@/components/MarginDetailFields';
 import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
+import NoteTimeline from '@/components/NoteTimeline';
 import type { SourcingZhTranslation } from '@/lib/ai';
 
 const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
@@ -602,9 +603,10 @@ function SupplierAddForm({
   );
 }
 
-function SuppliersSection({ item }: { item: any }) {
+function SuppliersSection({ item, notes }: { item: any; notes: any[] }) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const suppliers: any[] = item.sourcing_item_suppliers || [];
   // 가격 비교가 목적이니 싼 순으로 정렬 (가격 없는 건 뒤로)
@@ -641,48 +643,62 @@ function SuppliersSection({ item }: { item: any }) {
                 />
               );
             }
+            const supplierNotes = notes.filter(
+              (n) => n.entity_type === 'supplier' && n.entity_id === s.id
+            );
+            const isNoteExpanded = expandedNoteId === s.id;
             return (
-              <div
-                key={s.id}
-                className={`flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 ${
-                  s.price != null && s.price === minPrice ? 'bg-accentBg' : 'bg-paper'
-                }`}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-ink truncate">{s.title || '(이름 없음)'}</span>
-                    {s.link && (
-                      <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline shrink-0">
-                        [링크]
-                      </a>
-                    )}
+              <div key={s.id} className="grid gap-1.5">
+                <div
+                  className={`flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 ${
+                    s.price != null && s.price === minPrice ? 'bg-accentBg' : 'bg-paper'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-ink truncate">{s.title || '(이름 없음)'}</span>
+                      {s.link && (
+                        <a href={s.link} target="_blank" rel="noreferrer" className="text-profit underline shrink-0">
+                          [링크]
+                        </a>
+                      )}
+                    </div>
+                    {s.notes && <p className="text-inkSoft mt-0.5">{s.notes}</p>}
                   </div>
-                  {s.notes && <p className="text-inkSoft mt-0.5">{s.notes}</p>}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {s.price != null && (
+                      <span className="font-mono">
+                        {CURRENCY_LABEL[s.currency] || ''}
+                        {s.price.toLocaleString()}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => setExpandedNoteId(isNoteExpanded ? null : s.id)}
+                      className="text-inkSoft hover:text-ink"
+                    >
+                      메모 기록{supplierNotes.length > 0 && ` (${supplierNotes.length})`}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingId(s.id);
+                        setAdding(false);
+                      }}
+                      className="text-inkSoft hover:text-ink"
+                    >
+                      수정
+                    </button>
+                    <button
+                      onClick={() => startTransition(() => deleteSourcingSupplier(s.id))}
+                      disabled={isPending}
+                      className="text-inkSoft hover:text-red-700"
+                    >
+                      삭제
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {s.price != null && (
-                    <span className="font-mono">
-                      {CURRENCY_LABEL[s.currency] || ''}
-                      {s.price.toLocaleString()}
-                    </span>
-                  )}
-                  <button
-                    onClick={() => {
-                      setEditingId(s.id);
-                      setAdding(false);
-                    }}
-                    className="text-inkSoft hover:text-ink"
-                  >
-                    수정
-                  </button>
-                  <button
-                    onClick={() => startTransition(() => deleteSourcingSupplier(s.id))}
-                    disabled={isPending}
-                    className="text-inkSoft hover:text-red-700"
-                  >
-                    삭제
-                  </button>
-                </div>
+                {isNoteExpanded && (
+                  <NoteTimeline entityType="supplier" entityId={s.id} notes={supplierNotes} />
+                )}
               </div>
             );
           })}
@@ -1328,9 +1344,11 @@ function ComparisonsSection({ item }: { item: any }) {
 export default function SourcingList({
   items,
   checklistTemplate,
+  notes,
 }: {
   items: any[];
   checklistTemplate: any[];
+  notes: any[];
 }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -1344,6 +1362,7 @@ export default function SourcingList({
   const [expandedSuppliersId, setExpandedSuppliersId] = useState<string | null>(null);
   const [expandedComparisonsId, setExpandedComparisonsId] = useState<string | null>(null);
   const [expandedChecklistId, setExpandedChecklistId] = useState<string | null>(null);
+  const [expandedNotesId, setExpandedNotesId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const rows = useMemo(() => {
@@ -1479,10 +1498,14 @@ export default function SourcingList({
             const isSuppliersExpanded = expandedSuppliersId === it.id;
             const isComparisonsExpanded = expandedComparisonsId === it.id;
             const isChecklistExpanded = expandedChecklistId === it.id;
+            const isNotesExpanded = expandedNotesId === it.id;
             const optionCount = (it.sourcing_item_options || []).length;
             const supplierCount = (it.sourcing_item_suppliers || []).length;
             const comparisonCount = (it.sourcing_item_comparisons || []).length;
             const checklistCheckedCount = (it.sourcing_item_checklist || []).filter((c: any) => c.checked).length;
+            const itemNotes = notes.filter(
+              (n) => n.entity_type === 'sourcing_item' && n.entity_id === it.id
+            );
 
             if (isEditing) {
               return (
@@ -1630,12 +1653,21 @@ export default function SourcingList({
                   >
                     소싱 체크리스트 {checklistCheckedCount > 0 && `(${checklistCheckedCount})`} {isChecklistExpanded ? '▲' : '▼'}
                   </button>
+                  <button
+                    onClick={() => setExpandedNotesId(isNotesExpanded ? null : it.id)}
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                  >
+                    메모 기록 {itemNotes.length > 0 && `(${itemNotes.length})`} {isNotesExpanded ? '▲' : '▼'}
+                  </button>
                 </div>
 
                 {isOptionsExpanded && <OptionsSection item={it} />}
                 {isComparisonsExpanded && <ComparisonsSection item={it} />}
-                {isSuppliersExpanded && <SuppliersSection item={it} />}
+                {isSuppliersExpanded && <SuppliersSection item={it} notes={notes} />}
                 {isChecklistExpanded && <ChecklistSection item={it} template={checklistTemplate} />}
+                {isNotesExpanded && (
+                  <NoteTimeline entityType="sourcing_item" entityId={it.id} notes={itemNotes} />
+                )}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
                   <span className="text-[11px] text-inkSoft">
