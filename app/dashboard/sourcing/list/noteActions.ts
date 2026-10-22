@@ -44,12 +44,17 @@ export async function addItemNote(
     imageUrl = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
   }
 
+  const category = String(formData.get('category') || '').trim() || null;
+  const pinned = formData.get('pinned') === 'true';
+
   const { error } = await supabase.from('item_notes').insert({
     entity_type: entityType,
     entity_id: entityId,
     author_email: user.email,
     body: body || null,
     image_url: imageUrl,
+    category,
+    pinned,
   });
   if (error) return { error: error.message };
 
@@ -61,5 +66,14 @@ export async function deleteItemNote(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from('item_notes').delete().eq('id', id);
   if (error) console.error('[item notes] 삭제 실패:', error.message);
+  revalidatePath(PATH);
+}
+
+// 작성할 땐 평범한 메모였는데 나중에 "이게 결론이었구나" 싶을 때도
+// 고정할 수 있도록 - 작성 시점의 고정 체크와 별개로 토글 가능해야 함.
+export async function setItemNotePinned(id: string, pinned: boolean) {
+  const supabase = createClient();
+  const { error } = await supabase.from('item_notes').update({ pinned }).eq('id', id);
+  if (error) console.error('[item notes] 고정 변경 실패:', error.message);
   revalidatePath(PATH);
 }
