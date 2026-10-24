@@ -62,6 +62,51 @@ export async function addItemNote(
   return { success: true };
 }
 
+// 기존 메모의 내용/카테고리/고정 여부/사진을 고친다. 사진은 1) 새
+// 파일을 올리면 교체, 2) removeImage만 true면 제거, 3) 둘 다 없으면
+// 기존 사진 그대로 유지 (update 페이로드에 image_url 키 자체를 안 넣어서
+// Supabase가 건드리지 않게 함).
+export async function updateItemNote(
+  id: string,
+  entityType: string,
+  entityId: string,
+  formData: FormData
+): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+
+  const body = String(formData.get('body') || '').trim();
+  const file = formData.get('image') as File | null;
+  const removeImage = formData.get('removeImage') === 'true';
+  const category = String(formData.get('category') || '').trim() || null;
+  const pinned = formData.get('pinned') === 'true';
+
+  if (!body && removeImage && (!file || file.size === 0)) {
+    return { error: '메모 내용이나 사진 중 하나는 남아있어야 해요.' };
+  }
+
+  const patch: Record<string, unknown> = { body: body || null, category, pinned };
+
+  if (file && file.size > 0) {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const mimeType = file.type || 'image/jpeg';
+    const path = `memo-notes/${entityType}/${entityId}/${Date.now()}.${extFromContentType(mimeType)}`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, buffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
+    if (upErr) return { error: upErr.message };
+    patch.image_url = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  } else if (removeImage) {
+    patch.image_url = null;
+  }
+
+  const { error } = await supabase.from('item_notes').update(patch).eq('id', id);
+  if (error) return { error: error.message };
+
+  revalidatePath(PATH);
+  return { success: true };
+}
+
 export async function deleteItemNote(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from('item_notes').delete().eq('id', id);

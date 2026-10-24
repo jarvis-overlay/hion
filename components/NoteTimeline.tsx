@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from 'react';
 import {
   addItemNote,
+  updateItemNote,
   deleteItemNote,
   setItemNotePinned,
   addNoteCategory,
@@ -22,6 +23,132 @@ function colorFor(categories: { id: string; label: string }[], label: string): s
   const idx = categories.findIndex((c) => c.label === label);
   if (idx === -1) return 'bg-paperLine text-inkSoft';
   return COLOR_CYCLE[idx % COLOR_CYCLE.length];
+}
+
+// 메모 수정 폼 - 작성 폼과 거의 같은 구조지만 기존 값(내용/카테고리/
+// 고정/사진)을 미리 채워두고, 사진은 그대로 두기/교체/제거 세 가지를
+// 고를 수 있어야 해서 별도 컴포넌트로 뺐다.
+function EditNoteForm({
+  n,
+  entityType,
+  entityId,
+  categories,
+  onDone,
+}: {
+  n: any;
+  entityType: string;
+  entityId: string;
+  categories: { id: string; label: string }[];
+  onDone: () => void;
+}) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [category, setCategory] = useState<string | null>(n.category || null);
+  const [pinned, setPinned] = useState<boolean>(!!n.pinned);
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
+
+  return (
+    <form
+      ref={formRef}
+      action={(fd) =>
+        startTransition(async () => {
+          setError(null);
+          if (file) fd.set('image', file);
+          if (category) fd.set('category', category);
+          fd.set('pinned', pinned ? 'true' : 'false');
+          fd.set('removeImage', removeImage ? 'true' : 'false');
+          const res = await updateItemNote(n.id, entityType, entityId, fd);
+          if (!res || 'error' in res) {
+            setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+            return;
+          }
+          onDone();
+        })
+      }
+      className="grid gap-1.5 bg-paper rounded px-2 py-2 text-xs ring-1 ring-accent"
+    >
+      <textarea
+        name="body"
+        defaultValue={n.body || ''}
+        rows={2}
+        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+      />
+
+      <div className="flex flex-wrap gap-1">
+        {categories.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => setCategory(category === c.label ? null : c.label)}
+            className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
+              category === c.label
+                ? colorFor(categories, c.label) + ' ring-1 ring-inset ring-accent'
+                : 'bg-white text-inkSoft ring-1 ring-inset ring-paperLine'
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      <label className="flex items-center gap-1.5 text-[11px] text-inkSoft">
+        <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} />
+        📌 중요 메모로 고정
+      </label>
+
+      {n.image_url && !removeImage && !previewUrl && (
+        <div className="flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={n.image_url} alt="" className="h-10 w-10 object-cover rounded border border-paperLine" />
+          <button
+            type="button"
+            onClick={() => setRemoveImage(true)}
+            className="text-[11px] text-inkSoft hover:text-red-700"
+          >
+            사진 제거
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className="text-[11px] text-accent font-semibold cursor-pointer">
+          {file ? '사진 변경' : '+ 사진 첨부/교체'}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const raw = e.target.files?.[0] || null;
+              const f = raw ? await shrinkImageForUpload(raw) : null;
+              setFile(f);
+              setPreviewUrl(f ? URL.createObjectURL(f) : null);
+              setRemoveImage(false);
+            }}
+          />
+        </label>
+        {previewUrl && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={previewUrl} alt="" className="h-8 w-8 object-cover rounded border border-paperLine" />
+        )}
+        <div className="flex gap-2 ml-auto">
+          <button type="button" onClick={onDone} className="text-[11px] text-inkSoft">
+            취소
+          </button>
+          <button
+            type="submit"
+            disabled={isPending}
+            className="btn-primary py-1 px-3 text-xs font-semibold disabled:opacity-50"
+          >
+            {isPending ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      </div>
+      {error && <p className="text-[11px] text-warn bg-warnBg rounded px-2 py-1">{error}</p>}
+    </form>
+  );
 }
 
 // 소싱 아이템/공급처 등 여러 대상에 재사용하는 메모 타임라인 - 단일
@@ -51,6 +178,7 @@ export default function NoteTimeline({
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
   const [managingCategories, setManagingCategories] = useState(false);
   const [newCategoryLabel, setNewCategoryLabel] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const visible = filterCategory ? notes.filter((n) => n.category === filterCategory) : notes;
   const pinned = [...visible.filter((n) => n.pinned)].sort(
@@ -82,6 +210,12 @@ export default function NoteTimeline({
               className={n.pinned ? 'text-accent' : 'text-inkSoft hover:text-ink'}
             >
               {n.pinned ? '📌 고정 해제' : '📌 고정'}
+            </button>
+            <button
+              onClick={() => setEditingId(n.id)}
+              className="text-inkSoft hover:text-ink"
+            >
+              수정
             </button>
             <button
               onClick={() => startTransition(() => deleteItemNote(n.id))}
@@ -134,17 +268,39 @@ export default function NoteTimeline({
       {pinned.length > 0 && (
         <div className="grid gap-2 mb-2">
           <span className="text-[11px] font-semibold text-accent">📌 고정된 메모</span>
-          {pinned.map((n) => (
-            <NoteCard key={n.id} n={n} />
-          ))}
+          {pinned.map((n) =>
+            editingId === n.id ? (
+              <EditNoteForm
+                key={n.id}
+                n={n}
+                entityType={entityType}
+                entityId={entityId}
+                categories={categories}
+                onDone={() => setEditingId(null)}
+              />
+            ) : (
+              <NoteCard key={n.id} n={n} />
+            )
+          )}
         </div>
       )}
 
       {regular.length > 0 && (
         <div className="grid gap-2">
-          {regular.map((n) => (
-            <NoteCard key={n.id} n={n} />
-          ))}
+          {regular.map((n) =>
+            editingId === n.id ? (
+              <EditNoteForm
+                key={n.id}
+                n={n}
+                entityType={entityType}
+                entityId={entityId}
+                categories={categories}
+                onDone={() => setEditingId(null)}
+              />
+            ) : (
+              <NoteCard key={n.id} n={n} />
+            )
+          )}
         </div>
       )}
 
