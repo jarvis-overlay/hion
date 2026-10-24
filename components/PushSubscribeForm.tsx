@@ -68,7 +68,8 @@ export default function PushSubscribeForm({
     setStatus(null);
     startTransition(async () => {
       const result = await sendTestPushNotification();
-      setStatus(`전송 ${result.sent}건 성공, ${result.failed}건 실패`);
+      const lines = [`전송 ${result.sent}건 성공, ${result.failed}건 실패`, ...(result.details || [])];
+      setStatus(lines.join('\n'));
     });
   }
 
@@ -127,7 +128,7 @@ export default function PushSubscribeForm({
           {isPending ? '전송 중...' : '테스트 푸시 보내기'}
         </button>
       )}
-      {status && <p className="text-xs mt-2 text-inkSoft">{status}</p>}
+      {status && <p className="text-xs mt-2 text-inkSoft whitespace-pre-wrap break-all">{status}</p>}
     </div>
   );
 }
