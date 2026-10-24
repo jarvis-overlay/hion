@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { notifyAllRecipients } from '@/lib/kakao';
 import { sendPushToAll } from '@/lib/webpush';
 
 const PATH = '/dashboard/sourcing/list';
@@ -88,24 +87,14 @@ export async function addItemNote(
   });
   if (error) return { error: error.message };
 
-  // 동업자와 같이 보는 메모라 새로 남기면 카카오톡/앱 푸시로 알려준다.
-  // 이미 등록된 주문 알림(lib/coupangSync.ts)과 같은 패턴 - 알림 전송에
-  // 실패해도 메모 저장 자체는 이미 끝났으니 별도로 감싸서 영향 안 주게
-  // 한다.
+  // 동업자와 같이 보는 메모라 새로 남기면 앱 푸시로 알려준다. 알림
+  // 전송에 실패해도 메모 저장 자체는 이미 끝났으니 별도로 감싸서 영향
+  // 안 주게 한다.
   try {
     const entityLabel = await describeNoteEntity(supabase, entityType, entityId);
     const preview = body ? (body.length > 200 ? body.slice(0, 200) + '...' : body) : '(사진만 첨부됨)';
     const prefix = `${pinned ? '📌 ' : ''}${category ? `[${category}] ` : ''}`;
-    const author = user.email?.split('@')[0] || '';
 
-    try {
-      await notifyAllRecipients(
-        supabase,
-        `📝 메모 추가 - ${entityLabel}\n${prefix}${preview}\n(작성: ${author})`
-      );
-    } catch (e) {
-      console.error('[item notes] 카카오 알림 전송 실패:', e);
-    }
     try {
       await sendPushToAll(supabase, {
         title: `📝 메모 추가: ${entityLabel}`,
