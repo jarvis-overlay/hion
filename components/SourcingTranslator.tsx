@@ -2,6 +2,16 @@
 
 import { useState, useTransition } from 'react';
 import { runTranslateToChinese, runTranslateToKorean } from '@/app/dashboard/sourcing/translate/actions';
+import { useDraft } from '@/lib/useDraft';
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 type Direction = 'ko-zh' | 'zh-ko';
 
@@ -37,13 +47,15 @@ function CopyButton({ text }: { text: string }) {
 
 export default function SourcingTranslator() {
   const [direction, setDirection] = useState<Direction>('ko-zh');
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft('sourcing-translate-draft');
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [copiedNotice, setCopiedNotice] = useState<string | null>(null);
 
   function handleTranslate() {
     setError(null);
+    setCopiedNotice(null);
     const inputSnapshot = text;
     startTransition(async () => {
       if (direction === 'ko-zh') {
@@ -56,6 +68,14 @@ export default function SourcingTranslator() {
           { id: crypto.randomUUID(), direction, input: inputSnapshot, casual: res.data.casual, formal: res.data.formal },
           ...prev,
         ]);
+        // 공장 채팅창에 바로 붙여넣을 수 있게 결과를 자동으로 클립보드에
+        // 복사해둔다 - 번역 결과가 2톤(편한/격식)이라 격식 톤을 기본으로
+        // 복사하고, 편한 톤을 쓰고 싶으면 해당 카드의 복사 버튼을 누르면
+        // 된다.
+        const toCopy = res.data.formal || res.data.casual;
+        if (toCopy && (await copyToClipboard(toCopy))) {
+          setCopiedNotice(res.data.formal ? '격식 톤이 클립보드에 복사됐어요' : '번역 결과가 클립보드에 복사됐어요');
+        }
       } else {
         const res = await runTranslateToKorean(inputSnapshot);
         if ('error' in res) {
@@ -66,6 +86,9 @@ export default function SourcingTranslator() {
           { id: crypto.randomUUID(), direction, input: inputSnapshot, translation: res.translation },
           ...prev,
         ]);
+        if (res.translation && (await copyToClipboard(res.translation))) {
+          setCopiedNotice('번역 결과가 클립보드에 복사됐어요');
+        }
       }
       setText('');
     });

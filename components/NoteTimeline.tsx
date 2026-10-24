@@ -10,6 +10,7 @@ import {
   deleteNoteCategory,
 } from '@/app/dashboard/sourcing/list/noteActions';
 import { shrinkImageForUpload } from '@/lib/clientImage';
+import { useDraft } from '@/lib/useDraft';
 
 // 라벨은 자유롭게 추가/삭제하니 색은 고정 매핑 대신 순서대로 돌려쓴다.
 const COLOR_CYCLE = [
@@ -171,6 +172,7 @@ export default function NoteTimeline({
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [body, setBody] = useDraft(`note-draft-${entityType}-${entityId}`);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [newCategory, setNewCategory] = useState<string | null>(null);
@@ -313,6 +315,7 @@ export default function NoteTimeline({
         action={(fd) =>
           startTransition(async () => {
             setError(null);
+            fd.set('body', body);
             if (file) fd.set('image', file);
             if (newCategory) fd.set('category', newCategory);
             fd.set('pinned', newPinned ? 'true' : 'false');
@@ -322,6 +325,7 @@ export default function NoteTimeline({
               return;
             }
             formRef.current?.reset();
+            setBody('');
             setFile(null);
             setPreviewUrl(null);
             setNewCategory(null);
@@ -332,7 +336,9 @@ export default function NoteTimeline({
       >
         <textarea
           name="body"
-          placeholder="새 메모 (공장 답변, 진행 상황 등 - 결론 위주로 짧게)"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="새 메모 (공장 답변, 진행 상황 등 - 결론 위주로 짧게, 앱을 벗어나도 임시저장돼요)"
           rows={2}
           className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
         />

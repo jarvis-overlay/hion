@@ -35,6 +35,7 @@ import { MarginDetailFields } from '@/components/MarginDetailFields';
 import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
 import NoteTimeline from '@/components/NoteTimeline';
+import { useDraft } from '@/lib/useDraft';
 import type { SourcingZhTranslation } from '@/lib/ai';
 
 const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
@@ -758,15 +759,17 @@ interface FreeTranslateEntry {
 // 확인, 가격 문의, 답장 해석 등)도 이 화면을 안 벗어나고 바로 번역할
 // 수 있게 하는 자유 입력 번역기 - /dashboard/sourcing/translate 페이지와
 // 같은 서버 액션을 그대로 재사용한다.
-function FreeTranslateBox() {
+function FreeTranslateBox({ draftKey }: { draftKey: string }) {
   const [direction, setDirection] = useState<FreeTranslateDirection>('ko-zh');
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(draftKey);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<FreeTranslateEntry[]>([]);
+  const [copiedNotice, setCopiedNotice] = useState<string | null>(null);
 
   function handleTranslate() {
     setError(null);
+    setCopiedNotice(null);
     const inputSnapshot = text;
     startTransition(async () => {
       if (direction === 'ko-zh') {
@@ -779,6 +782,17 @@ function FreeTranslateBox() {
           { id: crypto.randomUUID(), direction, input: inputSnapshot, casual: res.data.casual, formal: res.data.formal },
           ...prev,
         ]);
+        // 번역 결과를 자동으로 클립보드에 복사해서 공장 채팅창에 바로
+        // 붙여넣을 수 있게 함 - 2톤 중 격식 톤을 기본으로 복사.
+        const toCopy = res.data.formal || res.data.casual;
+        if (toCopy) {
+          try {
+            await navigator.clipboard.writeText(toCopy);
+            setCopiedNotice(res.data.formal ? '격식 톤이 클립보드에 복사됐어요' : '번역 결과가 클립보드에 복사됐어요');
+          } catch {
+            // 클립보드 권한 없음 - 조용히 무시
+          }
+        }
       } else {
         const res = await runTranslateToKorean(inputSnapshot);
         if ('error' in res) {
@@ -789,6 +803,14 @@ function FreeTranslateBox() {
           { id: crypto.randomUUID(), direction, input: inputSnapshot, translation: res.translation },
           ...prev,
         ]);
+        if (res.translation) {
+          try {
+            await navigator.clipboard.writeText(res.translation);
+            setCopiedNotice('번역 결과가 클립보드에 복사됐어요');
+          } catch {
+            // 클립보드 권한 없음 - 조용히 무시
+          }
+        }
       }
       setText('');
     });
@@ -836,6 +858,7 @@ function FreeTranslateBox() {
         {isPending ? '번역 중...' : '번역하기'}
       </button>
       {error && <p className="text-[11px] text-warn">{error}</p>}
+      {copiedNotice && <p className="text-[11px] text-profit">📋 {copiedNotice}</p>}
 
       {history.length > 0 && (
         <div className="grid gap-2">
@@ -985,7 +1008,7 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
 
   return (
     <div className="rounded-md ring-1 ring-paperLine p-3">
-      <FreeTranslateBox />
+      <FreeTranslateBox draftKey={`sourcing-translate-draft-${item.id}`} />
 
       <p className="text-[11px] text-inkSoft mb-2 mt-3 pt-3 border-t border-paperLine">
         항목을 체크하면서 공장과 확인하세요. 항목을 누르면 바로 쓸 수 있는 중국어 문구가 펼쳐져요.

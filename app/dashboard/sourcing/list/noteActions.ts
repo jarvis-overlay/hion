@@ -2,6 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { notifyAllRecipients } from '@/lib/kakao';
+import { sendPushToAll } from '@/lib/webpush';
 
 const PATH = '/dashboard/sourcing/list';
 // 새 버킷을 또 만들지 않고 detail-images 버킷을 재사용한다 (이미
@@ -12,6 +14,34 @@ function extFromContentType(contentType: string): string {
   if (contentType.includes('png')) return 'png';
   if (contentType.includes('webp')) return 'webp';
   return 'jpg';
+}
+
+// 알림 메시지에 "어느 소싱 아이템/공급처에 남긴 메모인지"를 보여주기
+// 위한 라벨. entity_type이 폴리모픽이라 각각 다른 테이블을 조회한다.
+async function describeNoteEntity(
+  supabase: ReturnType<typeof createClient>,
+  entityType: string,
+  entityId: string
+): Promise<string> {
+  if (entityType === 'sourcing_item') {
+    const { data } = await supabase
+      .from('sourcing_items')
+      .select('title')
+      .eq('id', entityId)
+      .maybeSingle();
+    return data?.title || '(이름 없는 소싱 아이템)';
+  }
+  if (entityType === 'supplier') {
+    const { data } = await supabase
+      .from('sourcing_item_suppliers')
+      .select('title, sourcing_items(title)')
+      .eq('id', entityId)
+      .maybeSingle();
+    const itemTitle = (data as any)?.sourcing_items?.title || '(상품 정보 없음)';
+    const supplierTitle = (data as any)?.title || '(이름 없는 공급처)';
+    return `${itemTitle} - 공급처 ${supplierTitle}`;
+  }
+  return entityType;
 }
 
 export async function addItemNote(
@@ -57,6 +87,37 @@ export async function addItemNote(
     pinned,
   });
   if (error) return { error: error.message };
+
+  // 동업자와 같이 보는 메모라 새로 남기면 카카오톡/앱 푸시로 알려준다.
+  // 이미 등록된 주문 알림(lib/coupangSync.ts)과 같은 패턴 - 알림 전송에
+  // 실패해도 메모 저장 자체는 이미 끝났으니 별도로 감싸서 영향 안 주게
+  // 한다.
+  try {
+    const entityLabel = await describeNoteEntity(supabase, entityType, entityId);
+    const preview = body ? (body.length > 200 ? body.slice(0, 200) + '...' : body) : '(사진만 첨부됨)';
+    const prefix = `${pinned ? '📌 ' : ''}${category ? `[${category}] ` : ''}`;
+    const author = user.email?.split('@')[0] || '';
+
+    try {
+      await notifyAllRecipients(
+        supabase,
+        `📝 메모 추가 - ${entityLabel}\n${prefix}${preview}\n(작성: ${author})`
+      );
+    } catch (e) {
+      console.error('[item notes] 카카오 알림 전송 실패:', e);
+    }
+    try {
+      await sendPushToAll(supabase, {
+        title: `📝 메모 추가: ${entityLabel}`,
+        body: `${prefix}${preview}`,
+        url: '/dashboard/sourcing/list',
+      });
+    } catch (e) {
+      console.error('[item notes] 푸시 알림 전송 실패:', e);
+    }
+  } catch (e) {
+    console.error('[item notes] 알림 준비 실패:', e);
+  }
 
   revalidatePath(PATH);
   return { success: true };
