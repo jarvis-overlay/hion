@@ -10,7 +10,7 @@ export default async function SourcingPage() {
   let { data: items, error } = await supabase
     .from('sourcing_items')
     .select(
-      '*, sourcing_item_options(*), sourcing_item_suppliers(*), sourcing_item_comparisons(*, sourcing_comparison_prices(*)), sourcing_item_checklist(*)'
+      '*, sourcing_item_options(*), sourcing_item_suppliers(*), sourcing_item_comparisons(*, sourcing_comparison_prices(*)), sourcing_item_checklist(*), sourcing_translation_history(*)'
     )
     .order('created_at', { ascending: false });
 

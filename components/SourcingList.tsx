@@ -28,6 +28,10 @@ import {
   generateChecklistMessage,
 } from '@/app/dashboard/sourcing/list/checklistActions';
 import { runTranslateToChinese, runTranslateToKorean } from '@/app/dashboard/sourcing/translate/actions';
+import {
+  saveChecklistTranslation,
+  deleteChecklistTranslation,
+} from '@/app/dashboard/sourcing/list/translationHistoryActions';
 import { computeMargin as computeMarginShared } from '@/lib/marginCalc';
 import { useMarginFields } from '@/lib/useMarginFields';
 import FxCalculator from '@/components/FxCalculator';
@@ -760,13 +764,23 @@ interface FreeTranslateEntry {
 // 체크리스트 항목뿐 아니라, 공장과 주고받는 그때그때의 메시지(주문
 // 확인, 가격 문의, 답장 해석 등)도 이 화면을 안 벗어나고 바로 번역할
 // 수 있게 하는 자유 입력 번역기 - /dashboard/sourcing/translate 페이지와
-// 같은 서버 액션을 그대로 재사용한다.
-function FreeTranslateBox({ draftKey }: { draftKey: string }) {
+// 같은 서버 액션을 그대로 재사용한다. 번역 결과는 sourcing_translation_history에
+// 저장해서 새로고침해도 안 사라지게 한다 (예전엔 새로고침하면 다
+// 날아가서 불편하다는 요청으로 추가함).
+function FreeTranslateBox({
+  draftKey,
+  sourcingItemId,
+  initialHistory,
+}: {
+  draftKey: string;
+  sourcingItemId: string;
+  initialHistory: FreeTranslateEntry[];
+}) {
   const [direction, setDirection] = useState<FreeTranslateDirection>('ko-zh');
   const [text, setText] = useDraft(draftKey);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<FreeTranslateEntry[]>([]);
+  const [history, setHistory] = useState<FreeTranslateEntry[]>(initialHistory);
   const [copiedNotice, setCopiedNotice] = useState<string | null>(null);
 
   function handleTranslate() {
@@ -780,10 +794,17 @@ function FreeTranslateBox({ draftKey }: { draftKey: string }) {
           setError(res.error);
           return;
         }
+        const newId = crypto.randomUUID();
         setHistory((prev) => [
-          { id: crypto.randomUUID(), direction, input: inputSnapshot, casual: res.data.casual, formal: res.data.formal },
+          { id: newId, direction, input: inputSnapshot, casual: res.data.casual, formal: res.data.formal },
           ...prev,
         ]);
+        await saveChecklistTranslation(newId, sourcingItemId, {
+          direction,
+          input: inputSnapshot,
+          casual: res.data.casual,
+          formal: res.data.formal,
+        });
         // 번역 결과를 자동으로 클립보드에 복사해서 공장 채팅창에 바로
         // 붙여넣을 수 있게 함 - 2톤 중 격식 톤을 기본으로 복사.
         const toCopy = res.data.formal || res.data.casual;
@@ -801,10 +822,16 @@ function FreeTranslateBox({ draftKey }: { draftKey: string }) {
           setError(res.error);
           return;
         }
+        const newId = crypto.randomUUID();
         setHistory((prev) => [
-          { id: crypto.randomUUID(), direction, input: inputSnapshot, translation: res.translation },
+          { id: newId, direction, input: inputSnapshot, translation: res.translation },
           ...prev,
         ]);
+        await saveChecklistTranslation(newId, sourcingItemId, {
+          direction,
+          input: inputSnapshot,
+          translation: res.translation,
+        });
         if (res.translation) {
           try {
             await navigator.clipboard.writeText(res.translation);
@@ -816,6 +843,11 @@ function FreeTranslateBox({ draftKey }: { draftKey: string }) {
       }
       setText('');
     });
+  }
+
+  function handleDeleteHistory(id: string) {
+    setHistory((prev) => prev.filter((h) => h.id !== id));
+    startTransition(() => deleteChecklistTranslation(id));
   }
 
   return (
@@ -866,7 +898,16 @@ function FreeTranslateBox({ draftKey }: { draftKey: string }) {
         <div className="grid gap-2">
           {history.map((h) => (
             <div key={h.id} className="bg-paper rounded px-2 py-1.5 text-xs grid gap-1.5">
-              <p className="text-inkSoft whitespace-pre-wrap">{h.input}</p>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-inkSoft whitespace-pre-wrap">{h.input}</p>
+                <button
+                  onClick={() => handleDeleteHistory(h.id)}
+                  disabled={isPending}
+                  className="text-inkSoft hover:text-red-700 shrink-0"
+                >
+                  삭제
+                </button>
+              </div>
               {h.direction === 'ko-zh' ? (
                 <>
                   {h.casual && (
@@ -1010,7 +1051,20 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
 
   return (
     <div className="rounded-md ring-1 ring-paperLine p-3">
-      <FreeTranslateBox draftKey={`sourcing-translate-draft-${item.id}`} />
+      <FreeTranslateBox
+        draftKey={`sourcing-translate-draft-${item.id}`}
+        sourcingItemId={item.id}
+        initialHistory={[...(item.sourcing_translation_history || [])]
+          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .map((h: any) => ({
+            id: h.id,
+            direction: h.direction,
+            input: h.input,
+            casual: h.casual || undefined,
+            formal: h.formal || undefined,
+            translation: h.translation || undefined,
+          }))}
+      />
 
       <p className="text-[11px] text-inkSoft mb-2 mt-3 pt-3 border-t border-paperLine">
         항목을 체크하면서 공장과 확인하세요. 항목을 누르면 바로 쓸 수 있는 중국어 문구가 펼쳐져요.
