@@ -11,6 +11,7 @@ import {
 } from '@/app/dashboard/sourcing/list/noteActions';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import { useDraft } from '@/lib/useDraft';
+import CollapsibleText from '@/components/CollapsibleText';
 
 // 라벨은 자유롭게 추가/삭제하니 색은 고정 매핑 대신 순서대로 돌려쓴다.
 const COLOR_CYCLE = [
@@ -228,7 +229,7 @@ export default function NoteTimeline({
             </button>
           </div>
         </div>
-        {n.body && <p className="text-ink whitespace-pre-wrap break-words mt-1">{n.body}</p>}
+        {n.body && <CollapsibleText text={n.body} maxChars={200} className="text-ink mt-1" />}
         {n.image_url && (
           <a href={n.image_url} target="_blank" rel="noreferrer">
             {/* eslint-disable-next-line @next/next/no-img-element */}

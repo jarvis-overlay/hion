@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { runTranslateToChinese, runTranslateToKorean } from '@/app/dashboard/sourcing/translate/actions';
 import { useDraft } from '@/lib/useDraft';
+import CollapsibleText from '@/components/CollapsibleText';
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -143,7 +144,7 @@ export default function SourcingTranslator() {
         <div className="grid gap-3">
           {history.map((h) => (
             <div key={h.id} className="card p-4 grid gap-2.5">
-              <p className="text-xs text-inkSoft whitespace-pre-wrap">{h.input}</p>
+              <CollapsibleText text={h.input} maxChars={150} className="text-xs text-inkSoft" />
               {h.direction === 'ko-zh' ? (
                 <div className="grid gap-2">
                   {h.casual && (
@@ -154,7 +155,7 @@ export default function SourcingTranslator() {
                         </span>
                         <CopyButton text={h.casual} />
                       </div>
-                      <p className="text-sm mt-1 whitespace-pre-wrap">{h.casual}</p>
+                      <CollapsibleText text={h.casual} maxChars={250} className="text-sm mt-1" />
                     </div>
                   )}
                   {h.formal && (
@@ -165,7 +166,7 @@ export default function SourcingTranslator() {
                         </span>
                         <CopyButton text={h.formal} />
                       </div>
-                      <p className="text-sm mt-1 whitespace-pre-wrap">{h.formal}</p>
+                      <CollapsibleText text={h.formal} maxChars={250} className="text-sm mt-1" />
                     </div>
                   )}
                 </div>
@@ -175,7 +176,7 @@ export default function SourcingTranslator() {
                     <span className="text-[10px] text-inkSoft font-semibold uppercase tracking-wide">번역</span>
                     <CopyButton text={h.translation || ''} />
                   </div>
-                  <p className="text-sm mt-1 whitespace-pre-wrap">{h.translation}</p>
+                  <CollapsibleText text={h.translation || ''} maxChars={250} className="text-sm mt-1" />
                 </div>
               )}
             </div>

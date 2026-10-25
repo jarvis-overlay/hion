@@ -39,6 +39,7 @@ import { MarginDetailFields } from '@/components/MarginDetailFields';
 import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
 import NoteTimeline from '@/components/NoteTimeline';
+import CollapsibleText from '@/components/CollapsibleText';
 import { useDraft } from '@/lib/useDraft';
 import type { SourcingZhTranslation } from '@/lib/ai';
 
@@ -899,7 +900,9 @@ function FreeTranslateBox({
           {history.map((h) => (
             <div key={h.id} className="bg-paper rounded px-2 py-1.5 text-xs grid gap-1.5">
               <div className="flex items-start justify-between gap-2">
-                <p className="text-inkSoft whitespace-pre-wrap">{h.input}</p>
+                <div className="min-w-0 flex-1">
+                  <CollapsibleText text={h.input} maxChars={120} className="text-inkSoft" />
+                </div>
                 <button
                   onClick={() => handleDeleteHistory(h.id)}
                   disabled={isPending}
@@ -916,7 +919,7 @@ function FreeTranslateBox({
                         <span className="text-[10px] text-inkSoft font-semibold uppercase">편한 톤</span>
                         <ChecklistCopyButton text={h.casual} />
                       </div>
-                      <p className="mt-1 whitespace-pre-wrap">{h.casual}</p>
+                      <CollapsibleText text={h.casual} maxChars={200} className="mt-1" />
                     </div>
                   )}
                   {h.formal && (
@@ -925,7 +928,7 @@ function FreeTranslateBox({
                         <span className="text-[10px] text-inkSoft font-semibold uppercase">격식 톤</span>
                         <ChecklistCopyButton text={h.formal} />
                       </div>
-                      <p className="mt-1 whitespace-pre-wrap">{h.formal}</p>
+                      <CollapsibleText text={h.formal} maxChars={200} className="mt-1" />
                     </div>
                   )}
                 </>
@@ -935,7 +938,7 @@ function FreeTranslateBox({
                     <span className="text-[10px] text-inkSoft font-semibold uppercase">번역</span>
                     <ChecklistCopyButton text={h.translation || ''} />
                   </div>
-                  <p className="mt-1 whitespace-pre-wrap">{h.translation}</p>
+                  <CollapsibleText text={h.translation || ''} maxChars={200} className="mt-1" />
                 </div>
               )}
             </div>
@@ -1284,14 +1287,14 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
                 <span className="text-[10px] text-inkSoft font-semibold uppercase tracking-wide">편한 톤</span>
                 <ChecklistCopyButton text={message.casual} />
               </div>
-              <p className="text-xs mt-1 whitespace-pre-wrap">{message.casual}</p>
+              <CollapsibleText text={message.casual} maxChars={200} className="text-xs mt-1" />
             </div>
             <div className="bg-paper rounded px-2 py-1.5">
               <div className="flex items-start justify-between gap-2">
                 <span className="text-[10px] text-inkSoft font-semibold uppercase tracking-wide">격식 톤</span>
                 <ChecklistCopyButton text={message.formal} />
               </div>
-              <p className="text-xs mt-1 whitespace-pre-wrap">{message.formal}</p>
+              <CollapsibleText text={message.formal} maxChars={200} className="text-xs mt-1" />
             </div>
           </div>
         )}
@@ -1725,9 +1728,12 @@ export default function SourcingList({
                 )}
 
                 {it.content && (
-                  <p className="text-xs text-ink whitespace-pre-wrap break-words">
-                    {linkifyText(it.content)}
-                  </p>
+                  <CollapsibleText
+                    text={it.content}
+                    maxChars={200}
+                    className="text-xs text-ink"
+                    render={linkifyText}
+                  />
                 )}
 
                 <div className="flex flex-wrap gap-2 text-xs">
