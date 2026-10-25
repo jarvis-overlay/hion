@@ -1460,8 +1460,21 @@ export default function SourcingList({
   const [expandedSuppliersId, setExpandedSuppliersId] = useState<string | null>(null);
   const [expandedComparisonsId, setExpandedComparisonsId] = useState<string | null>(null);
   const [expandedChecklistId, setExpandedChecklistId] = useState<string | null>(null);
-  const [expandedNotesId, setExpandedNotesId] = useState<string | null>(null);
+  // 메모 기록은 다른 항목(옵션/공급처/체크리스트 등)과 달리 접어두지 않고
+  // 기본으로 바로 보이게 한다 - 공장과의 소통/기록을 메모로 주로 하기
+  // 때문에 매번 펼쳐야 보이면 불편하다는 요청. 그래서 "펼친 것"이 아니라
+  // "접은 것"만 집합으로 추적한다(기본값 = 전부 펼쳐짐).
+  const [collapsedNotesIds, setCollapsedNotesIds] = useState<Set<string>>(new Set());
   const [isPending, startTransition] = useTransition();
+
+  function toggleNotesCollapsed(id: string) {
+    setCollapsedNotesIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const rows = useMemo(() => {
     const withMargin = items.map((it) => ({
@@ -1603,7 +1616,7 @@ export default function SourcingList({
             const isSuppliersExpanded = expandedSuppliersId === it.id;
             const isComparisonsExpanded = expandedComparisonsId === it.id;
             const isChecklistExpanded = expandedChecklistId === it.id;
-            const isNotesExpanded = expandedNotesId === it.id;
+            const isNotesCollapsed = collapsedNotesIds.has(it.id);
             const optionCount = (it.sourcing_item_options || []).length;
             const supplierCount = (it.sourcing_item_suppliers || []).length;
             const comparisonCount = (it.sourcing_item_comparisons || []).length;
@@ -1694,6 +1707,29 @@ export default function SourcingList({
                   {it.moq && <span>MOQ {it.moq}</span>}
                 </div>
 
+                {/* 메모 기록은 공장과의 소통/기록을 주로 담당하는 핵심
+                    기능이라, 옵션/공급처/체크리스트처럼 접어두지 않고
+                    기본으로 바로 보이게 한다. 필요하면 카드별로 접을 수는
+                    있음. */}
+                <div>
+                  <button
+                    onClick={() => toggleNotesCollapsed(it.id)}
+                    className="text-xs font-semibold text-inkSoft hover:text-ink flex items-center gap-1"
+                  >
+                    메모 기록 {itemNotes.length > 0 && `(${itemNotes.length})`} {isNotesCollapsed ? '▼' : '▲'}
+                  </button>
+                  {!isNotesCollapsed && (
+                    <div className="mt-1.5">
+                      <NoteTimeline
+                        entityType="sourcing_item"
+                        entityId={it.id}
+                        notes={itemNotes}
+                        categories={noteCategories}
+                      />
+                    </div>
+                  )}
+                </div>
+
                 {isMarginExpanded && m.marginPct != null && (
                   <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs bg-paper rounded-md px-3 py-2">
                     <div className="flex justify-between gap-2">
@@ -1761,12 +1797,6 @@ export default function SourcingList({
                   >
                     소싱 체크리스트 {checklistCheckedCount > 0 && `(${checklistCheckedCount})`} {isChecklistExpanded ? '▲' : '▼'}
                   </button>
-                  <button
-                    onClick={() => setExpandedNotesId(isNotesExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
-                  >
-                    메모 기록 {itemNotes.length > 0 && `(${itemNotes.length})`} {isNotesExpanded ? '▲' : '▼'}
-                  </button>
                 </div>
 
                 {isOptionsExpanded && <OptionsSection item={it} />}
@@ -1775,14 +1805,6 @@ export default function SourcingList({
                   <SuppliersSection item={it} notes={notes} noteCategories={noteCategories} />
                 )}
                 {isChecklistExpanded && <ChecklistSection item={it} template={checklistTemplate} />}
-                {isNotesExpanded && (
-                  <NoteTimeline
-                    entityType="sourcing_item"
-                    entityId={it.id}
-                    notes={itemNotes}
-                    categories={noteCategories}
-                  />
-                )}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
                   <span className="text-[11px] text-inkSoft">
