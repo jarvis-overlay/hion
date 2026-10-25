@@ -38,8 +38,8 @@ export default function SourcingForm() {
             startTransition(async () => {
               setError(null);
               const res = await addSourcingItem(fd, comparisons);
-              if ('error' in res) {
-                setError(res.error);
+              if (!res || 'error' in res) {
+                setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
                 return;
               }
               formRef.current?.reset();

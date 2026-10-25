@@ -60,8 +60,8 @@ export default function SourcingTranslator() {
     startTransition(async () => {
       if (direction === 'ko-zh') {
         const res = await runTranslateToChinese(inputSnapshot);
-        if ('error' in res) {
-          setError(res.error);
+        if (!res || 'error' in res) {
+          setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
           return;
         }
         setHistory((prev) => [
@@ -78,8 +78,8 @@ export default function SourcingTranslator() {
         }
       } else {
         const res = await runTranslateToKorean(inputSnapshot);
-        if ('error' in res) {
-          setError(res.error);
+        if (!res || 'error' in res) {
+          setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
           return;
         }
         setHistory((prev) => [

@@ -80,8 +80,8 @@ export default function SalesStrategyList({ items }: { items: any[] }) {
     startTransition(async () => {
       const res = await generateStrategy(item.id, keyword);
       setGeneratingId(null);
-      if ('error' in res) {
-        setErrors((e) => ({ ...e, [item.id]: res.error }));
+      if (!res || 'error' in res) {
+        setErrors((e) => ({ ...e, [item.id]: res?.error ?? '요청이 실패했어요. 다시 시도해주세요.' }));
         return;
       }
       setResults((r) => ({

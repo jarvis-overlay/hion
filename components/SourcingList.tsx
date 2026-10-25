@@ -229,8 +229,8 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
         startTransition(async () => {
           setError(null);
           const res = await updateSourcingItem(item.id, fd);
-          if ('error' in res) {
-            setError(res.error);
+          if (!res || 'error' in res) {
+            setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
             return;
           }
           onDone();
@@ -361,8 +361,8 @@ function OptionAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onD
         startTransition(async () => {
           setError(null);
           const res = await addSourcingOption(sourcingItemId, fd);
-          if ('error' in res) {
-            setError(res.error);
+          if (!res || 'error' in res) {
+            setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
             return;
           }
           formRef.current?.reset();
@@ -540,8 +540,8 @@ function SupplierAddForm({
           const res = initial
             ? await updateSourcingSupplier(initial.id, fd)
             : await addSourcingSupplier(sourcingItemId, fd);
-          if ('error' in res) {
-            setError(res.error);
+          if (!res || 'error' in res) {
+            setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
             return;
           }
           formRef.current?.reset();
@@ -790,8 +790,8 @@ function FreeTranslateBox({
     startTransition(async () => {
       if (direction === 'ko-zh') {
         const res = await runTranslateToChinese(inputSnapshot);
-        if ('error' in res) {
-          setError(res.error);
+        if (!res || 'error' in res) {
+          setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
           return;
         }
         const newId = crypto.randomUUID();
@@ -818,8 +818,8 @@ function FreeTranslateBox({
         }
       } else {
         const res = await runTranslateToKorean(inputSnapshot);
-        if ('error' in res) {
-          setError(res.error);
+        if (!res || 'error' in res) {
+          setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
           return;
         }
         const newId = crypto.randomUUID();
@@ -1041,8 +1041,8 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
     startTransition(async () => {
       const res = await generateChecklistMessage(checkedLabels);
       setGenerating(false);
-      if ('error' in res) {
-        setMessageError(res.error);
+      if (!res || 'error' in res) {
+        setMessageError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
       }
       setMessage(res.data);
@@ -1348,8 +1348,8 @@ function ComparisonsSection({ item }: { item: any }) {
                     startTransition(async () => {
                       setError(null);
                       const res = await updateSourcingComparison(c.id, updated);
-                      if ('error' in res) {
-                        setError(res.error);
+                      if (!res || 'error' in res) {
+                        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
                         return;
                       }
                       setEditingId(null);
@@ -1420,8 +1420,8 @@ function ComparisonsSection({ item }: { item: any }) {
             startTransition(async () => {
               setError(null);
               const res = await addSourcingComparison(item.id, c);
-              if ('error' in res) {
-                setError(res.error);
+              if (!res || 'error' in res) {
+                setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
                 return;
               }
               setAdding(false);
