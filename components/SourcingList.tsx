@@ -41,12 +41,14 @@ import type { SourcingZhTranslation } from '@/lib/ai';
 const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
 
 const STATUS_LABEL: Record<string, string> = {
+  not_set: '미입력',
   checking: '검토중',
   ordered: '발주완료',
   hold: '보류',
 };
 
 const STATUS_STYLE: Record<string, string> = {
+  not_set: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
   checking: 'bg-warnBg text-warn',
   ordered: 'bg-profitBg text-profit',
   hold: 'bg-paperLine text-inkSoft',
@@ -1487,6 +1489,7 @@ export default function SourcingList({
           className="border border-paperLine bg-white px-2 py-2 text-sm"
         >
           <option value="all">상태 전체</option>
+          <option value="not_set">미입력</option>
           <option value="checking">검토중</option>
           <option value="ordered">발주완료</option>
           <option value="hold">보류</option>
@@ -1775,6 +1778,7 @@ export default function SourcingList({
                       }
                       className="border border-paperLine bg-white text-xs px-1 py-0.5"
                     >
+                      <option value="not_set">미입력</option>
                       <option value="checking">검토중</option>
                       <option value="ordered">발주완료</option>
                       <option value="hold">보류</option>
