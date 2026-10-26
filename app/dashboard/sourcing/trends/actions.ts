@@ -117,25 +117,36 @@ function analyzeCoupangResults(
       ? ['작음', 'low', '작은 시장 (니치, 신중 필요)']
       : ['매우 작음', 'very-low', '매우 작은 시장 (수요 거의 없음 - 비추천 가능성 높음)'];
 
-  // "검증된 경쟁자가 몇 명인지"를 개수로만 재면, fetch할 때 지정한
-  // limit(예: 5개)에 막혀서 절대 "높음"이 안 나오는 경우가 생긴다
-  // (limit=5인데 "높음" 기준이 6명 이상이면 수학적으로 불가능). limit이
-  // 다른 곳마다 달라도 똑같이 통하도록, 목록에서 "비율"로 판정한다.
+  // 경쟁강도는 "1위 상품 수준으로 잘 팔리는 다른 상품이 이 카테고리
+  // 안에 얼마나 많은가"를 그 카테고리 1위 리뷰수 "대비 비율"로 잰다.
   //
-  // 중요: 이 기준 리뷰수는 반드시 시장규모 "큼" 경계선(1,000)보다 커야
-  // 한다. 중앙값의 정의상, 중앙값이 1,000 이상이면 목록의 최소 절반은
-  // 이미 1,000 이상이라는 게 수학적으로 보장된다 - 그래서 예전에 여길
-  // 1,000으로 맞췄더니 "시장 크면(중앙값>=1,000) 무조건 경쟁도 높음
-  // (비율>=50%)"이 되어버려서 "시장 크고 경쟁 낮음"(골든타임) 조합이
-  // 원천적으로 나올 수 없는 버그가 있었다(실측: 16개 후보 중 골든타임
-  // 0개). 시장규모 "매우 큼" 경계선(3,000)을 써야 두 지표가 실제로
-  // 독립적으로 갈린다.
-  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= 3000).length;
+  // 예전엔 절대 리뷰수(3,000개 이상)로 쟀는데, 그러면 시장규모(중앙값)
+  // 계산과 똑같은 숫자를 공유하게 돼서 두 지표가 수학적으로 묶여버리는
+  // 문제가 있었다: 중앙값이 1,000 이상이면 최소 절반은 이미 1,000
+  // 이상이라는 게 정의상 보장되므로, 기준을 1,000으로 맞추면 "시장
+  // 크면 무조건 경쟁도 높음"이 되어 "시장 크고 경쟁 낮음"(골든타임)
+  // 조합이 원천적으로 안 나왔다(실측: 16개 후보 중 0개). 기준을 3,000
+  // (시장규모 "매우 큼" 경계선)으로 올려서 그 버그는 고쳤지만, 이번엔
+  // 반대쪽이 묶여버렸다 - 중앙값 3,000 이상(매우 큼)이면 역시 정의상
+  // 최소 절반이 3,000 이상이라 "높음"이 자동 보장되고, 반대로 중앙값이
+  // 1,000~3,000(큼)인데 그 중 절반이 3,000을 넘는 경우는 통계적으로
+  // 거의 불가능하다. 그 결과 "큰 시장 + 경쟁 있음"(레드오션) 조합이
+  // "매우 큰 시장"일 때만 나오는데, 지금 AI가 브레인스토밍하는 구체적인
+  // 틈새형 카테고리명으로는 40개 샘플의 중앙값이 3,000을 넘기는 경우가
+  // 거의 없어서 레드오션이 사실상 안 나왔다(실측 확인).
+  //
+  // 절대 리뷰수 대신 "이 카테고리 1위 대비 비율"로 재면 시장규모(중앙값)
+  // 계산과 전혀 다른 숫자를 쓰게 되어 두 지표가 진짜로 독립적으로
+  // 갈린다 - 시장이 크든 작든, "1위만 튀고 나머지는 멀리 뒤처진 경우"
+  // (경쟁 낮음)와 "여러 상품이 1위와 비슷하게 선전하는 경우"(경쟁 높음)
+  // 를 규모와 무관하게 구분할 수 있다.
+  const topReviews = Math.max(...reviewCounts, 1);
+  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= topReviews * 0.3).length;
   const meaningfulRatio = meaningfulCompetitorCount / reviewCounts.length;
   const [competitionLabel, competitionTier]: [string, CompetitionTier] =
-    meaningfulRatio >= 0.5
+    meaningfulRatio >= 0.4
       ? ['높음', 'high']
-      : meaningfulRatio >= 0.2
+      : meaningfulRatio >= 0.15
       ? ['보통', 'mid']
       : ['낮음', 'low'];
 
@@ -150,7 +161,7 @@ function analyzeCoupangResults(
     top.price ?? '?'
   }원). 목록 내 리뷰 중앙값 ${medianReviews.toLocaleString()}개(최다는 "${topByReviews.name}" ${maxReviews.toLocaleString()}개) - 시장 규모는 중앙값 기준으로 판정: ${scaleDesc}. 조회된 ${
     coupang.length
-  }개 중 리뷰 3,000개 이상인 검증된 경쟁자 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
+  }개 중 1위 리뷰수의 30% 이상인 상품 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
     0
   )}%) - 경쟁강도 ${competitionLabel}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 가격 분포 ${priceRange}`;
 
