@@ -140,13 +140,17 @@ function analyzeCoupangResults(
   // 갈린다 - 시장이 크든 작든, "1위만 튀고 나머지는 멀리 뒤처진 경우"
   // (경쟁 낮음)와 "여러 상품이 1위와 비슷하게 선전하는 경우"(경쟁 높음)
   // 를 규모와 무관하게 구분할 수 있다.
+  // 실제 쿠팡 랭킹은 1위가 2위 이하를 압도하는 극단적인 쏠림이 흔해서
+  // (승자독식 구조), "1위 대비 30% 이상이 40% 이상" 같은 기준은 실측해
+  // 보니 거의 모든 카테고리에서 "낮음"으로만 나왔다 - 기준을 더
+  // 느슨하게 (1위 대비 15% 이상, 목록의 25% 이상) 조정.
   const topReviews = Math.max(...reviewCounts, 1);
-  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= topReviews * 0.3).length;
+  const meaningfulCompetitorCount = reviewCounts.filter((r) => r >= topReviews * 0.15).length;
   const meaningfulRatio = meaningfulCompetitorCount / reviewCounts.length;
   const [competitionLabel, competitionTier]: [string, CompetitionTier] =
-    meaningfulRatio >= 0.4
+    meaningfulRatio >= 0.25
       ? ['높음', 'high']
-      : meaningfulRatio >= 0.15
+      : meaningfulRatio >= 0.1
       ? ['보통', 'mid']
       : ['낮음', 'low'];
 
@@ -161,7 +165,7 @@ function analyzeCoupangResults(
     top.price ?? '?'
   }원). 목록 내 리뷰 중앙값 ${medianReviews.toLocaleString()}개(최다는 "${topByReviews.name}" ${maxReviews.toLocaleString()}개) - 시장 규모는 중앙값 기준으로 판정: ${scaleDesc}. 조회된 ${
     coupang.length
-  }개 중 1위 리뷰수의 30% 이상인 상품 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
+  }개 중 1위 리뷰수의 15% 이상인 상품 ${meaningfulCompetitorCount}개(${(meaningfulRatio * 100).toFixed(
     0
   )}%) - 경쟁강도 ${competitionLabel}. 목록 전체 리뷰 합계 ${totalReviews.toLocaleString()}개, 가격 분포 ${priceRange}`;
 
