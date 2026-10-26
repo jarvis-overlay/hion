@@ -50,6 +50,8 @@ const STATUS_LABEL: Record<string, string> = {
   checking: '검토중',
   ordered: '발주완료',
   hold: '보류',
+  on_sale: '판매중',
+  stopped: '판매중지',
 };
 
 const STATUS_STYLE: Record<string, string> = {
@@ -57,6 +59,8 @@ const STATUS_STYLE: Record<string, string> = {
   checking: 'bg-warnBg text-warn',
   ordered: 'bg-profitBg text-profit',
   hold: 'bg-paperLine text-inkSoft',
+  on_sale: 'bg-profitBg text-profit',
+  stopped: 'bg-paperLine text-inkSoft',
 };
 
 const STAGE_LABEL: Record<string, string> = {
@@ -73,8 +77,6 @@ const PRIORITY_LABEL: Record<string, string> = {
   '1': '1순위',
   '2': '2순위',
   '3': '3순위',
-  on_sale: '판매중',
-  stopped: '판매중지',
 };
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -1567,6 +1569,8 @@ export default function SourcingList({
           <option value="checking">검토중</option>
           <option value="ordered">발주완료</option>
           <option value="hold">보류</option>
+          <option value="on_sale">판매중</option>
+          <option value="stopped">판매중지</option>
         </select>
         <select
           value={priorityFilter}
@@ -1577,8 +1581,6 @@ export default function SourcingList({
           <option value="1">1순위</option>
           <option value="2">2순위</option>
           <option value="3">3순위</option>
-          <option value="on_sale">판매중</option>
-          <option value="stopped">판매중지</option>
           <option value="none">미지정</option>
         </select>
         <select
@@ -1846,8 +1848,6 @@ export default function SourcingList({
                       <option value="1">1순위</option>
                       <option value="2">2순위</option>
                       <option value="3">3순위</option>
-                      <option value="on_sale">판매중</option>
-                      <option value="stopped">판매중지</option>
                     </select>
                     <select
                       value={stage}
@@ -1872,6 +1872,8 @@ export default function SourcingList({
                       <option value="checking">검토중</option>
                       <option value="ordered">발주완료</option>
                       <option value="hold">보류</option>
+                      <option value="on_sale">판매중</option>
+                      <option value="stopped">판매중지</option>
                     </select>
                     <button onClick={() => setEditingId(it.id)} className="text-inkSoft hover:text-ink">
                       수정
