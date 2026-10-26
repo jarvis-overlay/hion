@@ -406,7 +406,11 @@ async function runOneRound(
   return { categories, consideredCategories };
 }
 
-const CATEGORY_STAGE_BUDGET_MS = 270000;
+// 예전엔 270000(30초 여유)이었는데, 레드오션처럼 조건에 맞는 후보를
+// 찾기 어려운 전략은 라운드를 반복하다가 실제로 300초 서버 시간제한에
+// 걸려서 "응답 없음(시간 초과)"로 실패하는 게 실측으로 확인됨 - 여유를
+// 30초에서 60초로 넉넉하게 늘려서 안전마진을 키운다.
+const CATEGORY_STAGE_BUDGET_MS = 240000;
 const CATEGORY_RETRY_WORST_CASE_MS = 90000;
 
 // 1단계: 시즌 선택 + 네이버 트렌드(되면)로 카테고리 후보를 먼저
@@ -436,7 +440,11 @@ export async function runCategoryRecommendation(
   // 서버에서 자동으로 몇 번 더 브레인스토밍해서 누적한다 - 사용자가
   // "다른 카테고리 더 보기"를 수동으로 여러 번 누를 필요 없게 함.
   const MIN_RESULTS_FOR_STRATEGY = 3;
-  const MAX_ROUNDS = 3;
+  // 예전엔 3이었는데, 조건에 맞는 후보가 잘 안 모이는 전략일수록
+  // 라운드를 끝까지(3번) 반복하다가 시간제한에 걸려 통째로 실패하는
+  // 경우가 있었다. 2로 줄여서 최악의 경우 소요 시간을 줄이는 대신,
+  // 모자라면 사용자가 "다른 카테고리 더 보기"를 한 번 더 누르면 됨.
+  const MAX_ROUNDS = 2;
   let allConsidered = round1.consideredCategories;
   let categories = round1.categories;
   let roundsRun = 1;
