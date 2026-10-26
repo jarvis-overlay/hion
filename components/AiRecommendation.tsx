@@ -93,9 +93,14 @@ export default function AiRecommendation({
     setProducts(null);
     setSelectedCategory(null);
     try {
-      // 저장해둔 제외 카테고리(조건 모드에서 관리) + 이번 세션에서 이미
-      // 본 카테고리를 합쳐서 전달한다.
-      const excludeList = [...excludedCategories.map((e) => e.label), ...seenCategories];
+      // 저장해둔 제외 카테고리는 "조건 설정" 모드일 때만 적용한다 - "AI
+      // 자유 추천"에서까지 몰래 적용되면 사용자가 모르는 사이에 후보가
+      // 줄어드는 문제가 생긴다(실제로 레드오션 같이 원래도 희소한 전략이
+      // 아예 안 나오게 된 버그였음).
+      const excludeList =
+        mode === 'custom'
+          ? [...excludedCategories.map((e) => e.label), ...seenCategories]
+          : seenCategories;
       const res = await runCategoryRecommendation(season, excludeList, strategy, buildCustomFilters());
       if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
       else if ('error' in res) setError(res.error);
