@@ -73,12 +73,16 @@ const PRIORITY_LABEL: Record<string, string> = {
   '1': '1순위',
   '2': '2순위',
   '3': '3순위',
+  on_sale: '판매중',
+  stopped: '판매중지',
 };
 
 const PRIORITY_STYLE: Record<string, string> = {
   '1': 'bg-red-50 text-red-700',
   '2': 'bg-warnBg text-warn',
   '3': 'bg-paperLine text-inkSoft',
+  on_sale: 'bg-profitBg text-profit',
+  stopped: 'bg-paperLine text-inkSoft',
 };
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
@@ -1573,6 +1577,8 @@ export default function SourcingList({
           <option value="1">1순위</option>
           <option value="2">2순위</option>
           <option value="3">3순위</option>
+          <option value="on_sale">판매중</option>
+          <option value="stopped">판매중지</option>
           <option value="none">미지정</option>
         </select>
         <select
@@ -1840,6 +1846,8 @@ export default function SourcingList({
                       <option value="1">1순위</option>
                       <option value="2">2순위</option>
                       <option value="3">3순위</option>
+                      <option value="on_sale">판매중</option>
+                      <option value="stopped">판매중지</option>
                     </select>
                     <select
                       value={stage}
