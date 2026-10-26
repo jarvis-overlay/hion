@@ -1,3 +1,4 @@
+import { createClient } from '@/lib/supabase/server';
 import AiRecommendation from '@/components/AiRecommendation';
 
 // 상품 추천 단계에서 쿠팡/알리바바를 실시간으로 여러 번 조회하느라
@@ -7,7 +8,16 @@ import AiRecommendation from '@/components/AiRecommendation';
 // 300초 안에 맞추는 쪽으로 대응함.
 export const maxDuration = 300;
 
-export default function TrendsPage() {
+export default async function TrendsPage() {
+  const supabase = createClient();
+  // "조건 모드"에서 매번 다시 입력 안 해도 되게 저장해둔 제외 카테고리
+  // 목록 (마이그레이션 전이면 빈 배열 - 조건 모드 자체는 그대로 쓸 수
+  // 있고 저장된 제외 목록만 비어있게 됨).
+  const { data: excludedCategories } = await supabase
+    .from('sourcing_excluded_categories')
+    .select('*')
+    .order('created_at', { ascending: true });
+
   return (
     <div>
       <h1 className="font-display text-2xl font-bold mb-1">AI 소싱 추천</h1>
@@ -15,7 +25,7 @@ export default function TrendsPage() {
         지금 소싱하기 좋은 아이템을 찾아봐요.
       </p>
 
-      <AiRecommendation />
+      <AiRecommendation excludedCategories={excludedCategories || []} />
     </div>
   );
 }

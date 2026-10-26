@@ -25,9 +25,46 @@ import {
 } from '@/lib/ai';
 import { fetchCoupangBestsellers, fetchAlibabaProducts, type CoupangBestseller } from '@/lib/brightdata';
 import { strategyBucket, type StrategyKey } from '@/lib/strategy';
+import { createClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
 
 export type { MarketScaleTier, CompetitionTier };
 export type { StrategyKey };
+
+// AI 소싱 추천 "조건 모드"에서 사용자가 지정하는 조건. includeScope는
+// AI 브레인스토밍 프롬프트에 지시로만 들어가고(코드로 강제 불가 - 카테
+// 고리명이 범위에 속하는지 기계적으로 판단할 방법이 없음), minReviewCount/
+// minPrice/maxPrice는 실제 쿠팡 데이터에서 코드로 직접 걸러서 100%
+// 지켜지게 한다.
+export interface CustomFilters {
+  includeScope?: string[];
+  minReviewCount?: number;
+  minPrice?: number;
+  maxPrice?: number;
+}
+
+function matchesCustomFilters(c: CoupangBestseller, filters?: CustomFilters): boolean {
+  if (!filters) return true;
+  const review = Number((c.reviewCount || '0').replace(/,/g, '')) || 0;
+  const price = Number((c.price || '').replace(/,/g, '')) || 0;
+  if (filters.minReviewCount != null && review < filters.minReviewCount) return false;
+  // 가격 정보를 못 읽은 상품(price=0)은 조건 미달로 단정하지 않고
+  // 그냥 통과시킨다 - 데이터 누락 때문에 멀쩡한 후보가 억울하게
+  // 걸러지는 것보다는 낫다.
+  if (price > 0) {
+    if (filters.minPrice != null && price < filters.minPrice) return false;
+    if (filters.maxPrice != null && price > filters.maxPrice) return false;
+  }
+  return true;
+}
+
+function applyCustomFilters(
+  coupang: CoupangBestseller[],
+  filters?: CustomFilters
+): CoupangBestseller[] {
+  if (!filters) return coupang;
+  return coupang.filter((c) => matchesCustomFilters(c, filters));
+}
 
 export interface MarketBadges {
   marketScaleLabel: string; // "매우 큼" / "큼" / "중간" / "작음" / "매우 작음"
@@ -232,7 +269,8 @@ async function runOneRound(
   season: Season,
   excludeCategories: string[],
   strategy: StrategyKey | 'all',
-  stageStart: number
+  stageStart: number,
+  customFilters?: CustomFilters
 ): Promise<{ categories: CategoryRecommendation[]; consideredCategories: string[] } | { error: string }> {
   const naverSummary = await fetchNaverTrendSummary();
   const contextSummary = naverSummary
@@ -241,7 +279,12 @@ async function runOneRound(
 
   let candidates: CategoryDraft[];
   try {
-    candidates = await recommendCategories({ season, contextSummary, excludeCategories });
+    candidates = await recommendCategories({
+      season,
+      contextSummary,
+      excludeCategories,
+      includeScope: customFilters?.includeScope,
+    });
   } catch (e: any) {
     return { error: e?.message || String(e) };
   }
@@ -305,9 +348,9 @@ async function runOneRound(
 
   const badgesByCategory = new Map<string, MarketBadges>();
   const findings: CategoryFinding[] = candidates.map((c) => {
-    const coupang = coupangByCategory.get(c.category) || [];
+    const coupang = applyCustomFilters(coupangByCategory.get(c.category) || [], customFilters);
     const analysis = analyzeCoupangResults(coupang);
-    if (!analysis) return { category: c.category, summary: '쿠팡 조회 실패/데이터 없음' };
+    if (!analysis) return { category: c.category, summary: '쿠팡 조회 실패/데이터 없음 (조건에 맞는 상품 없음)' };
     badgesByCategory.set(c.category, analysis.badges);
     return { category: c.category, summary: analysis.summary };
   });
@@ -365,13 +408,14 @@ const CATEGORY_RETRY_WORST_CASE_MS = 90000;
 export async function runCategoryRecommendation(
   season: Season,
   excludeCategories: string[] = [],
-  strategy: StrategyKey | 'all' = 'all'
+  strategy: StrategyKey | 'all' = 'all',
+  customFilters?: CustomFilters
 ): Promise<
   | { categories: CategoryRecommendation[]; consideredCategories: string[] }
   | { error: string }
 > {
   const stageStart = Date.now();
-  const round1 = await runOneRound(season, excludeCategories, strategy, stageStart);
+  const round1 = await runOneRound(season, excludeCategories, strategy, stageStart, customFilters);
   if ('error' in round1) return round1;
 
   // 후보 8개 중 특정 전략(예: 골든타임)에 맞는 게 1개뿐이거나 아예
@@ -391,7 +435,13 @@ export async function runCategoryRecommendation(
     roundsRun < MAX_ROUNDS &&
     Date.now() - stageStart < CATEGORY_STAGE_BUDGET_MS - CATEGORY_RETRY_WORST_CASE_MS
   ) {
-    const nextRound = await runOneRound(season, [...excludeCategories, ...allConsidered], strategy, stageStart);
+    const nextRound = await runOneRound(
+      season,
+      [...excludeCategories, ...allConsidered],
+      strategy,
+      stageStart,
+      customFilters
+    );
     roundsRun++;
     if ('error' in nextRound) break; // 실패하면 지금까지 모은 것만이라도 보여준다
     allConsidered = [...allConsidered, ...nextRound.consideredCategories];
@@ -452,7 +502,8 @@ export interface ProductRecommendation {
 // 나눴다.
 export async function runProductRecommendation(
   category: string,
-  season: Season
+  season: Season,
+  customFilters?: CustomFilters
 ): Promise<{ recommendations: ProductRecommendation[] } | { error: string }> {
   let keywords: { ko: string; en: string }[];
   try {
@@ -482,7 +533,13 @@ export async function runProductRecommendation(
   const coupangResults = await Promise.all(
     keywords.map(async ({ ko }) => ({
       keyword: ko,
-      coupang: await fetchCoupangBestsellers(ko, 20).catch(() => []),
+      // 커스텀 조건(최소 리뷰수/가격 범위)을 여기서 바로 적용해둔다 -
+      // 대표 상품 선정, 뱃지 계산, 화면에 보여줄 참고 상품 목록까지
+      // 전부 이 필터링된 풀을 그대로 쓰게 되어 조건이 끝까지 지켜진다.
+      coupang: applyCustomFilters(
+        await fetchCoupangBestsellers(ko, 20).catch(() => []),
+        customFilters
+      ),
     }))
   );
 
@@ -856,4 +913,24 @@ export async function runProductSearch(keyword: string): Promise<ProductSearchRe
     })),
     naverUnavailable,
   };
+}
+
+// AI 소싱 추천 "조건 모드"의 제외 카테고리 목록 - 체크리스트 기본
+// 항목과 같은 패턴으로 화면에서 직접 추가/삭제, 매번 다시 입력 안 해도
+// 되게 저장해둔다.
+export async function addExcludedCategory(label: string) {
+  if (!label.trim()) return;
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('sourcing_excluded_categories')
+    .insert({ label: label.trim() });
+  if (error) console.error('[AI 추천] 제외 카테고리 추가 실패:', error.message);
+  revalidatePath('/dashboard/sourcing/trends');
+}
+
+export async function deleteExcludedCategory(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from('sourcing_excluded_categories').delete().eq('id', id);
+  if (error) console.error('[AI 추천] 제외 카테고리 삭제 실패:', error.message);
+  revalidatePath('/dashboard/sourcing/trends');
 }

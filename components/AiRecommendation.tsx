@@ -1,12 +1,15 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, useTransition } from 'react';
 import {
   runCategoryRecommendation,
   runProductRecommendation,
+  addExcludedCategory,
+  deleteExcludedCategory,
   type ProductRecommendation,
   type CategoryRecommendation,
   type StrategyKey,
+  type CustomFilters,
 } from '@/app/dashboard/sourcing/trends/actions';
 import type { Season } from '@/lib/ai';
 import { Badge, MarketBadgeRow, strategyBucket, type StrategyBucket, STRATEGY_OPTIONS } from '@/components/MarketBadge';
@@ -17,9 +20,24 @@ const SEASON_OPTIONS: { value: Season; label: string }[] = [
   { value: 'all', label: '사계절' },
 ];
 
-export default function AiRecommendation() {
+export default function AiRecommendation({
+  excludedCategories,
+}: {
+  excludedCategories: { id: string; label: string }[];
+}) {
   const [season, setSeason] = useState<Season>('all');
   const [strategy, setStrategy] = useState<StrategyKey | 'all'>('all');
+  // "AI 자유 추천"은 지금까지와 동일하게 시즌/전략만으로 바로 찾고,
+  // "조건 설정"은 아래 입력값(제외 카테고리/범위/리뷰수/가격)을 같이
+  // 반영해서 찾는다 - 비슷비슷한 추천이 아니라 내 상황에 맞는 추천을
+  // 받고 싶다는 요청으로 추가함.
+  const [mode, setMode] = useState<'auto' | 'custom'>('auto');
+  const [includeScope, setIncludeScope] = useState('');
+  const [minReviewCount, setMinReviewCount] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [newExcludeLabel, setNewExcludeLabel] = useState('');
+  const [isPendingExclude, startExcludeTransition] = useTransition();
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [categories, setCategories] = useState<CategoryRecommendation[] | null>(null);
   // "더 보기"를 눌렀을 때 AI가 방금 전략 필터링으로 걸러진 후보를 또
@@ -53,13 +71,32 @@ export default function AiRecommendation() {
 
   const selectedStrategyOption = STRATEGY_OPTIONS.find((o) => o.value === strategy)!;
 
+  // "조건 설정" 모드일 때만 필터를 실제로 적용한다 - "AI 자유 추천"에서는
+  // 입력값이 남아있어도 무시(모드 전환만으로 켜고 끌 수 있게).
+  function buildCustomFilters(): CustomFilters | undefined {
+    if (mode !== 'custom') return undefined;
+    const scope = includeScope
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const filters: CustomFilters = {};
+    if (scope.length > 0) filters.includeScope = scope;
+    if (minReviewCount.trim()) filters.minReviewCount = Number(minReviewCount);
+    if (minPrice.trim()) filters.minPrice = Number(minPrice);
+    if (maxPrice.trim()) filters.maxPrice = Number(maxPrice);
+    return filters;
+  }
+
   async function fetchCategories() {
     setLoadingCategories(true);
     setError(null);
     setProducts(null);
     setSelectedCategory(null);
     try {
-      const res = await runCategoryRecommendation(season, seenCategories, strategy);
+      // 저장해둔 제외 카테고리(조건 모드에서 관리) + 이번 세션에서 이미
+      // 본 카테고리를 합쳐서 전달한다.
+      const excludeList = [...excludedCategories.map((e) => e.label), ...seenCategories];
+      const res = await runCategoryRecommendation(season, excludeList, strategy, buildCustomFilters());
       if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
       else if ('error' in res) setError(res.error);
       else {
@@ -89,7 +126,7 @@ export default function AiRecommendation() {
     setError(null);
     setProducts(null);
     try {
-      const res = await runProductRecommendation(category, season);
+      const res = await runProductRecommendation(category, season, buildCustomFilters());
       if (pickRequestRef.current !== requestId) return; // 그 사이 다른 카테고리를 클릭함 - 이 응답은 버림
       if (!res) setError('응답이 없어요 (시간 초과일 수 있어요). 다시 시도해주세요.');
       else if ('error' in res) setError(res.error);
@@ -164,6 +201,141 @@ export default function AiRecommendation() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="mb-5">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-inkSoft mb-2">
+          3단계 · 추천 방식
+        </p>
+        <div className="flex gap-2 mb-3">
+          <button
+            onClick={() => {
+              setMode('auto');
+              setSeenCategories([]);
+              setCategories(null);
+              setHasSearchedCategories(false);
+            }}
+            className={`flex-1 rounded-xl p-3 text-left transition ${
+              mode === 'auto' ? 'bg-accentBg ring-2 ring-accent' : 'bg-white ring-1 ring-paperLine hover:ring-accent'
+            }`}
+          >
+            <div className="text-sm font-bold mb-0.5">🤖 AI 자유 추천</div>
+            <p className="text-[11px] text-inkSoft leading-snug">조건 없이 AI가 알아서 찾아줘요</p>
+          </button>
+          <button
+            onClick={() => {
+              setMode('custom');
+              setSeenCategories([]);
+              setCategories(null);
+              setHasSearchedCategories(false);
+            }}
+            className={`flex-1 rounded-xl p-3 text-left transition ${
+              mode === 'custom' ? 'bg-accentBg ring-2 ring-accent' : 'bg-white ring-1 ring-paperLine hover:ring-accent'
+            }`}
+          >
+            <div className="text-sm font-bold mb-0.5">🎯 조건 설정</div>
+            <p className="text-[11px] text-inkSoft leading-snug">내가 정한 조건 안에서 찾아줘요</p>
+          </button>
+        </div>
+
+        {mode === 'custom' && (
+          <div className="grid gap-3 bg-paper rounded-xl p-4">
+            <div>
+              <p className="text-xs font-semibold text-inkSoft mb-1.5">
+                제외 카테고리 (이미 하는 중이거나 피하고 싶은 상품군)
+              </p>
+              {excludedCategories.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {excludedCategories.map((c) => (
+                    <span
+                      key={c.id}
+                      className="flex items-center gap-1 text-[11px] bg-white ring-1 ring-paperLine rounded-full pl-2.5 pr-1.5 py-1"
+                    >
+                      {c.label}
+                      <button
+                        onClick={() => startExcludeTransition(() => deleteExcludedCategory(c.id))}
+                        disabled={isPendingExclude}
+                        className="text-inkSoft hover:text-red-700"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  value={newExcludeLabel}
+                  onChange={(e) => setNewExcludeLabel(e.target.value)}
+                  placeholder="예: 주방용품"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1 rounded"
+                />
+                <button
+                  onClick={() => {
+                    if (!newExcludeLabel.trim()) return;
+                    startExcludeTransition(() => addExcludedCategory(newExcludeLabel.trim()));
+                    setNewExcludeLabel('');
+                  }}
+                  disabled={isPendingExclude || !newExcludeLabel.trim()}
+                  className="text-xs text-accent font-semibold px-2 disabled:opacity-40"
+                >
+                  + 추가
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-inkSoft mb-1.5">
+                포함 범위 (이 안에서만 찾아줘요, 선택 입력)
+              </p>
+              <input
+                value={includeScope}
+                onChange={(e) => setIncludeScope(e.target.value)}
+                placeholder="예: 욕실용품, 수납정리 (쉼표로 여러 개)"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full rounded"
+              />
+              <p className="text-[10px] text-inkSoft mt-1">
+                ⚠️ 이 조건은 AI에게 지시만 하는 거라 100% 보장은 안 돼요.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <p className="text-xs font-semibold text-inkSoft mb-1.5">최소 리뷰수</p>
+                <input
+                  type="number"
+                  value={minReviewCount}
+                  onChange={(e) => setMinReviewCount(e.target.value)}
+                  placeholder="예: 500"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full rounded"
+                />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-inkSoft mb-1.5">최소 가격(원)</p>
+                <input
+                  type="number"
+                  value={minPrice}
+                  onChange={(e) => setMinPrice(e.target.value)}
+                  placeholder="예: 10000"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full rounded"
+                />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-inkSoft mb-1.5">최대 가격(원)</p>
+                <input
+                  type="number"
+                  value={maxPrice}
+                  onChange={(e) => setMaxPrice(e.target.value)}
+                  placeholder="예: 50000"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full rounded"
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-inkSoft -mt-1">
+              ✅ 리뷰수/가격 조건은 실제 쿠팡 데이터로 코드에서 직접 걸러내서 100% 지켜져요.
+            </p>
+          </div>
+        )}
       </div>
 
       <button

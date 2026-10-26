@@ -151,8 +151,9 @@ export async function recommendCategories(input: {
   season: Season;
   contextSummary: string | null;
   excludeCategories?: string[];
+  includeScope?: string[];
 }): Promise<CategoryRecommendation[]> {
-  const { season, contextSummary, excludeCategories = [] } = input;
+  const { season, contextSummary, excludeCategories = [], includeScope = [] } = input;
 
   const dataSection = contextSummary
     ? `아래는 참고할 실데이터입니다:\n\n${contextSummary}`
@@ -165,6 +166,17 @@ export async function recommendCategories(input: {
           .join('\n')}\n`
       : '';
 
+  // 사용자가 "조건 모드"에서 입력한 범위 - 지정했으면 이 범위를 벗어난
+  // 카테고리는 절대 추천하면 안 된다 (벗어나면 강제가 안 되는 AI 지시일
+  // 뿐이라, 실데이터 조회 단계에서 코드로 한 번 더 못 거르는 유일한
+  // 조건이라 프롬프트에서 최대한 강하게 못박는다).
+  const scopeSection =
+    includeScope.length > 0
+      ? `\n**사용자가 지정한 범위입니다 - 반드시 아래 범위 안에 속하는 카테고리만 추천하세요. 범위를 벗어나는 카테고리는 절대 추천하지 마세요**:\n${includeScope
+          .map((s) => `- ${s}`)
+          .join('\n')}\n`
+      : '';
+
   const prompt = `당신은 1인 이커머스 셀러(쿠팡 로켓그로스, 중국 알리바바/1688에서 소싱)의 소싱 컨설턴트입니다.
 
 사용자는 지금 **"${SEASON_LABEL[season]}"** 을 집중적으로 소싱하고 싶어합니다.
@@ -173,6 +185,7 @@ export async function recommendCategories(input: {
 
 ${SOURCING_EXCLUSION_RULE}
 ${excludeSection}
+${scopeSection}
 ${dataSection}
 
 이 조건에 맞는, 지금 소싱하기 좋은 **카테고리(상품군)** 8개를 최대한 다양하게(서로 겹치지 않는 여러 생활 영역에 걸쳐서) 추천해주세요. 시장 규모가 클 것 같은 것부터 작고 틈새인 것까지, 경쟁이 치열할 것 같은 것부터 아직 안 붐빌 것 같은 것까지 골고루 섞어주세요 - 나중에 실데이터로 검증한 뒤 시장규모/경쟁강도 조합별로 걸러서 보여줄 예정이라, 후보 단계에서부터 스펙트럼이 다양해야 합니다. "패션의류" 같은 너무 넓은 대분류 말고, "여름 휴대용 냉방 소품" "캠핑 조명용품" 처럼 실제로 무엇을 찾아야 할지 감이 오는 수준의 구체성으로 적어주세요. 단, "A/B", "A·B", "A 및 B" 처럼 서로 다른 상품 여러 개를 하나로 묶은 이름은 절대 쓰지 마세요 — 하나의 일관된 상품군이어야 합니다 (예: "수건걸이/샴푸디스펜서 세트" (X), "선풍기/가습기" (X) → "욕실 정리용품" (O)).
