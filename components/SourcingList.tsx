@@ -77,12 +77,16 @@ const PRIORITY_LABEL: Record<string, string> = {
   '1': '1순위',
   '2': '2순위',
   '3': '3순위',
+  waiting: '발주 대기 중',
+  ordering: '발주 진행 중',
 };
 
 const PRIORITY_STYLE: Record<string, string> = {
   '1': 'bg-red-50 text-red-700',
   '2': 'bg-warnBg text-warn',
   '3': 'bg-paperLine text-inkSoft',
+  waiting: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
+  ordering: 'bg-accentBg text-accent',
   on_sale: 'bg-profitBg text-profit',
   stopped: 'bg-paperLine text-inkSoft',
 };
@@ -1581,6 +1585,8 @@ export default function SourcingList({
           <option value="1">1순위</option>
           <option value="2">2순위</option>
           <option value="3">3순위</option>
+          <option value="waiting">발주 대기 중</option>
+          <option value="ordering">발주 진행 중</option>
           <option value="none">미지정</option>
         </select>
         <select
@@ -1848,6 +1854,8 @@ export default function SourcingList({
                       <option value="1">1순위</option>
                       <option value="2">2순위</option>
                       <option value="3">3순위</option>
+                      <option value="waiting">발주 대기 중</option>
+                      <option value="ordering">발주 진행 중</option>
                     </select>
                     <select
                       value={stage}
