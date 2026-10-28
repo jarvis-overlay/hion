@@ -3,7 +3,7 @@
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { generateThumbnailImage, type ThumbnailPosition } from '@/lib/imageProcessing';
+import { generateThumbnailImage, applyThumbnailEffect, type ThumbnailPosition } from '@/lib/imageProcessing';
 
 // 상세페이지 제작과 같은 storage 버킷(detail-images)을 재사용한다 -
 // 새 버킷을 새로 만들 필요 없음.
@@ -144,6 +144,52 @@ async function runGeneration(
     await supabase.from('thumbnail_images').update({ error: message }).eq('id', imageId);
     revalidatePath(PATH);
     return { error: message };
+  }
+}
+
+// 이미 생성된 썸네일을 처음부터 다시 만드는 게 아니라, 지금 결과
+// 이미지에 프롬프트로 부분 수정을 한 번 더 입힌다 - applyThumbnailEffect가
+// "이미지+텍스트 지시 -> 수정된 이미지"를 그대로 해주는 함수라 생성
+// 단계의 효과 적용과 동일한 걸 재사용한다.
+export async function editThumbnailImage(
+  imageId: string,
+  promptText: string
+): Promise<{ error: string } | { success: true; url: string }> {
+  const prompt = promptText.trim();
+  if (!prompt) return { error: '수정할 내용을 입력해주세요.' };
+
+  const supabase = createClient();
+  const { data: img, error } = await supabase.from('thumbnail_images').select('*').eq('id', imageId).single();
+  if (error || !img) return { error: error?.message || '이미지를 찾을 수 없어요.' };
+  if (!img.output_image_url) return { error: '먼저 썸네일이 생성된 후에 수정할 수 있어요.' };
+
+  try {
+    const res = await fetch(img.output_image_url);
+    if (!res.ok) return { error: `현재 이미지를 불러오지 못했어요 (HTTP ${res.status})` };
+    const buffer = Buffer.from(await res.arrayBuffer());
+
+    const edited = await applyThumbnailEffect(buffer, prompt);
+
+    const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, edited, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (upErr) return { error: upErr.message };
+    // 같은 경로에 덮어써서 URL 문자열은 그대로라, 캐시 때문에 수정된
+    // 이미지가 화면에 바로 안 보일 수 있다 - 캐시 무효화용 쿼리를 붙인다.
+    const outputUrl = `${supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl}?v=${Date.now()}`;
+
+    const { error: updateErr } = await supabase
+      .from('thumbnail_images')
+      .update({ output_image_url: outputUrl, effect_prompt: prompt, error: null })
+      .eq('id', imageId);
+    if (updateErr) return { error: updateErr.message };
+
+    revalidatePath(PATH);
+    return { success: true, url: outputUrl };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
   }
 }
 

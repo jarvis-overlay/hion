@@ -7,6 +7,7 @@ import {
   deleteProject,
   addThumbnailImage,
   retryThumbnailImage,
+  editThumbnailImage,
   deleteThumbnailImage,
 } from '@/app/dashboard/sales/thumbnails/actions';
 
@@ -124,6 +125,28 @@ function ImageCard({
   onDelete: () => void;
   busy: boolean;
 }) {
+  // 이미 나온 결과를 처음부터 다시 만들지 않고, 프롬프트로 부분 수정만
+  // 하고 싶다는 요청으로 추가함 - 수정도 같은 이미지에 덮어써서 생성/
+  // 재시도와 같은 카드 하나로 관리한다.
+  const [editing, setEditing] = useState(false);
+  const [editPrompt, setEditPrompt] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isEditPending, startEditTransition] = useTransition();
+
+  function handleEdit() {
+    if (!editPrompt.trim()) return;
+    setEditError(null);
+    startEditTransition(async () => {
+      const res = await editThumbnailImage(img.id, editPrompt.trim());
+      if (!res || 'error' in res) {
+        setEditError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+        return;
+      }
+      setEditing(false);
+      setEditPrompt('');
+    });
+  }
+
   return (
     <div className="card p-2 grid gap-1.5 justify-items-center">
       {img.output_image_url ? (
@@ -144,14 +167,44 @@ function ImageCard({
       {img.effect_prompt && <p className="text-[10px] text-inkSoft text-center px-1">효과: {img.effect_prompt}</p>}
       <div className="flex gap-2">
         {img.output_image_url && (
-          <a href={img.output_image_url} download target="_blank" rel="noreferrer" className="text-[11px] text-accent underline">
-            다운로드
-          </a>
+          <>
+            <a href={img.output_image_url} download target="_blank" rel="noreferrer" className="text-[11px] text-accent underline">
+              다운로드
+            </a>
+            <button
+              onClick={() => {
+                setEditing((v) => !v);
+                setEditError(null);
+              }}
+              className="text-[11px] text-accent font-semibold"
+            >
+              {editing ? '취소' : '수정'}
+            </button>
+          </>
         )}
         <button onClick={onDelete} className="text-[11px] text-inkSoft hover:text-red-700">
           삭제
         </button>
       </div>
+      {editing && img.output_image_url && (
+        <div className="grid gap-1.5 w-full">
+          <textarea
+            value={editPrompt}
+            onChange={(e) => setEditPrompt(e.target.value)}
+            rows={2}
+            placeholder="수정할 내용을 입력하세요 (예: 그림자를 더 연하게 해줘, 제품을 살짝 왼쪽으로 옮겨줘)"
+            className="border border-paperLine bg-white px-2 py-1.5 text-[11px] w-full"
+          />
+          <button
+            onClick={handleEdit}
+            disabled={isEditPending || !editPrompt.trim()}
+            className="btn-primary py-1 text-[11px] font-semibold disabled:opacity-50"
+          >
+            {isEditPending ? '수정 중...' : '수정 적용'}
+          </button>
+          {editError && <p className="text-[10px] text-warn">{editError}</p>}
+        </div>
+      )}
     </div>
   );
 }
