@@ -1040,6 +1040,24 @@ export async function applyThumbnailEffect(imageBuffer: Buffer, effectPrompt: st
     .toBuffer();
 }
 
+// Gemini가 "success"로 응답해도 실제로는 요청을 무시하고 원본과
+// 거의 동일한 이미지를 그대로 돌려줄 때가 있다 (특히 상품 개수를
+// 늘리는 것처럼 구조적인 수정 요청일 때). 이런 경우를 조용히
+// "성공"으로 처리하면 사용자가 왜 안 바뀌었는지 알 수 없으니,
+// 16x16 흑백 다운샘플 평균 밝기 차이로 "거의 그대로"인지 감지해서
+// 호출하는 쪽에서 명확한 에러로 보여줄 수 있게 한다.
+export async function isImageVisuallyUnchanged(before: Buffer, after: Buffer): Promise<boolean> {
+  const SIZE = 16;
+  const [a, b] = await Promise.all([
+    sharp(before).resize(SIZE, SIZE, { fit: 'fill' }).greyscale().raw().toBuffer(),
+    sharp(after).resize(SIZE, SIZE, { fit: 'fill' }).greyscale().raw().toBuffer(),
+  ]);
+  let diffSum = 0;
+  for (let i = 0; i < a.length; i++) diffSum += Math.abs(a[i] - b[i]);
+  const meanDiff = diffSum / a.length;
+  return meanDiff < 1.5;
+}
+
 // 실측 결과 "이미지 생성 모델에게 상품만 남기고 다시 그려달라"는
 // 방식은 같은 사진을 두 번 넣어도 결과가 들쭉날쭉했다(한 번은 소품이
 // 남고, 한 번은 깔끔하게 나옴) - 이미지 생성 자체가 확률적이라

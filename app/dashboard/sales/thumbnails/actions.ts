@@ -3,7 +3,12 @@
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { generateThumbnailImage, applyThumbnailEffect, type ThumbnailPosition } from '@/lib/imageProcessing';
+import {
+  generateThumbnailImage,
+  applyThumbnailEffect,
+  isImageVisuallyUnchanged,
+  type ThumbnailPosition,
+} from '@/lib/imageProcessing';
 
 // 상세페이지 제작과 같은 storage 버킷(detail-images)을 재사용한다 -
 // 새 버킷을 새로 만들 필요 없음.
@@ -169,6 +174,13 @@ export async function editThumbnailImage(
     const buffer = Buffer.from(await res.arrayBuffer());
 
     const edited = await applyThumbnailEffect(buffer, prompt);
+
+    if (await isImageVisuallyUnchanged(buffer, edited)) {
+      return {
+        error:
+          'AI가 요청한 수정을 반영하지 못했어요 (이미지가 거의 그대로예요). 프롬프트를 더 구체적으로 적어서 다시 시도해주세요.',
+      };
+    }
 
     const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, edited, {
