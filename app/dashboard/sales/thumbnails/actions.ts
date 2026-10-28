@@ -7,6 +7,7 @@ import {
   generateThumbnailImage,
   applyThumbnailEffect,
   isImageVisuallyUnchanged,
+  duplicateImageStrip,
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
 
@@ -195,6 +196,47 @@ export async function editThumbnailImage(
     const { error: updateErr } = await supabase
       .from('thumbnail_images')
       .update({ output_image_url: outputUrl, effect_prompt: prompt, error: null })
+      .eq('id', imageId);
+    if (updateErr) return { error: updateErr.message };
+
+    revalidatePath(PATH);
+    return { success: true, url: outputUrl };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
+}
+
+// AI 효과 프롬프트로는 "상품 개수를 늘려달라" 같은 반복 패턴 연장
+// 요청이 잘 안 먹혀서, 이미지 안의 한 구간(띠)을 그대로 복사해
+// 다른 위치에 붙여넣는 결정적인 방법을 따로 둔다. AI를 안 거치고
+// 픽셀을 그대로 복사하므로 스타일이 항상 100% 일치한다.
+export async function duplicateThumbnailStrip(
+  imageId: string,
+  params: { sourceTopPct: number; sourceBottomPct: number; destTopPct: number }
+): Promise<{ error: string } | { success: true; url: string }> {
+  const supabase = createClient();
+  const { data: img, error } = await supabase.from('thumbnail_images').select('*').eq('id', imageId).single();
+  if (error || !img) return { error: error?.message || '이미지를 찾을 수 없어요.' };
+  if (!img.output_image_url) return { error: '먼저 썸네일이 생성된 후에 복제할 수 있어요.' };
+
+  try {
+    const res = await fetch(img.output_image_url);
+    if (!res.ok) return { error: `현재 이미지를 불러오지 못했어요 (HTTP ${res.status})` };
+    const buffer = Buffer.from(await res.arrayBuffer());
+
+    const edited = await duplicateImageStrip(buffer, params);
+
+    const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, edited, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (upErr) return { error: upErr.message };
+    const outputUrl = `${supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl}?v=${Date.now()}`;
+
+    const { error: updateErr } = await supabase
+      .from('thumbnail_images')
+      .update({ output_image_url: outputUrl, error: null })
       .eq('id', imageId);
     if (updateErr) return { error: updateErr.message };
 

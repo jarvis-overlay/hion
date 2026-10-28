@@ -1040,6 +1040,34 @@ export async function applyThumbnailEffect(imageBuffer: Buffer, effectPrompt: st
     .toBuffer();
 }
 
+// AI한테 "상품을 하나 더 그려 넣어줘" 같은 요청을 맡기면 반복되는
+// 패턴(예: 겹쳐 쌓인 다회 세트 상품의 띠)을 정확히 재현하지 못하고
+// 번번이 무시하는 경우가 많다 - 반면 이미 있는 영역을 그대로
+// 복사해서 다른 위치에 붙여넣는 건 AI 없이도 완벽하게 할 수 있는
+// 작업이라 별도 결정적 함수로 분리한다. 퍼센트(0~100) 좌표를 쓰는
+// 이유는 호출하는 쪽(UI)이 실제 픽셀 크기를 몰라도 되게 하기 위해서.
+export async function duplicateImageStrip(
+  imageBuffer: Buffer,
+  params: { sourceTopPct: number; sourceBottomPct: number; destTopPct: number }
+): Promise<Buffer> {
+  const meta = await sharp(imageBuffer).metadata();
+  const width = meta.width || THUMBNAIL_SIZE;
+  const height = meta.height || THUMBNAIL_SIZE;
+
+  const srcTop = Math.max(0, Math.min(height - 1, Math.round((height * params.sourceTopPct) / 100)));
+  const srcBottom = Math.max(srcTop + 1, Math.min(height, Math.round((height * params.sourceBottomPct) / 100)));
+  const stripHeight = srcBottom - srcTop;
+
+  const strip = await sharp(imageBuffer).extract({ left: 0, top: srcTop, width, height: stripHeight }).toBuffer();
+
+  const destTop = Math.max(0, Math.min(height - stripHeight, Math.round((height * params.destTopPct) / 100)));
+
+  return sharp(imageBuffer)
+    .composite([{ input: strip, left: 0, top: destTop }])
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
 // Gemini가 "success"로 응답해도 실제로는 요청을 무시하고 원본과
 // 거의 동일한 이미지를 그대로 돌려줄 때가 있다 (특히 상품 개수를
 // 늘리는 것처럼 구조적인 수정 요청일 때). 이런 경우를 조용히

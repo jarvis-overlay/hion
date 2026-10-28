@@ -8,6 +8,7 @@ import {
   addThumbnailImage,
   retryThumbnailImage,
   editThumbnailImage,
+  duplicateThumbnailStrip,
   deleteThumbnailImage,
 } from '@/app/dashboard/sales/thumbnails/actions';
 
@@ -133,6 +134,17 @@ function ImageCard({
   const [editError, setEditError] = useState<string | null>(null);
   const [isEditPending, startEditTransition] = useTransition();
 
+  // 효과 프롬프트(AI)로는 "똑같은 띠를 하나 더 반복해달라" 같은 요청이
+  // 잘 안 먹혀서, 이미지 안의 한 구간을 그대로 복사해 다른 위치에
+  // 붙여넣는 결정적 도구를 별도로 둔다 - 비율(%)로 영역을 지정하고,
+  // 미리보기 사각형으로 어디를 복사해서 어디에 붙이는지 보여준다.
+  const [duplicating, setDuplicating] = useState(false);
+  const [srcTopPct, setSrcTopPct] = useState(0);
+  const [srcBottomPct, setSrcBottomPct] = useState(20);
+  const [destTopPct, setDestTopPct] = useState(0);
+  const [dupError, setDupError] = useState<string | null>(null);
+  const [isDupPending, startDupTransition] = useTransition();
+
   function handleEdit() {
     if (!editPrompt.trim()) return;
     setEditError(null);
@@ -147,11 +159,45 @@ function ImageCard({
     });
   }
 
+  function handleDuplicate() {
+    setDupError(null);
+    startDupTransition(async () => {
+      const res = await duplicateThumbnailStrip(img.id, {
+        sourceTopPct: srcTopPct,
+        sourceBottomPct: srcBottomPct,
+        destTopPct: destTopPct,
+      });
+      if (!res || 'error' in res) {
+        setDupError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+        return;
+      }
+      setDuplicating(false);
+    });
+  }
+
   return (
     <div className="card p-2 grid gap-1.5 justify-items-center">
       {img.output_image_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={img.output_image_url} alt="썸네일" className={`${size} object-contain rounded bg-paper border border-paperLine`} />
+        <div className={`${size} relative`}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={img.output_image_url}
+            alt="썸네일"
+            className="absolute inset-0 w-full h-full object-contain rounded bg-paper border border-paperLine"
+          />
+          {duplicating && (
+            <>
+              <div
+                className="absolute left-0 right-0 border-2 border-blue-500 bg-blue-500/20 pointer-events-none"
+                style={{ top: `${srcTopPct}%`, height: `${Math.max(0, srcBottomPct - srcTopPct)}%` }}
+              />
+              <div
+                className="absolute left-0 right-0 border-2 border-red-500 pointer-events-none"
+                style={{ top: `${destTopPct}%`, height: `${Math.max(0, srcBottomPct - srcTopPct)}%` }}
+              />
+            </>
+          )}
+        </div>
       ) : img.error ? (
         <button
           onClick={onRetry}
@@ -180,6 +226,15 @@ function ImageCard({
             >
               {editing ? '취소' : '수정'}
             </button>
+            <button
+              onClick={() => {
+                setDuplicating((v) => !v);
+                setDupError(null);
+              }}
+              className="text-[11px] text-accent font-semibold"
+            >
+              {duplicating ? '취소' : '조각 복제'}
+            </button>
           </>
         )}
         <button onClick={onDelete} className="text-[11px] text-inkSoft hover:text-red-700">
@@ -203,6 +258,51 @@ function ImageCard({
             {isEditPending ? '수정 중...' : '수정 적용'}
           </button>
           {editError && <p className="text-[10px] text-warn">{editError}</p>}
+        </div>
+      )}
+      {duplicating && img.output_image_url && (
+        <div className="grid gap-1.5 w-full">
+          <p className="text-[10px] text-inkSoft">
+            파란 영역(복사할 구간)을 빨간 영역(붙여넣을 위치)으로 복제해요. 반복되는 띠 하나를 더 추가할 때 써요.
+          </p>
+          <label className="text-[10px] text-inkSoft grid gap-0.5">
+            복사할 구간 - 시작 {srcTopPct}%
+            <input
+              type="range"
+              min={0}
+              max={99}
+              value={srcTopPct}
+              onChange={(e) => setSrcTopPct(Math.min(Number(e.target.value), srcBottomPct - 1))}
+            />
+          </label>
+          <label className="text-[10px] text-inkSoft grid gap-0.5">
+            복사할 구간 - 끝 {srcBottomPct}%
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={srcBottomPct}
+              onChange={(e) => setSrcBottomPct(Math.max(Number(e.target.value), srcTopPct + 1))}
+            />
+          </label>
+          <label className="text-[10px] text-inkSoft grid gap-0.5">
+            붙여넣을 위치 - 시작 {destTopPct}%
+            <input
+              type="range"
+              min={0}
+              max={99}
+              value={destTopPct}
+              onChange={(e) => setDestTopPct(Number(e.target.value))}
+            />
+          </label>
+          <button
+            onClick={handleDuplicate}
+            disabled={isDupPending}
+            className="btn-primary py-1 text-[11px] font-semibold disabled:opacity-50"
+          >
+            {isDupPending ? '복제 중...' : '복제 적용'}
+          </button>
+          {dupError && <p className="text-[10px] text-warn">{dupError}</p>}
         </div>
       )}
     </div>
