@@ -8,6 +8,8 @@ import {
   updateSourcingInputStatus,
   updateSourcingItem,
   deleteSourcingItem,
+  archiveSourcingItem,
+  unarchiveSourcingItem,
   addSourcingOption,
   deleteSourcingOption,
   addSourcingSupplier,
@@ -1462,7 +1464,12 @@ export default function SourcingList({
   const [stageFilter, setStageFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [priorityError, setPriorityError] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [enteredFilter, setEnteredFilter] = useState('all');
+  // 더 이상 소싱 안 하기로 한 항목을 메인 목록에서 숨기고 "보관함"
+  // 으로만 따로 볼 수 있게 - 지우는 게 아니라 숨기기만 하는 거라 토글로
+  // 전환한다 (기본값 = 보관 안 한 것만 보임).
+  const [showArchived, setShowArchived] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
@@ -1495,6 +1502,7 @@ export default function SourcingList({
 
     const q = search.trim().toLowerCase();
     const filtered = withMargin.filter((it) => {
+      if (showArchived ? !it.archived_at : !!it.archived_at) return false;
       if (statusFilter !== 'all' && (it.status || 'checking') !== statusFilter) return false;
       if (stageFilter !== 'all' && (it.stage || 'candidate') !== stageFilter) return false;
       if (priorityFilter !== 'all' && (it.priority || 'none') !== priorityFilter) return false;
@@ -1534,7 +1542,9 @@ export default function SourcingList({
     });
 
     return sorted;
-  }, [items, search, statusFilter, stageFilter, priorityFilter, enteredFilter, sortKey]);
+  }, [items, search, statusFilter, stageFilter, priorityFilter, enteredFilter, showArchived, sortKey]);
+
+  const archivedCount = useMemo(() => items.filter((it) => !!it.archived_at).length, [items]);
 
   return (
     <div>
@@ -1600,6 +1610,15 @@ export default function SourcingList({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={() => setShowArchived((v) => !v)}
+          className={`text-sm px-3 py-2 rounded-md font-semibold ${
+            showArchived ? 'bg-accent text-white' : 'ring-1 ring-paperLine text-inkSoft hover:text-ink'
+          }`}
+        >
+          {showArchived ? '목록으로 돌아가기' : `보관함${archivedCount > 0 ? ` (${archivedCount})` : ''}`}
+        </button>
       </div>
 
       {priorityError && (
@@ -1607,10 +1626,23 @@ export default function SourcingList({
           우선순위 저장 실패: {priorityError}
         </p>
       )}
+      {archiveError && (
+        <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2 mb-3">보관함 처리 실패: {archiveError}</p>
+      )}
+
+      {showArchived && (
+        <p className="text-xs text-inkSoft bg-paper rounded-md px-3 py-2 mb-3">
+          소싱하지 않기로 한 항목만 모아놨어요. 다시 쓸 항목은 &quot;복구&quot;를 누르면 메인 목록으로 돌아가요.
+        </p>
+      )}
 
       {rows.length === 0 ? (
         <p className="text-sm text-inkSoft">
-          {items.length === 0 ? '아직 등록된 소싱 후보가 없어요.' : '조건에 맞는 항목이 없어요.'}
+          {items.length === 0
+            ? '아직 등록된 소싱 후보가 없어요.'
+            : showArchived
+              ? '보관된 항목이 없어요.'
+              : '조건에 맞는 항목이 없어요.'}
         </p>
       ) : (
         <div className="grid gap-3">
@@ -1885,6 +1917,19 @@ export default function SourcingList({
                     </select>
                     <button onClick={() => setEditingId(it.id)} className="text-inkSoft hover:text-ink">
                       수정
+                    </button>
+                    <button
+                      onClick={() =>
+                        startTransition(async () => {
+                          const res = it.archived_at
+                            ? await unarchiveSourcingItem(it.id)
+                            : await archiveSourcingItem(it.id);
+                          if (res && 'error' in res) setArchiveError(res.error);
+                        })
+                      }
+                      className="text-inkSoft hover:text-ink"
+                    >
+                      {it.archived_at ? '복구' : '보관'}
                     </button>
                     <button
                       onClick={() => startTransition(() => deleteSourcingItem(it.id))}

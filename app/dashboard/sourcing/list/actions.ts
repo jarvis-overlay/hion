@@ -276,6 +276,38 @@ export async function updateSourcingInputStatus(id: string, inputStatus: string)
   revalidatePath('/dashboard/sourcing/list');
 }
 
+// 더 이상 소싱하지 않기로 한 항목을 지우지 않고 "보관함"으로만 옮긴다 -
+// 메인 목록에서는 안 보이지만 나중에 다시 꺼내볼 수 있어야 한다는
+// 요청으로 추가함. priority 컬럼 때와 같은 이유로, 마이그레이션을 아직
+// 안 돌렸으면 명확한 안내 메시지를 보여준다.
+export async function archiveSourcingItem(id: string): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('sourcing_items')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) {
+    console.error('[sourcing] archiveSourcingItem 실패:', error.message);
+    if (/archived_at/i.test(error.message) && /column|schema cache/i.test(error.message)) {
+      return {
+        error:
+          '보관함 기능을 쓰려면 DB 컬럼이 필요해요. Supabase SQL Editor에서 supabase/sourcing_items_add_archived.sql을 실행해주세요.',
+      };
+    }
+    return { error: error.message };
+  }
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
+export async function unarchiveSourcingItem(id: string): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const { error } = await supabase.from('sourcing_items').update({ archived_at: null }).eq('id', id);
+  if (error) return { error: error.message };
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
 export async function deleteSourcingItem(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from('sourcing_items').delete().eq('id', id);
