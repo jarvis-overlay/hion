@@ -1002,9 +1002,9 @@ export async function composeThumbnailImage(
 export async function applyThumbnailEffect(imageBuffer: Buffer, effectPrompt: string): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
 
-  const instruction = `**절대 이미지 안에 어떤 문자·숫자·기호도 넣지 마세요.** 아래 상품 썸네일 사진에 요청한 효과만 추가해주세요. 상품 자체의 실제 형태·색상·디자인·비율은 절대 바꾸지 말고, 조명/그림자/배경 질감/소품 같은 연출 효과만 추가하세요. 쿠팡 상품 썸네일이라는 걸 감안해서 상품이 가려지거나 알아보기 어려워지면 안 됩니다.
+  const instruction = `**절대 이미지 안에 어떤 문자·숫자·기호도 넣지 마세요.** 아래 상품 썸네일 사진을 아래 "요청 사항"에 맞게 수정해주세요. 요청 사항은 상품 개수를 늘리거나 배치를 바꾸는 것처럼 상품 자체에 관한 내용이어도 반드시 반영하세요. 요청 사항에서 따로 언급하지 않은 부분(상품의 색상·재질·전체적인 디자인 등)만 원본 그대로 유지하면 됩니다. 쿠팡 상품 썸네일이라는 걸 감안해서 상품이 가려지거나 알아보기 어려워지면 안 됩니다.
 
-효과 요청: ${effectPrompt}`;
+요청 사항: ${effectPrompt}`;
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
