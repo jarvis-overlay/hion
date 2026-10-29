@@ -907,23 +907,44 @@ export async function composeSpecTableSection(rows: SpecRow[], title?: string): 
   return sharp(canvas.toBuffer('image/png')).jpeg({ quality: 92 }).toBuffer();
 }
 
-export async function generateDetailSectionImage(
+// 섹션 이미지는 "AI가 만든 배경 사진"과 "서버에서 합성하는 문구" 두 단계다.
+// 생성된 섹션을 나중에 수정할 때 문구/디자인만 바꾸는 경우엔 배경 사진을
+// 다시 만들 필요가 없으므로(비용 + 사진이 바뀌는 문제), 두 단계를 따로
+// 쓸 수 있게 분리해둔다. 배경은 항상 JPEG로 정규화해서 보관/재사용한다.
+export async function generateDetailBackground(
   input: DetailSectionInput,
   productImage: { buffer: Buffer; mimeType: string } | null
+): Promise<Buffer> {
+  const raw = await generateBackgroundImage(input.keyword, input.mood, productImage, input.colorPrompt);
+  return sharp(raw).jpeg({ quality: 92 }).toBuffer();
+}
+
+// background는 typography(사진 없는 레이아웃)에선 쓰지 않으므로 null이어도 된다.
+export async function composeDetailSectionImage(
+  input: DetailSectionInput,
+  background: Buffer | null
 ): Promise<Buffer> {
   const style = input.layoutStyle || 'white';
 
   if (style === 'typography') {
     return composeTypographySection(input);
   }
-
-  const background = await generateBackgroundImage(input.keyword, input.mood, productImage, input.colorPrompt);
-
+  if (!background) {
+    throw new Error('배경 이미지가 없어서 합성할 수 없어요.');
+  }
   if (style === 'overlay') {
     return composeOverlaySection(background, input);
   }
-
   return composeDetailSection(background, input.description.trim());
+}
+
+export async function generateDetailSectionImage(
+  input: DetailSectionInput,
+  productImage: { buffer: Buffer; mimeType: string } | null
+): Promise<Buffer> {
+  const background =
+    (input.layoutStyle || 'white') === 'typography' ? null : await generateDetailBackground(input, productImage);
+  return composeDetailSectionImage(input, background);
 }
 
 // 쿠팡 상세페이지 이미지 규격(가로 860px)에 맞춘다 - AI 업스케일이

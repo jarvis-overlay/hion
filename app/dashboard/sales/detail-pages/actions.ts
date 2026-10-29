@@ -4,7 +4,8 @@ import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import {
-  generateDetailSectionImage,
+  generateDetailBackground,
+  composeDetailSectionImage,
   detectAndTranslateText,
   composeSpecTableSection,
   type DetailSectionInput,
@@ -21,6 +22,74 @@ function extFromContentType(contentType: string): string {
   if (contentType.includes('png')) return 'png';
   if (contentType.includes('webp')) return 'webp';
   return 'jpg';
+}
+
+// 같은 경로에 upsert로 덮어쓰면 공개 URL이 그대로라 브라우저/CDN이 예전
+// 이미지를 계속 보여줄 수 있다 - 수정 결과가 바로 보이도록 URL에 버전 값을
+// 붙여서 저장한다.
+function versioned(url: string): string {
+  return `${url}?v=${Date.now()}`;
+}
+
+// 섹션 입력 폼(추가/수정 공용)을 읽는다.
+interface SectionFields extends DetailSectionInput {
+  keyword: string;
+  mood: string;
+  description: string;
+}
+
+function readSectionFields(formData: FormData): SectionFields {
+  const get = (k: string) => String(formData.get(k) || '').trim();
+  return {
+    keyword: get('keyword'),
+    mood: get('mood'),
+    description: get('description'),
+    eyebrow: get('eyebrow'),
+    accentTitle: get('accentTitle'),
+    accentSubtitle: get('accentSubtitle'),
+    stat: get('stat'),
+    statCaption: get('statCaption'),
+    badge: get('badge'),
+    bodyText: get('bodyText'),
+    listItems: get('listItems'),
+    colorPrompt: get('colorPrompt'),
+    layoutStyle: (get('layoutStyle') || 'white') as DetailSectionLayout,
+    theme: (get('theme') || 'dark') as DetailSectionTheme,
+  };
+}
+
+function hasAnyCopy(f: SectionFields): boolean {
+  return !!(
+    f.keyword ||
+    f.mood ||
+    f.description ||
+    f.eyebrow ||
+    f.accentTitle ||
+    f.stat ||
+    f.badge ||
+    f.bodyText ||
+    f.listItems
+  );
+}
+
+function buildPromptText(f: SectionFields): string {
+  return [
+    f.keyword && `키워드: ${f.keyword}`,
+    f.mood && `분위기: ${f.mood}`,
+    f.description && `설명: ${f.description}`,
+    f.eyebrow && `작은 문구: ${f.eyebrow}`,
+    f.accentTitle && `브랜드명: ${f.accentTitle}`,
+    f.stat && `통계: ${f.stat}`,
+    f.badge && `뱃지: ${f.badge}`,
+    f.bodyText && `문단: ${f.bodyText}`,
+    f.listItems && `리스트: ${f.listItems.split(/\r?\n/).filter(Boolean).length}개 항목`,
+  ]
+    .filter(Boolean)
+    .join(' / ');
+}
+
+function bgPathOf(projectId: string, sectionId: string) {
+  return `detail-pages/${projectId}/${sectionId}-bg.jpg`;
 }
 
 // 원본(1688) 사진에 박혀있는 중국어 문구가 뭐라고 써있는지 미리 보여주는
@@ -83,36 +152,11 @@ export async function addSection(
   formData: FormData
 ): Promise<{ error: string } | { success: true; url: string }> {
   const supabase = createClient();
-  const keyword = String(formData.get('keyword') || '').trim();
-  const mood = String(formData.get('mood') || '').trim();
-  const description = String(formData.get('description') || '').trim();
-  const eyebrow = String(formData.get('eyebrow') || '').trim();
-  const accentTitle = String(formData.get('accentTitle') || '').trim();
-  const accentSubtitle = String(formData.get('accentSubtitle') || '').trim();
-  const stat = String(formData.get('stat') || '').trim();
-  const statCaption = String(formData.get('statCaption') || '').trim();
-  const badge = String(formData.get('badge') || '').trim();
-  const bodyText = String(formData.get('bodyText') || '').trim();
-  const listItems = String(formData.get('listItems') || '').trim();
-  const colorPrompt = String(formData.get('colorPrompt') || '').trim();
-  const layoutStyle = (String(formData.get('layoutStyle') || 'white') as DetailSectionLayout) || 'white';
-  const theme = (String(formData.get('theme') || 'dark') as DetailSectionTheme) || 'dark';
-  if (!keyword && !mood && !description && !eyebrow && !accentTitle && !stat && !badge && !bodyText && !listItems) {
+  const input = readSectionFields(formData);
+  if (!hasAnyCopy(input)) {
     return { error: '문구 항목 중 하나는 입력해주세요.' };
   }
-  const promptText = [
-    keyword && `키워드: ${keyword}`,
-    mood && `분위기: ${mood}`,
-    description && `설명: ${description}`,
-    eyebrow && `작은 문구: ${eyebrow}`,
-    accentTitle && `브랜드명: ${accentTitle}`,
-    stat && `통계: ${stat}`,
-    badge && `뱃지: ${badge}`,
-    bodyText && `문단: ${bodyText}`,
-    listItems && `리스트: ${listItems.split(/\r?\n/).filter(Boolean).length}개 항목`,
-  ]
-    .filter(Boolean)
-    .join(' / ');
+  const promptText = buildPromptText(input);
 
   const file = formData.get('image') as File | null;
   let inputImageUrl: string | null = null;
@@ -138,40 +182,31 @@ export async function addSection(
     position,
     input_image_url: inputImageUrl,
     prompt_text: promptText,
-    keyword: keyword || null,
-    mood: mood || null,
-    description: description || null,
-    eyebrow: eyebrow || null,
-    accent_title: accentTitle || null,
-    accent_subtitle: accentSubtitle || null,
-    stat: stat || null,
-    stat_caption: statCaption || null,
-    badge: badge || null,
-    body_text: bodyText || null,
-    list_items: listItems || null,
-    color_prompt: colorPrompt || null,
-    layout_style: layoutStyle,
-    theme,
+    ...sectionColumns(input),
   });
   if (insertErr) return { error: insertErr.message };
 
-  const input: DetailSectionInput = {
-    keyword,
-    mood,
-    description,
-    eyebrow,
-    accentTitle,
-    accentSubtitle,
-    stat,
-    statCaption,
-    badge,
-    bodyText,
-    listItems,
-    colorPrompt,
-    layoutStyle,
-    theme,
-  };
   return runGeneration(supabase, sectionId, projectId, input, productImage);
+}
+
+// DB 컬럼 이름으로 바꾼 섹션 입력값 (추가/수정 공용)
+function sectionColumns(f: SectionFields) {
+  return {
+    keyword: f.keyword || null,
+    mood: f.mood || null,
+    description: f.description || null,
+    eyebrow: f.eyebrow || null,
+    accent_title: f.accentTitle || null,
+    accent_subtitle: f.accentSubtitle || null,
+    stat: f.stat || null,
+    stat_caption: f.statCaption || null,
+    badge: f.badge || null,
+    body_text: f.bodyText || null,
+    list_items: f.listItems || null,
+    color_prompt: f.colorPrompt || null,
+    layout_style: f.layoutStyle || 'white',
+    theme: f.theme || 'dark',
+  };
 }
 
 export async function retrySection(
@@ -212,22 +247,36 @@ export async function retrySection(
   return runGeneration(supabase, sectionId, section.project_id, input, productImage);
 }
 
+// reuseBackground가 있으면 AI 배경 생성을 건너뛰고 그 사진 위에 문구만 다시
+// 합성한다 (생성된 섹션 수정 - 문구/디자인만 바꾸는 경우). 없으면 배경을
+// 새로 만들고, 나중에 수정할 때 재사용할 수 있게 따로 저장해둔다.
 async function runGeneration(
   supabase: ReturnType<typeof createClient>,
   sectionId: string,
   projectId: string,
   input: DetailSectionInput,
-  productImage: { buffer: Buffer; mimeType: string } | null
+  productImage: { buffer: Buffer; mimeType: string } | null,
+  reuseBackground: Buffer | null = null
 ): Promise<{ error: string } | { success: true; url: string }> {
   try {
-    const generated = await generateDetailSectionImage(input, productImage);
+    let background = reuseBackground;
+    if ((input.layoutStyle || 'white') !== 'typography' && !background) {
+      background = await generateDetailBackground(input, productImage);
+      // 배경 보관은 편의 기능이라 실패해도 생성 자체는 계속한다
+      // (못 남기면 나중에 수정할 때 배경을 새로 만들게 될 뿐).
+      const { error: bgErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(bgPathOf(projectId, sectionId), background, { contentType: 'image/jpeg', upsert: true });
+      if (bgErr) console.error('[detail-pages] 배경 보관 실패:', bgErr.message);
+    }
+    const generated = await composeDetailSectionImage(input, background);
     const outPath = `detail-pages/${projectId}/${sectionId}-output.jpg`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
       contentType: 'image/jpeg',
       upsert: true,
     });
     if (upErr) throw new Error(upErr.message);
-    const outputUrl = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl;
+    const outputUrl = versioned(supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl);
 
     const { error: updateErr } = await supabase
       .from('detail_page_sections')
@@ -235,6 +284,151 @@ async function runGeneration(
       .eq('id', sectionId);
     if (updateErr) return { error: updateErr.message };
 
+    revalidatePath(PATH);
+    return { success: true, url: outputUrl };
+  } catch (e: any) {
+    const message = e?.message || String(e);
+    await supabase.from('detail_page_sections').update({ error: message }).eq('id', sectionId);
+    revalidatePath(PATH);
+    return { error: message };
+  }
+}
+
+// 이미 생성된 섹션 수정 - 문구/디자인을 바꾸고 다시 합성한다.
+//   - 키워드/분위기/색상 지시를 바꾸거나, 사진을 교체/제거했거나, 레이아웃이
+//     사진 없는 타입에서 사진 있는 타입으로 바뀌었거나, 사용자가 "배경 새로
+//     생성"을 켰으면 AI 배경을 새로 만든다.
+//   - 그 외(문구·레이아웃·테마만 변경)에는 생성 때 보관해둔 배경 사진을
+//     그대로 쓰고 문구만 다시 합성한다 (AI 호출 없음, 사진 안 바뀜).
+//   - 보관된 배경이 없는 옛 섹션은 어쩔 수 없이 새로 만들고, 그 사실을
+//     backgroundReused=false로 알려준다.
+export async function updateSection(
+  sectionId: string,
+  formData: FormData
+): Promise<{ error: string } | { success: true; url: string; backgroundReused: boolean }> {
+  const supabase = createClient();
+  const input = readSectionFields(formData);
+  if (!hasAnyCopy(input)) return { error: '문구 항목 중 하나는 입력해주세요.' };
+
+  const { data: section, error } = await supabase
+    .from('detail_page_sections')
+    .select('*')
+    .eq('id', sectionId)
+    .single();
+  if (error || !section) return { error: error?.message || '섹션을 찾을 수 없어요.' };
+  if (section.layout_style === 'spec') return { error: '제품 사양 표는 표 수정으로 고쳐주세요.' };
+
+  const projectId: string = section.project_id;
+  const forceBackground = formData.get('forceBackground') === '1';
+  const removeImage = formData.get('removeImage') === '1';
+  const file = formData.get('image') as File | null;
+  const hasNewFile = !!file && file.size > 0;
+
+  // 1) 원본 사진 교체/제거
+  let inputImageUrl: string | null = section.input_image_url;
+  let productImage: { buffer: Buffer; mimeType: string } | null = null;
+  if (hasNewFile) {
+    const buffer = Buffer.from(await file!.arrayBuffer());
+    const mimeType = file!.type || 'image/jpeg';
+    productImage = { buffer, mimeType };
+    const path = `detail-pages/${projectId}/${sectionId}-input.${extFromContentType(mimeType)}`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, buffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
+    if (upErr) return { error: upErr.message };
+    inputImageUrl = versioned(supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl);
+  } else if (removeImage) {
+    inputImageUrl = null;
+  }
+
+  // 2) 배경을 새로 만들어야 하는지 판단
+  const wasTypography = (section.layout_style || 'white') === 'typography';
+  const needsPhoto = (input.layoutStyle || 'white') !== 'typography';
+  const photoInputsChanged =
+    (section.keyword || '') !== input.keyword ||
+    (section.mood || '') !== input.mood ||
+    (section.color_prompt || '') !== input.colorPrompt ||
+    hasNewFile ||
+    removeImage;
+
+  let reuseBackground: Buffer | null = null;
+  if (needsPhoto && !forceBackground && !photoInputsChanged && !wasTypography) {
+    try {
+      const { data: bg } = await supabase.storage.from(BUCKET).download(bgPathOf(projectId, sectionId));
+      if (bg) reuseBackground = Buffer.from(await bg.arrayBuffer());
+    } catch {
+      reuseBackground = null; // 보관된 배경이 없음 - 아래에서 새로 생성
+    }
+  }
+
+  // 새로 만들 때 쓸 원본 사진: 방금 올린 것 > 기존 첨부 (제거했으면 없음)
+  if (needsPhoto && !reuseBackground && !productImage && inputImageUrl && !removeImage) {
+    const res = await fetch(inputImageUrl);
+    if (!res.ok) return { error: `원본 이미지를 다시 불러오지 못했어요 (HTTP ${res.status})` };
+    productImage = {
+      buffer: Buffer.from(await res.arrayBuffer()),
+      mimeType: res.headers.get('content-type')?.split(';')[0] || 'image/jpeg',
+    };
+  }
+
+  // 3) 입력값 저장 (생성이 실패해도 입력은 남겨서 재시도할 수 있게)
+  const { error: updateErr } = await supabase
+    .from('detail_page_sections')
+    .update({
+      input_image_url: inputImageUrl,
+      prompt_text: buildPromptText(input),
+      ...sectionColumns(input),
+    })
+    .eq('id', sectionId);
+  if (updateErr) return { error: updateErr.message };
+
+  // 4) 합성/생성
+  const result = await runGeneration(supabase, sectionId, projectId, input, productImage, reuseBackground);
+  if ('error' in result) return result;
+  return { success: true, url: result.url, backgroundReused: !!reuseBackground || !needsPhoto };
+}
+
+// 제품 사양 표 수정 - 제목/항목을 바꾸고 표를 다시 그린다.
+export async function updateSpecSection(
+  sectionId: string,
+  input: { title: string; rows: SpecRow[] }
+): Promise<{ error: string } | { success: true; url: string }> {
+  const supabase = createClient();
+  const rows = input.rows.filter((r) => r.label.trim() || r.value.trim());
+  if (rows.length === 0) return { error: '표에 항목을 하나 이상 입력해주세요.' };
+
+  const { data: section, error } = await supabase
+    .from('detail_page_sections')
+    .select('id, project_id, layout_style')
+    .eq('id', sectionId)
+    .single();
+  if (error || !section) return { error: error?.message || '섹션을 찾을 수 없어요.' };
+  if (section.layout_style !== 'spec') return { error: '제품 사양 표 섹션이 아니에요.' };
+
+  const { error: updateErr } = await supabase
+    .from('detail_page_sections')
+    .update({
+      prompt_text: `제품 사양 표 (${rows.length}개 항목)`,
+      spec_title: input.title || null,
+      spec_rows: rows,
+    })
+    .eq('id', sectionId);
+  if (updateErr) return { error: updateErr.message };
+
+  try {
+    const generated = await composeSpecTableSection(rows, input.title);
+    const outPath = `detail-pages/${section.project_id}/${sectionId}-output.jpg`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (upErr) throw new Error(upErr.message);
+    const outputUrl = versioned(supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl);
+    await supabase
+      .from('detail_page_sections')
+      .update({ output_image_url: outputUrl, error: null })
+      .eq('id', sectionId);
     revalidatePath(PATH);
     return { success: true, url: outputUrl };
   } catch (e: any) {

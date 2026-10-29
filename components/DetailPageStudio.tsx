@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { Fragment, useState, useTransition } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import {
   createProject,
@@ -12,6 +12,8 @@ import {
   recommendSectionCopy,
   moveSection,
   addSpecSection,
+  updateSection,
+  updateSpecSection,
 } from '@/app/dashboard/sales/detail-pages/actions';
 
 // 이미지(왼쪽) - 문구(가운데) - 결과(오른쪽) - 관리 순서로 행이 쌓이는
@@ -177,8 +179,231 @@ function newSpecDraft(): SpecDraft {
   };
 }
 
+// 새 섹션 입력(초안)과 생성된 섹션 수정 패널이 같이 쓰는 입력 폼 - 디자인
+// 템플릿 카드와 문구 입력칸들. 아래 JSX는 원래 초안 행 안에 있던 것을
+// 그대로 옮겨왔고, 값/변경 핸들러만 props로 받는다.
+type FieldValues = Pick<
+  Draft,
+  | 'keyword'
+  | 'mood'
+  | 'description'
+  | 'eyebrow'
+  | 'accentTitle'
+  | 'accentSubtitle'
+  | 'stat'
+  | 'statCaption'
+  | 'badge'
+  | 'bodyText'
+  | 'listItems'
+  | 'colorPrompt'
+  | 'layoutStyle'
+  | 'theme'
+  | 'templateId'
+>;
+
+function FieldsEditor({
+  d,
+  onChange,
+}: {
+  d: FieldValues;
+  onChange: (patch: Partial<FieldValues>) => void;
+}) {
+  return (
+    <>
+                {/* 디자인 스타일을 고르는 유일한 컨트롤 - 예전엔 이 카드
+                    아래에 layoutStyle/theme 드롭다운이 따로 있어서 "카드랑
+                    드롭다운 중 뭘 봐야 하냐"는 혼란이 있었음. 드롭다운을
+                    없애고 카드 하나로 통일함. 같은 layoutStyle+theme 값을
+                    쓰는 카드가 여러 개 있을 수 있어서(예: 인증뱃지+리스트,
+                    통계 강조가 둘 다 typography+dark), "선택됨" 표시는
+                    값 비교가 아니라 실제로 클릭한 카드 id(templateId)로만
+                    판단한다. */}
+                <div className="grid grid-cols-3 gap-2">
+                  {TEMPLATES.map((t) => {
+                    const isSelected = d.templateId === t.id;
+                    return (
+                      <div key={t.id} className="relative group">
+                        <button
+                          onClick={() => onChange({ layoutStyle: t.layoutStyle, theme: t.theme, templateId: t.id })}
+                          className={`w-full rounded-lg border-2 overflow-hidden text-left block transition ${
+                            isSelected ? 'border-accent ring-2 ring-accent/30' : 'border-paperLine hover:border-accent/50'
+                          }`}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={t.thumb} alt={t.label} className="w-full block bg-paper" />
+                          <p
+                            className={`text-[11px] leading-tight px-1.5 py-1 truncate ${
+                              isSelected ? 'text-accent font-semibold' : 'text-inkSoft'
+                            }`}
+                          >
+                            {isSelected && '✓ '}
+                            {t.label}
+                          </p>
+                        </button>
+                        {/* 마우스 올리면 더 크게 보여주는 미리보기 */}
+                        <div className="hidden group-hover:block absolute z-50 left-0 top-full mt-1 w-56 rounded-lg shadow-xl border border-paperLine bg-white p-1.5 pointer-events-none">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={t.thumb} alt={t.label} className="w-full rounded" />
+                          <p className="text-[11px] font-semibold text-ink px-0.5 pt-1">{t.label}</p>
+                          <p className="text-[10px] text-inkSoft px-0.5 pb-0.5">{t.desc}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {d.layoutStyle !== 'typography' && (
+                  <>
+                    <input
+                      value={d.keyword}
+                      onChange={(e) => onChange({ keyword: e.target.value })}
+                      placeholder="키워드 (예: 여름 휴대용 선풍기)"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                    />
+                    <input
+                      value={d.mood}
+                      onChange={(e) => onChange({ mood: e.target.value })}
+                      placeholder="분위기 (예: 시원한 파란 톤)"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                    />
+                    <input
+                      value={d.colorPrompt}
+                      onChange={(e) => onChange({ colorPrompt: e.target.value })}
+                      placeholder="제품 색상 변경 지시 (선택, 예: 제품을 네이비 색상으로 바꿔줘)"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                    />
+                  </>
+                )}
+                <input
+                  value={d.eyebrow}
+                  onChange={(e) => onChange({ eyebrow: e.target.value })}
+                  placeholder="작은 상단 문구 (선택, 예: 처음 시향한 순간)"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                />
+                <input
+                  value={d.description}
+                  onChange={(e) => onChange({ description: e.target.value })}
+                  placeholder="헤드라인 문구 (예: '한여름 폭염도 거뜬' 강조)"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                />
+                {d.layoutStyle !== 'white' && (
+                  <details className="text-xs" open>
+                    <summary className="cursor-pointer text-accent font-semibold select-none">
+                      + 디자인 요소 추가 (브랜드명 / 뱃지 / 통계 / 문단 / 번호 리스트, 전부 선택)
+                    </summary>
+                    <div className="grid gap-1.5 mt-1.5">
+                      <input
+                        value={d.accentTitle}
+                        onChange={(e) => onChange({ accentTitle: e.target.value })}
+                        placeholder="브랜드/제품명 영문 (예: Saffron Luminous Arcana)"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <input
+                        value={d.accentSubtitle}
+                        onChange={(e) => onChange({ accentSubtitle: e.target.value })}
+                        placeholder="한글 표기 (예: 사프란 루미너스 아르카나)"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <input
+                        value={d.stat}
+                        onChange={(e) => onChange({ stat: e.target.value })}
+                        placeholder="강조 숫자 (예: 110%, 부향률 30%)"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <input
+                        value={d.statCaption}
+                        onChange={(e) => onChange({ statCaption: e.target.value })}
+                        placeholder="숫자 아래 설명 문구"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <input
+                        value={d.badge}
+                        onChange={(e) => onChange({ badge: e.target.value })}
+                        placeholder="작은 뱃지 문구 (예: 특허출원 신개념 처방)"
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+                      />
+                      <textarea
+                        value={d.bodyText}
+                        onChange={(e) => onChange({ bodyText: e.target.value })}
+                        placeholder="문단형 카피 (여러 줄 입력 가능, 스토리텔링/비교 문구용)"
+                        rows={3}
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full resize-y"
+                      />
+                      <textarea
+                        value={d.listItems}
+                        onChange={(e) => onChange({ listItems: e.target.value })}
+                        placeholder={'번호 리스트 (한 줄에 한 항목)\n예) 하루의 시작과 끝, 나를 감싸는 향\n겹겹이 쌓이는 향, 깊어지는 여운'}
+                        rows={3}
+                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full resize-y"
+                      />
+                    </div>
+                  </details>
+                )}
+    </>
+  );
+}
+
+// 생성이 끝난 섹션을 고치는 중인 상태. 문구 섹션은 FieldValues(+사진 교체/
+// 제거 옵션)를, 제품 사양 표 섹션은 제목/항목을 쓴다.
+interface EditState extends FieldValues {
+  sectionId: string;
+  isSpec: boolean;
+  currentImageUrl: string | null; // 지금 저장돼 있는 원본 사진
+  file: File | null; // 새로 고른 교체 사진
+  previewUrl: string | null;
+  removeImage: boolean;
+  forceBackground: boolean;
+  specTitle: string;
+  specRows: SpecRowDraft[];
+}
+
+// 저장된 layout_style+theme에 해당하는 템플릿 카드 id (같은 조합을 쓰는 카드가
+// 여럿이면 첫 번째 - 카드 선택 표시는 편의일 뿐 결과물은 layout/theme로 결정됨)
+function templateIdFor(layoutStyle: string, theme: string): string {
+  return (
+    TEMPLATES.find((t) => t.layoutStyle === layoutStyle && t.theme === theme)?.id ||
+    TEMPLATES.find((t) => t.layoutStyle === layoutStyle)?.id ||
+    'white-simple'
+  );
+}
+
+function editStateFromSection(s: any): EditState {
+  const layoutStyle = (s.layout_style === 'spec' ? 'white' : s.layout_style || 'white') as LayoutStyle;
+  const theme = (s.theme || 'dark') as Theme;
+  const specRows: SpecRowDraft[] = Array.isArray(s.spec_rows)
+    ? s.spec_rows.map((r: any) => ({ label: String(r?.label ?? ''), value: String(r?.value ?? '') }))
+    : [];
+  return {
+    sectionId: s.id,
+    isSpec: s.layout_style === 'spec',
+    currentImageUrl: s.input_image_url || null,
+    file: null,
+    previewUrl: null,
+    removeImage: false,
+    forceBackground: false,
+    keyword: s.keyword || '',
+    mood: s.mood || '',
+    description: s.description || '',
+    eyebrow: s.eyebrow || '',
+    accentTitle: s.accent_title || '',
+    accentSubtitle: s.accent_subtitle || '',
+    stat: s.stat || '',
+    statCaption: s.stat_caption || '',
+    badge: s.badge || '',
+    bodyText: s.body_text || '',
+    listItems: s.list_items || '',
+    colorPrompt: s.color_prompt || '',
+    layoutStyle,
+    theme,
+    templateId: templateIdFor(layoutStyle, theme),
+    specTitle: s.spec_title || '제품 사양',
+    specRows: specRows.length ? specRows : [{ label: '', value: '' }],
+  };
+}
+
 function ProjectEditor({ project, onClose }: { project: any; onClose: () => void }) {
   const [isPending, startTransition] = useTransition();
+  const [editing, setEditing] = useState<EditState | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null); // 재시도 중인 section id 또는 생성 중인 draft id
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([newDraft()]);
@@ -298,6 +523,95 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     });
   }
 
+  function patchEdit(patch: Partial<EditState>) {
+    setEditing((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  function startEdit(section: any) {
+    setError(null);
+    setNotice(null);
+    setEditing(editStateFromSection(section));
+  }
+
+  // 수정 저장 - 서버가 문구만 바뀐 건지(배경 사진 재사용) 사진까지 새로
+  // 만들어야 하는지 판단해서 처리하고, 어느 쪽이었는지 알려준다.
+  function handleSaveEdit(e: EditState) {
+    setError(null);
+    setNotice(null);
+    setBusyId(e.sectionId);
+
+    if (e.isSpec) {
+      const rows = e.specRows.filter((r) => r.label.trim() || r.value.trim());
+      if (rows.length === 0) {
+        setBusyId(null);
+        setError('표에 항목을 하나 이상 입력해주세요.');
+        return;
+      }
+      startTransition(async () => {
+        const res = await updateSpecSection(e.sectionId, { title: e.specTitle, rows });
+        setBusyId(null);
+        if (!res || 'error' in res) {
+          setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+          return;
+        }
+        setEditing(null);
+        setNotice('표를 수정했어요.');
+      });
+      return;
+    }
+
+    const hasText = [
+      e.keyword,
+      e.mood,
+      e.description,
+      e.eyebrow,
+      e.accentTitle,
+      e.stat,
+      e.badge,
+      e.bodyText,
+      e.listItems,
+    ].some((v) => v.trim());
+    if (!hasText) {
+      setBusyId(null);
+      setError('문구 항목 중 하나는 입력해주세요.');
+      return;
+    }
+    const fd = new FormData();
+    fd.set('keyword', e.keyword);
+    fd.set('mood', e.mood);
+    fd.set('description', e.description);
+    fd.set('eyebrow', e.eyebrow);
+    fd.set('accentTitle', e.accentTitle);
+    fd.set('accentSubtitle', e.accentSubtitle);
+    fd.set('stat', e.stat);
+    fd.set('statCaption', e.statCaption);
+    fd.set('badge', e.badge);
+    fd.set('bodyText', e.bodyText);
+    fd.set('listItems', e.listItems);
+    fd.set('colorPrompt', e.colorPrompt);
+    fd.set('layoutStyle', e.layoutStyle);
+    fd.set('theme', e.theme);
+    if (e.file) fd.set('image', e.file);
+    if (e.removeImage) fd.set('removeImage', '1');
+    if (e.forceBackground) fd.set('forceBackground', '1');
+    startTransition(async () => {
+      const res = await updateSection(e.sectionId, fd);
+      setBusyId(null);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+        return;
+      }
+      setEditing(null);
+      setNotice(
+        e.layoutStyle === 'typography'
+          ? '섹션을 수정했어요.'
+          : res.backgroundReused
+          ? '문구/디자인만 바꿔서 기존 사진은 그대로 유지했어요.'
+          : '사진을 새로 생성해서 반영했어요.'
+      );
+    });
+  }
+
   function handleMove(sectionId: string, direction: 'up' | 'down') {
     startTransition(async () => {
       await moveSection(sectionId, direction);
@@ -370,8 +684,10 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
 
         {sections.map((s, idx) => {
           const isRetrying = isPending && busyId === s.id;
+          const ed = editing?.sectionId === s.id ? editing : null;
           return (
-            <div key={s.id} className={`grid ${GRID_COLS} border-t border-paperLine items-start`}>
+            <Fragment key={s.id}>
+            <div className={`grid ${GRID_COLS} border-t border-paperLine items-start`}>
               <div className="p-2">
                 {s.input_image_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -443,6 +759,13 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                   </button>
                 </div>
                 <button
+                  onClick={() => (editing?.sectionId === s.id ? setEditing(null) : startEdit(s))}
+                  disabled={isPending}
+                  className="text-[11px] text-accent font-semibold hover:underline disabled:opacity-40"
+                >
+                  {editing?.sectionId === s.id ? '닫기' : '수정'}
+                </button>
+                <button
                   onClick={() => startTransition(() => deleteSection(s.id))}
                   className="text-[11px] text-inkSoft hover:text-red-700"
                 >
@@ -450,6 +773,155 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 </button>
               </div>
             </div>
+
+            {ed && (
+              <div className="border-t border-paperLine bg-paper/60 p-3 grid gap-3 md:grid-cols-[280px_1fr]">
+                {ed.isSpec ? (
+                  <div className="md:col-span-2 grid gap-2">
+                    <input
+                      value={ed.specTitle}
+                      onChange={(e) => patchEdit({ specTitle: e.target.value })}
+                      placeholder="표 제목 (예: 제품 사양)"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs font-semibold"
+                    />
+                    <div className="grid gap-1.5">
+                      {ed.specRows.map((row, i) => (
+                        <div key={i} className="flex gap-1.5">
+                          <input
+                            value={row.label}
+                            onChange={(e) =>
+                              patchEdit({
+                                specRows: ed.specRows.map((r, j) => (j === i ? { ...r, label: e.target.value } : r)),
+                              })
+                            }
+                            placeholder="항목"
+                            className="border border-paperLine bg-white px-2 py-1.5 text-xs w-32"
+                          />
+                          <input
+                            value={row.value}
+                            onChange={(e) =>
+                              patchEdit({
+                                specRows: ed.specRows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)),
+                              })
+                            }
+                            placeholder="값"
+                            className="border border-paperLine bg-white px-2 py-1.5 text-xs flex-1"
+                          />
+                          <button
+                            onClick={() => patchEdit({ specRows: ed.specRows.filter((_, j) => j !== i) })}
+                            className="text-[11px] text-inkSoft hover:text-red-700 shrink-0"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => patchEdit({ specRows: [...ed.specRows, { label: '', value: '' }] })}
+                      className="text-[11px] text-accent font-semibold justify-self-start"
+                    >
+                      + 항목 추가
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      {ed.layoutStyle === 'typography' ? (
+                        <div
+                          className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2`}
+                        >
+                          사진 없음
+                          <br />
+                          (그라데이션 배경)
+                        </div>
+                      ) : (
+                        <>
+                          {ed.previewUrl || (ed.currentImageUrl && !ed.removeImage) ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={ed.previewUrl || ed.currentImageUrl || ''}
+                              alt="원본 사진"
+                              className={`${THUMB} object-cover rounded bg-paper`}
+                            />
+                          ) : (
+                            <div
+                              className={`${THUMB} rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2`}
+                            >
+                              {ed.removeImage ? '사진 제거됨 (AI가 새로 생성)' : '없음 (AI 생성)'}
+                            </div>
+                          )}
+                          <div className="flex gap-3 mt-1.5">
+                            <label className="text-[11px] text-accent font-semibold underline cursor-pointer">
+                              사진 교체
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={async (ev) => {
+                                  const raw = ev.target.files?.[0] || null;
+                                  const f = raw ? await shrinkImageForUpload(raw) : null;
+                                  patchEdit({
+                                    file: f,
+                                    previewUrl: f ? URL.createObjectURL(f) : null,
+                                    removeImage: false,
+                                  });
+                                }}
+                              />
+                            </label>
+                            {(ed.currentImageUrl || ed.file) && !ed.removeImage && (
+                              <button
+                                onClick={() => patchEdit({ removeImage: true, file: null, previewUrl: null })}
+                                className="text-[11px] text-inkSoft hover:text-red-700"
+                              >
+                                사진 제거
+                              </button>
+                            )}
+                            {ed.removeImage && (
+                              <button
+                                onClick={() => patchEdit({ removeImage: false })}
+                                className="text-[11px] text-inkSoft hover:text-ink"
+                              >
+                                제거 취소
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="grid gap-1.5">
+                      <FieldsEditor d={ed} onChange={(patch) => patchEdit(patch)} />
+                      {ed.layoutStyle !== 'typography' && (
+                        <label className="flex items-start gap-2 text-[11px] text-inkSoft cursor-pointer mt-1">
+                          <input
+                            type="checkbox"
+                            checked={ed.forceBackground}
+                            onChange={(ev) => patchEdit({ forceBackground: ev.target.checked })}
+                            className="mt-0.5"
+                          />
+                          <span>
+                            배경 사진도 새로 생성 (끄면 지금 사진은 그대로 두고 문구·디자인만 바꿔요. 키워드·분위기·색상
+                            지시를 바꾸거나 사진을 교체하면 자동으로 새로 생성돼요)
+                          </span>
+                        </label>
+                      )}
+                    </div>
+                  </>
+                )}
+                <div className="md:col-span-2 flex items-center gap-3">
+                  <button
+                    onClick={() => handleSaveEdit(ed)}
+                    disabled={isPending}
+                    className="btn-primary px-4 py-1.5 text-xs font-semibold disabled:opacity-50"
+                  >
+                    {isRetrying ? '적용 중...' : '저장하고 적용'}
+                  </button>
+                  <button onClick={() => setEditing(null)} className="text-xs text-inkSoft hover:text-ink">
+                    취소
+                  </button>
+                </div>
+              </div>
+            )}
+            </Fragment>
           );
         })}
 
@@ -534,134 +1006,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 >
                   {d.recommending ? 'AI 추천 생성 중...' : '✨ AI 추천으로 문구+디자인 채우기'}
                 </button>
-                {/* 디자인 스타일을 고르는 유일한 컨트롤 - 예전엔 이 카드
-                    아래에 layoutStyle/theme 드롭다운이 따로 있어서 "카드랑
-                    드롭다운 중 뭘 봐야 하냐"는 혼란이 있었음. 드롭다운을
-                    없애고 카드 하나로 통일함. 같은 layoutStyle+theme 값을
-                    쓰는 카드가 여러 개 있을 수 있어서(예: 인증뱃지+리스트,
-                    통계 강조가 둘 다 typography+dark), "선택됨" 표시는
-                    값 비교가 아니라 실제로 클릭한 카드 id(templateId)로만
-                    판단한다. */}
-                <div className="grid grid-cols-3 gap-2">
-                  {TEMPLATES.map((t) => {
-                    const isSelected = d.templateId === t.id;
-                    return (
-                      <div key={t.id} className="relative group">
-                        <button
-                          onClick={() => updateDraft(d.id, { layoutStyle: t.layoutStyle, theme: t.theme, templateId: t.id })}
-                          className={`w-full rounded-lg border-2 overflow-hidden text-left block transition ${
-                            isSelected ? 'border-accent ring-2 ring-accent/30' : 'border-paperLine hover:border-accent/50'
-                          }`}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={t.thumb} alt={t.label} className="w-full block bg-paper" />
-                          <p
-                            className={`text-[11px] leading-tight px-1.5 py-1 truncate ${
-                              isSelected ? 'text-accent font-semibold' : 'text-inkSoft'
-                            }`}
-                          >
-                            {isSelected && '✓ '}
-                            {t.label}
-                          </p>
-                        </button>
-                        {/* 마우스 올리면 더 크게 보여주는 미리보기 */}
-                        <div className="hidden group-hover:block absolute z-50 left-0 top-full mt-1 w-56 rounded-lg shadow-xl border border-paperLine bg-white p-1.5 pointer-events-none">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={t.thumb} alt={t.label} className="w-full rounded" />
-                          <p className="text-[11px] font-semibold text-ink px-0.5 pt-1">{t.label}</p>
-                          <p className="text-[10px] text-inkSoft px-0.5 pb-0.5">{t.desc}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {d.layoutStyle !== 'typography' && (
-                  <>
-                    <input
-                      value={d.keyword}
-                      onChange={(e) => updateDraft(d.id, { keyword: e.target.value })}
-                      placeholder="키워드 (예: 여름 휴대용 선풍기)"
-                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                    />
-                    <input
-                      value={d.mood}
-                      onChange={(e) => updateDraft(d.id, { mood: e.target.value })}
-                      placeholder="분위기 (예: 시원한 파란 톤)"
-                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                    />
-                    <input
-                      value={d.colorPrompt}
-                      onChange={(e) => updateDraft(d.id, { colorPrompt: e.target.value })}
-                      placeholder="제품 색상 변경 지시 (선택, 예: 제품을 네이비 색상으로 바꿔줘)"
-                      className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                    />
-                  </>
-                )}
-                <input
-                  value={d.eyebrow}
-                  onChange={(e) => updateDraft(d.id, { eyebrow: e.target.value })}
-                  placeholder="작은 상단 문구 (선택, 예: 처음 시향한 순간)"
-                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                />
-                <input
-                  value={d.description}
-                  onChange={(e) => updateDraft(d.id, { description: e.target.value })}
-                  placeholder="헤드라인 문구 (예: '한여름 폭염도 거뜬' 강조)"
-                  className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                />
-                {d.layoutStyle !== 'white' && (
-                  <details className="text-xs" open>
-                    <summary className="cursor-pointer text-accent font-semibold select-none">
-                      + 디자인 요소 추가 (브랜드명 / 뱃지 / 통계 / 문단 / 번호 리스트, 전부 선택)
-                    </summary>
-                    <div className="grid gap-1.5 mt-1.5">
-                      <input
-                        value={d.accentTitle}
-                        onChange={(e) => updateDraft(d.id, { accentTitle: e.target.value })}
-                        placeholder="브랜드/제품명 영문 (예: Saffron Luminous Arcana)"
-                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                      />
-                      <input
-                        value={d.accentSubtitle}
-                        onChange={(e) => updateDraft(d.id, { accentSubtitle: e.target.value })}
-                        placeholder="한글 표기 (예: 사프란 루미너스 아르카나)"
-                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                      />
-                      <input
-                        value={d.stat}
-                        onChange={(e) => updateDraft(d.id, { stat: e.target.value })}
-                        placeholder="강조 숫자 (예: 110%, 부향률 30%)"
-                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                      />
-                      <input
-                        value={d.statCaption}
-                        onChange={(e) => updateDraft(d.id, { statCaption: e.target.value })}
-                        placeholder="숫자 아래 설명 문구"
-                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                      />
-                      <input
-                        value={d.badge}
-                        onChange={(e) => updateDraft(d.id, { badge: e.target.value })}
-                        placeholder="작은 뱃지 문구 (예: 특허출원 신개념 처방)"
-                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
-                      />
-                      <textarea
-                        value={d.bodyText}
-                        onChange={(e) => updateDraft(d.id, { bodyText: e.target.value })}
-                        placeholder="문단형 카피 (여러 줄 입력 가능, 스토리텔링/비교 문구용)"
-                        rows={3}
-                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full resize-y"
-                      />
-                      <textarea
-                        value={d.listItems}
-                        onChange={(e) => updateDraft(d.id, { listItems: e.target.value })}
-                        placeholder={'번호 리스트 (한 줄에 한 항목)\n예) 하루의 시작과 끝, 나를 감싸는 향\n겹겹이 쌓이는 향, 깊어지는 여운'}
-                        rows={3}
-                        className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full resize-y"
-                      />
-                    </div>
-                  </details>
-                )}
+                <FieldsEditor d={d} onChange={(patch) => updateDraft(d.id, patch)} />
               </div>
               <div className="p-2 grid gap-1">
                 <button
@@ -756,6 +1101,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         </div>
       </div>
 
+      {notice && <p className="text-xs text-profit bg-profitBg rounded-md px-3 py-2">{notice}</p>}
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{error}</p>}
     </div>
   );
