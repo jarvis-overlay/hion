@@ -4,6 +4,7 @@ import { Fragment, useState, useTransition } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import {
   createProject,
+  updateProjectCategory,
   deleteProject,
   addSection,
   retrySection,
@@ -109,6 +110,7 @@ interface Draft {
   id: string;
   file: File | null;
   previewUrl: string | null;
+  imageUrl: string;
   keyword: string;
   mood: string;
   description: string;
@@ -136,6 +138,7 @@ function newDraft(): Draft {
     id: crypto.randomUUID(),
     file: null,
     previewUrl: null,
+    imageUrl: '',
     keyword: '',
     mood: '',
     description: '',
@@ -350,6 +353,7 @@ interface EditState extends FieldValues {
   currentImageUrl: string | null; // 지금 저장돼 있는 원본 사진
   file: File | null; // 새로 고른 교체 사진
   previewUrl: string | null;
+  imageUrl: string; // 파일 대신 URL로 교체할 때
   removeImage: boolean;
   forceBackground: boolean;
   specTitle: string;
@@ -378,6 +382,7 @@ function editStateFromSection(s: any): EditState {
     currentImageUrl: s.input_image_url || null,
     file: null,
     previewUrl: null,
+    imageUrl: '',
     removeImage: false,
     forceBackground: false,
     keyword: s.keyword || '',
@@ -408,6 +413,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([newDraft()]);
   const [specDrafts, setSpecDrafts] = useState<SpecDraft[]>([]);
+  const [editingCategory, setEditingCategory] = useState(false);
+  const [categoryInput, setCategoryInput] = useState(project.category || '');
   const sections: any[] = [...(project.detail_page_sections || [])].sort((a, b) => a.position - b.position);
 
   function updateDraft(id: string, patch: Partial<Draft>) {
@@ -454,6 +461,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     fd.set('layoutStyle', draft.layoutStyle);
     fd.set('theme', draft.theme);
     if (draft.file) fd.set('image', draft.file);
+    else if (draft.imageUrl.trim()) fd.set('imageUrl', draft.imageUrl.trim());
     setBusyId(draft.id);
     startTransition(async () => {
       const res = await addSection(project.id, sections.length, fd);
@@ -479,10 +487,11 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   // 첨부한 원본 사진에 박힌 중국어 문구가 뭐라고 써있는지 미리 뽑아서
   // 보여준다 - 이걸 보고 사용자가 원하는 한국어 문구를 직접 입력한다.
   function handleExtractText(draft: Draft) {
-    if (!draft.file) return;
+    if (!draft.file && !draft.imageUrl.trim()) return;
     updateDraft(draft.id, { extracting: true, extractError: null, extractedTexts: null });
     const fd = new FormData();
-    fd.set('image', draft.file);
+    if (draft.file) fd.set('image', draft.file);
+    else fd.set('imageUrl', draft.imageUrl.trim());
     startTransition(async () => {
       const res = await extractImageText(fd);
       if (!res || 'error' in res) {
@@ -592,6 +601,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     fd.set('layoutStyle', e.layoutStyle);
     fd.set('theme', e.theme);
     if (e.file) fd.set('image', e.file);
+    else if (e.imageUrl.trim()) fd.set('imageUrl', e.imageUrl.trim());
     if (e.removeImage) fd.set('removeImage', '1');
     if (e.forceBackground) fd.set('forceBackground', '1');
     startTransition(async () => {
@@ -672,6 +682,34 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         <button onClick={onClose} className="text-xs text-inkSoft hover:text-ink">
           목록으로
         </button>
+      </div>
+
+      <div className="text-xs text-inkSoft">
+        {editingCategory ? (
+          <div className="flex items-center gap-2">
+            <input
+              value={categoryInput}
+              onChange={(e) => setCategoryInput(e.target.value)}
+              placeholder="카테고리/검색어 (예: 휴대용 선풍기) - 쿠팡 인기상품을 참고해서 배경을 더 퀄리티 있게 만들어요"
+              className="border border-paperLine bg-white px-2 py-1 text-xs flex-1"
+            />
+            <button
+              onClick={() =>
+                startTransition(() => {
+                  updateProjectCategory(project.id, categoryInput);
+                  setEditingCategory(false);
+                })
+              }
+              className="text-accent font-semibold"
+            >
+              저장
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setEditingCategory(true)} className="hover:text-ink">
+            {project.category ? `카테고리: ${project.category}` : '+ 카테고리 설정 (요즘 잘 팔리는 상품 참고용)'}
+          </button>
+        )}
       </div>
 
       <div className="card overflow-hidden">
@@ -863,6 +901,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                                   patchEdit({
                                     file: f,
                                     previewUrl: f ? URL.createObjectURL(f) : null,
+                                    imageUrl: f ? '' : ed.imageUrl,
                                     removeImage: false,
                                   });
                                 }}
@@ -885,6 +924,19 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                               </button>
                             )}
                           </div>
+                          <input
+                            value={ed.imageUrl}
+                            onChange={(e) =>
+                              patchEdit({
+                                imageUrl: e.target.value,
+                                file: e.target.value ? null : ed.file,
+                                previewUrl: e.target.value ? null : ed.previewUrl,
+                                removeImage: false,
+                              })
+                            }
+                            placeholder="또는 이미지 URL로 교체 (1688 사진 주소)"
+                            className="border border-paperLine bg-white px-2 py-1 text-[11px] w-full mt-1.5"
+                          />
                         </>
                       )}
                     </div>
@@ -964,6 +1016,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                         updateDraft(d.id, {
                           file: f,
                           previewUrl: f ? URL.createObjectURL(f) : null,
+                          imageUrl: f ? '' : d.imageUrl,
                           extractedTexts: null,
                           extractError: null,
                         });
@@ -971,7 +1024,23 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                     />
                   </label>
                 )}
-                {d.file && d.layoutStyle !== 'typography' && (
+                {d.layoutStyle !== 'typography' && (
+                  <input
+                    value={d.imageUrl}
+                    onChange={(e) =>
+                      updateDraft(d.id, {
+                        imageUrl: e.target.value,
+                        file: e.target.value ? null : d.file,
+                        previewUrl: e.target.value ? null : d.previewUrl,
+                        extractedTexts: null,
+                        extractError: null,
+                      })
+                    }
+                    placeholder="또는 이미지 URL 붙여넣기 (1688 사진 주소)"
+                    className="border border-paperLine bg-white px-2 py-1 text-[11px] w-full mt-1.5"
+                  />
+                )}
+                {(d.file || d.imageUrl.trim()) && d.layoutStyle !== 'typography' && (
                   <div className="mt-1.5">
                     <button
                       onClick={() => handleExtractText(d)}
@@ -1111,6 +1180,7 @@ export default function DetailPageStudio({ projects }: { projects: any[] }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newCategory, setNewCategory] = useState('');
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -1123,7 +1193,7 @@ export default function DetailPageStudio({ projects }: { projects: any[] }) {
   function handleCreate() {
     setError(null);
     startTransition(async () => {
-      const res = await createProject(newTitle);
+      const res = await createProject(newTitle, newCategory);
       if (!res || 'error' in res) {
         setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
@@ -1131,6 +1201,7 @@ export default function DetailPageStudio({ projects }: { projects: any[] }) {
       setActiveId(res.id);
       setCreating(false);
       setNewTitle('');
+      setNewCategory('');
     });
   }
 
@@ -1144,20 +1215,28 @@ export default function DetailPageStudio({ projects }: { projects: any[] }) {
       </div>
 
       {creating && (
-        <div className="flex gap-2 mb-4 bg-paper rounded-md p-3">
+        <div className="grid gap-2 mb-4 bg-paper rounded-md p-3">
+          <div className="flex gap-2">
+            <input
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="프로젝트 이름 (선택, 예: 여름 선풍기 상세페이지)"
+              className="border border-paperLine bg-white px-2 py-1.5 text-sm flex-1"
+            />
+            <button
+              onClick={handleCreate}
+              disabled={isPending}
+              className="btn-primary px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
+            >
+              {isPending ? '생성 중...' : '만들기'}
+            </button>
+          </div>
           <input
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="프로젝트 이름 (선택, 예: 여름 선풍기 상세페이지)"
-            className="border border-paperLine bg-white px-2 py-1.5 text-sm flex-1"
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            placeholder="카테고리/검색어 (선택, 예: 휴대용 선풍기) - 쿠팡 인기상품을 참고해서 배경을 더 퀄리티 있게 만들어요"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
           />
-          <button
-            onClick={handleCreate}
-            disabled={isPending}
-            className="btn-primary px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
-          >
-            {isPending ? '생성 중...' : '만들기'}
-          </button>
         </div>
       )}
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2 mb-3">{error}</p>}

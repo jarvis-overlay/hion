@@ -8,6 +8,8 @@ import {
   composeDetailSectionImage,
   detectAndTranslateText,
   composeSpecTableSection,
+  fetchImageFromUrl,
+  fetchTopSellerReferenceImages,
   type DetailSectionInput,
   type DetailSectionLayout,
   type DetailSectionTheme,
@@ -99,11 +101,20 @@ export async function extractImageText(
   formData: FormData
 ): Promise<{ error: string } | { success: true; texts: { original: string; translated: string }[] }> {
   const file = formData.get('image') as File | null;
-  if (!file || file.size === 0) return { error: '이미지를 먼저 첨부해주세요.' };
+  const imageUrl = String(formData.get('imageUrl') || '').trim();
+  if ((!file || file.size === 0) && !imageUrl) return { error: '이미지를 먼저 첨부하거나 이미지 URL을 입력해주세요.' };
 
   try {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const mimeType = file.type || 'image/jpeg';
+    let buffer: Buffer;
+    let mimeType: string;
+    if (file && file.size > 0) {
+      buffer = Buffer.from(await file.arrayBuffer());
+      mimeType = file.type || 'image/jpeg';
+    } else {
+      const fetched = await fetchImageFromUrl(imageUrl);
+      buffer = fetched.buffer;
+      mimeType = fetched.mimeType;
+    }
     const regions = await detectAndTranslateText(buffer, mimeType);
     if (regions.length === 0) {
       return { success: true, texts: [] };
@@ -118,7 +129,8 @@ export async function extractImageText(
 }
 
 export async function createProject(
-  title: string
+  title: string,
+  category?: string
 ): Promise<{ error: string } | { success: true; id: string }> {
   const supabase = createClient();
   const {
@@ -127,13 +139,25 @@ export async function createProject(
 
   const { data, error } = await supabase
     .from('detail_page_projects')
-    .insert({ title: title.trim() || null, author_email: user?.email })
+    .insert({ title: title.trim() || null, category: category?.trim() || null, author_email: user?.email })
     .select('id')
     .single();
 
   if (error || !data) return { error: error?.message || '프로젝트 생성에 실패했어요.' };
   revalidatePath(PATH);
   return { success: true, id: (data as { id: string }).id };
+}
+
+// 프로젝트 생성 후에도 "요즘 잘 팔리는 상품 참고" 카테고리를 나중에
+// 설정/수정할 수 있게 - 처음에 안 적었다고 다시 만들 필요 없게 한다.
+export async function updateProjectCategory(id: string, category: string) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('detail_page_projects')
+    .update({ category: category.trim() || null })
+    .eq('id', id);
+  if (error) console.error('[detail-pages] updateProjectCategory 실패:', error.message);
+  revalidatePath(PATH);
 }
 
 export async function deleteProject(id: string) {
@@ -159,13 +183,26 @@ export async function addSection(
   const promptText = buildPromptText(input);
 
   const file = formData.get('image') as File | null;
+  const imageUrl = String(formData.get('imageUrl') || '').trim();
   let inputImageUrl: string | null = null;
   let productImage: { buffer: Buffer; mimeType: string } | null = null;
   const sectionId = randomUUID();
 
-  if (file && file.size > 0) {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const mimeType = file.type || 'image/jpeg';
+  if ((file && file.size > 0) || imageUrl) {
+    let buffer: Buffer;
+    let mimeType: string;
+    if (file && file.size > 0) {
+      buffer = Buffer.from(await file.arrayBuffer());
+      mimeType = file.type || 'image/jpeg';
+    } else {
+      try {
+        const fetched = await fetchImageFromUrl(imageUrl);
+        buffer = fetched.buffer;
+        mimeType = fetched.mimeType;
+      } catch (e: any) {
+        return { error: e?.message || String(e) };
+      }
+    }
     productImage = { buffer, mimeType };
     const path = `detail-pages/${projectId}/${sectionId}-input.${extFromContentType(mimeType)}`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, buffer, {
@@ -261,7 +298,15 @@ async function runGeneration(
   try {
     let background = reuseBackground;
     if ((input.layoutStyle || 'white') !== 'typography' && !background) {
-      background = await generateDetailBackground(input, productImage);
+      // "요즘 잘 팔리는 상품" 참고 - 프로젝트에 카테고리를 입력해둔
+      // 경우에만 쿠팡 경쟁 상품 사진을 같이 넣어서 스타일 참고를 시킨다.
+      const { data: project } = await supabase
+        .from('detail_page_projects')
+        .select('category')
+        .eq('id', projectId)
+        .maybeSingle();
+      const referenceImages = project?.category ? await fetchTopSellerReferenceImages(project.category) : [];
+      background = await generateDetailBackground(input, productImage, referenceImages);
       // 배경 보관은 편의 기능이라 실패해도 생성 자체는 계속한다
       // (못 남기면 나중에 수정할 때 배경을 새로 만들게 될 뿐).
       const { error: bgErr } = await supabase.storage
@@ -322,14 +367,27 @@ export async function updateSection(
   const forceBackground = formData.get('forceBackground') === '1';
   const removeImage = formData.get('removeImage') === '1';
   const file = formData.get('image') as File | null;
-  const hasNewFile = !!file && file.size > 0;
+  const imageUrl = String(formData.get('imageUrl') || '').trim();
+  const hasNewFile = (!!file && file.size > 0) || !!imageUrl;
 
   // 1) 원본 사진 교체/제거
   let inputImageUrl: string | null = section.input_image_url;
   let productImage: { buffer: Buffer; mimeType: string } | null = null;
   if (hasNewFile) {
-    const buffer = Buffer.from(await file!.arrayBuffer());
-    const mimeType = file!.type || 'image/jpeg';
+    let buffer: Buffer;
+    let mimeType: string;
+    if (file && file.size > 0) {
+      buffer = Buffer.from(await file.arrayBuffer());
+      mimeType = file.type || 'image/jpeg';
+    } else {
+      try {
+        const fetched = await fetchImageFromUrl(imageUrl);
+        buffer = fetched.buffer;
+        mimeType = fetched.mimeType;
+      } catch (e: any) {
+        return { error: e?.message || String(e) };
+      }
+    }
     productImage = { buffer, mimeType };
     const path = `detail-pages/${projectId}/${sectionId}-input.${extFromContentType(mimeType)}`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, buffer, {

@@ -12,11 +12,62 @@
 import sharp from 'sharp';
 import { createCanvas, registerFont } from 'canvas';
 import path from 'path';
+import { fetchCoupangBestsellers } from './brightdata';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} 환경변수가 설정 안 되어있어요.`);
   return v;
+}
+
+// 1688 상품 페이지는 로그인 없인 못 열지만, 거기 박힌 사진 CDN 링크
+// 자체(img.alicdn.com 등)는 로그인 없이도 공개 접근되는 걸 실측으로
+// 확인함 - 파일 업로드 대신 "이미지 URL 붙여넣기"로 바로 가져올 수
+// 있게 하는 공용 헬퍼. 이미지가 아닌 URL을 넣는 실수를 바로 잡아주기
+// 위해 content-type을 확인한다.
+export async function fetchImageFromUrl(url: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e: any) {
+    throw new Error(`이미지 URL에 접속하지 못했어요: ${e?.message || String(e)}`);
+  }
+  if (!res.ok) throw new Error(`이미지 URL을 불러오지 못했어요 (HTTP ${res.status})`);
+  const contentType = (res.headers.get('content-type') || '').split(';')[0];
+  if (!contentType.startsWith('image/')) {
+    throw new Error('이 URL은 이미지가 아니에요. 이미지 파일 주소(끝이 .jpg/.png 등)가 맞는지 확인해주세요.');
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, mimeType: contentType };
+}
+
+// 쿠팡에서 실제로 잘 팔리는 경쟁 상품 사진을 AI 생성 호출에 "스타일
+// 참고용"으로 같이 넣어주기 위한 헬퍼. 프로젝트에 카테고리/검색어를
+// 입력해둔 경우에만 호출되고, 실패하거나 이미지가 없으면 빈 배열을
+// 돌려줘서 참고 없이도 생성 자체는 항상 계속 진행되게 한다.
+export async function fetchTopSellerReferenceImages(
+  category: string,
+  limit = 2
+): Promise<{ buffer: Buffer; mimeType: string }[]> {
+  const q = category.trim();
+  if (!q) return [];
+  try {
+    const bestsellers = await fetchCoupangBestsellers(q, limit * 3);
+    const candidates = bestsellers.filter((b) => b.imageUrl).slice(0, limit);
+    const fetched = await Promise.all(
+      candidates.map(async (b) => {
+        try {
+          return await fetchImageFromUrl(b.imageUrl!);
+        } catch {
+          return null;
+        }
+      })
+    );
+    return fetched.filter((f): f is { buffer: Buffer; mimeType: string } => f !== null);
+  } catch (e) {
+    console.error('[imageProcessing] 인기상품 레퍼런스 조회 실패:', e);
+    return [];
+  }
 }
 
 // sharp의 SVG 텍스트 렌더링은 시스템에 설치된 폰트에 의존하는데, Vercel
@@ -283,10 +334,19 @@ async function generateBackgroundImage(
   keyword: string,
   mood: string,
   productImage: { buffer: Buffer; mimeType: string } | null,
-  colorPrompt?: string
+  colorPrompt?: string,
+  referenceImages: { buffer: Buffer; mimeType: string }[] = []
 ): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
   const appearanceSpec = productImage ? await describeProductAppearance(productImage) : null;
+
+  // 프로젝트에 카테고리를 입력해둔 경우, 쿠팡에서 실제로 잘 팔리는
+  // 경쟁 상품 사진을 같이 넣어서 "그 상품을 베끼라"가 아니라 "왜 잘
+  // 팔리는지에 기여하는 구도/분위기/연출 스타일만 참고하라"고 못박는다.
+  const referenceRule =
+    referenceImages.length > 0
+      ? `\n\n[참고용 - 이 카테고리에서 실제로 잘 팔리는 경쟁 상품 사진 ${referenceImages.length}장이 먼저 첨부돼 있습니다] 그 사진 속 상품이나 문구를 그대로 베끼면 절대 안 됩니다. 다만 구도·배경 연출·조명 톤·여백 사용처럼 "이 카테고리에서 잘 팔리는 사진이 공통적으로 갖는 스타일 요소"는 참고해서, 아래 상품 사진에 녹여주세요.`
+      : '';
 
   const noTextRule =
     '**가장 중요한 규칙: 결과 이미지 안에는 그 어떤 문자·숫자·기호도 존재하면 안 됩니다.** 한국어든 중국어든 영어든 로고든 워터마크든 예외 없습니다. 이 규칙은 원본 사진에 이미 디자인 요소로 박혀 있는 텍스트(예: 판매용 사진에 얹혀있는 중국어 홍보 문구, 브랜드 로고, 워터마크, 각인, 라벨 글씨)에도 똑같이 적용됩니다 - 그런 텍스트가 보이면 지우거나 그리지 말고, 해당 영역을 자연스러운 배경/재질로 다시 채워서 완전히 안 보이게 만드세요. "글자를 다른 언어로 바꿔서 넣는 것"도 금지입니다 - 번역해서 넣는 게 아니라 아예 아무 글자도 없어야 합니다. 문구는 이후 단계에서 저희가 별도로 정확한 폰트로 합성할 예정이니, 지금 결과물은 순수하게 사진/배경/분위기만 있으면 됩니다.';
@@ -313,22 +373,27 @@ ${fidelityRule}${
         appearanceSpec
           ? `\n\n[상품 외형 명세 - 결과물 속 모든 상품이 반드시 이 명세와 일치해야 합니다. 특히 바닥 부품은 상품과 바닥면 사이에 눈에 보이게 그려주세요]\n${appearanceSpec}`
           : ''
-      }
+      }${referenceRule}
 
 위 규칙을 지키면서, 아래 상품 사진을 그대로 활용해서 쿠팡 상세페이지에 들어갈 마케팅 배경 이미지를 만들어주세요. ${colorRule}, 배경과 분위기만 아래 키워드/분위기에 맞게 합성/편집해주세요. 원본 사진에 있던 문구·워터마크·로고는 이번 결과물에 절대 나오면 안 됩니다.
 
 키워드: ${keyword || '(없음)'}
 분위기: ${mood || '(없음)'}`
-    : `${noTextRule}
+    : `${noTextRule}${referenceRule}
 
 위 규칙을 지키면서, 아래 키워드/분위기에 맞는 쿠팡 상세페이지용 마케팅 배경 이미지를 새로 만들어주세요. 첨부된 상품 사진이 없으니, 상황에 맞는 이미지를 구성해주세요.
 
 키워드: ${keyword || '(없음)'}
 분위기: ${mood || '(없음)'}`;
 
-  // 상품 사진을 먼저, 지시문을 뒤에 둔다 - 이미지 편집 계열 모델은 이
-  // 순서일 때 원본 이미지를 더 충실히 따른다.
+  // 참고 이미지(있으면) -> 상품 사진 -> 지시문 순서로 둔다 - 이미지
+  // 편집 계열 모델은 지시문을 마지막에 둘 때 이미지들을 더 충실히
+  // 따르고, 지시문 안에서 "먼저 첨부된 참고 사진들"이라고 명시했으므로
+  // 참고 이미지를 상품 사진보다 앞에 둬야 그 설명과 순서가 맞는다.
   const parts: Record<string, unknown>[] = [];
+  for (const ref of referenceImages) {
+    parts.push({ inlineData: { mimeType: ref.mimeType, data: ref.buffer.toString('base64') } });
+  }
   if (productImage) {
     parts.push({ inlineData: { mimeType: productImage.mimeType, data: productImage.buffer.toString('base64') } });
   }
@@ -913,9 +978,10 @@ export async function composeSpecTableSection(rows: SpecRow[], title?: string): 
 // 쓸 수 있게 분리해둔다. 배경은 항상 JPEG로 정규화해서 보관/재사용한다.
 export async function generateDetailBackground(
   input: DetailSectionInput,
-  productImage: { buffer: Buffer; mimeType: string } | null
+  productImage: { buffer: Buffer; mimeType: string } | null,
+  referenceImages: { buffer: Buffer; mimeType: string }[] = []
 ): Promise<Buffer> {
-  const raw = await generateBackgroundImage(input.keyword, input.mood, productImage, input.colorPrompt);
+  const raw = await generateBackgroundImage(input.keyword, input.mood, productImage, input.colorPrompt, referenceImages);
   return sharp(raw).jpeg({ quality: 92 }).toBuffer();
 }
 
@@ -1020,12 +1086,27 @@ export async function composeThumbnailImage(
 // 컷아웃(composeThumbnailImage)은 항상 결정적으로 먼저 만들고, 이
 // 함수는 그 결과물 위에 추가 편집을 요청할 때만 호출한다. 결과 크기가
 // 정확히 1000x1000이 아닐 수 있어서 마지막에 다시 규격에 맞춘다.
-export async function applyThumbnailEffect(imageBuffer: Buffer, effectPrompt: string): Promise<Buffer> {
+export async function applyThumbnailEffect(
+  imageBuffer: Buffer,
+  effectPrompt: string,
+  referenceImages: { buffer: Buffer; mimeType: string }[] = []
+): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
 
-  const instruction = `**절대 이미지 안에 어떤 문자·숫자·기호도 넣지 마세요.** 아래 상품 썸네일 사진을 아래 "요청 사항"에 맞게 수정해주세요. 요청 사항은 상품 개수를 늘리거나 배치를 바꾸는 것처럼 상품 자체에 관한 내용이어도 반드시 반영하세요. 요청 사항에서 따로 언급하지 않은 부분(상품의 색상·재질·전체적인 디자인 등)만 원본 그대로 유지하면 됩니다. 쿠팡 상품 썸네일이라는 걸 감안해서 상품이 가려지거나 알아보기 어려워지면 안 됩니다.
+  const referenceRule =
+    referenceImages.length > 0
+      ? `\n\n[참고용 - 이 카테고리에서 실제로 잘 팔리는 경쟁 상품 썸네일 ${referenceImages.length}장이 먼저 첨부돼 있습니다] 그 사진 속 상품이나 문구를 베끼지 말고, 효과/연출/소품 배치처럼 "잘 팔리는 썸네일이 공통적으로 갖는 스타일 요소"만 참고해서 아래 요청에 반영해주세요.`
+      : '';
+
+  const instruction = `**절대 이미지 안에 어떤 문자·숫자·기호도 넣지 마세요.** 아래 상품 썸네일 사진을 아래 "요청 사항"에 맞게 수정해주세요. 요청 사항은 상품 개수를 늘리거나 배치를 바꾸는 것처럼 상품 자체에 관한 내용이어도 반드시 반영하세요. 요청 사항에서 따로 언급하지 않은 부분(상품의 색상·재질·전체적인 디자인 등)만 원본 그대로 유지하면 됩니다. 쿠팡 상품 썸네일이라는 걸 감안해서 상품이 가려지거나 알아보기 어려워지면 안 됩니다.${referenceRule}
 
 요청 사항: ${effectPrompt}`;
+
+  const parts: Record<string, unknown>[] = [{ text: instruction }];
+  for (const ref of referenceImages) {
+    parts.push({ inlineData: { mimeType: ref.mimeType, data: ref.buffer.toString('base64') } });
+  }
+  parts.push({ inlineData: { mimeType: 'image/jpeg', data: imageBuffer.toString('base64') } });
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
@@ -1033,14 +1114,7 @@ export async function applyThumbnailEffect(imageBuffer: Buffer, effectPrompt: st
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: instruction },
-              { inlineData: { mimeType: 'image/jpeg', data: imageBuffer.toString('base64') } },
-            ],
-          },
-        ],
+        contents: [{ parts }],
         generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
       }),
     }
@@ -1256,6 +1330,7 @@ export interface GenerateThumbnailInput {
   productImage: { buffer: Buffer; mimeType: string };
   position: ThumbnailPosition;
   effectPrompt?: string;
+  referenceImages?: { buffer: Buffer; mimeType: string }[];
 }
 
 // 상품 위치 크롭(소품 물리적으로 제거) -> 문구/워터마크 정리 -> 누끼
@@ -1266,7 +1341,7 @@ export async function generateThumbnailImage(input: GenerateThumbnailInput): Pro
   const cutout = await removeImageBackground(cleaned.buffer, cleaned.mimeType);
   const base = await composeThumbnailImage(cutout, input.position);
   if (input.effectPrompt?.trim()) {
-    return applyThumbnailEffect(base, input.effectPrompt.trim());
+    return applyThumbnailEffect(base, input.effectPrompt.trim(), input.referenceImages || []);
   }
   return base;
 }

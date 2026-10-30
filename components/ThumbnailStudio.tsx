@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import {
   createProject,
+  updateProjectCategory,
   deleteProject,
   addThumbnailImage,
   retryThumbnailImage,
@@ -31,6 +32,7 @@ interface ImageDraft {
   id: string;
   file: File | null;
   previewUrl: string | null;
+  imageUrl: string;
   position: ThumbnailPosition;
   effectPrompt: string;
   generating: boolean;
@@ -41,6 +43,7 @@ function newImageDraft(): ImageDraft {
     id: crypto.randomUUID(),
     file: null,
     previewUrl: null,
+    imageUrl: '',
     position: 'center',
     effectPrompt: '',
     generating: false,
@@ -78,11 +81,17 @@ function DraftForm({
           onChange={async (e) => {
             const raw = e.target.files?.[0] || null;
             const f = raw ? await shrinkImageForUpload(raw) : null;
-            onChange({ file: f, previewUrl: f ? URL.createObjectURL(f) : null });
+            onChange({ file: f, previewUrl: f ? URL.createObjectURL(f) : null, imageUrl: f ? '' : draft.imageUrl });
           }}
         />
       </label>
       <div className="grid gap-1.5">
+        <input
+          value={draft.imageUrl}
+          onChange={(e) => onChange({ imageUrl: e.target.value, file: e.target.value ? null : draft.file, previewUrl: e.target.value ? null : draft.previewUrl })}
+          placeholder="또는 이미지 URL 붙여넣기 (예: 1688에서 복사한 사진 주소)"
+          className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+        />
         <label className="text-[11px] text-inkSoft">제품 위치</label>
         <select
           value={draft.position}
@@ -103,7 +112,7 @@ function DraftForm({
         />
         <button
           onClick={onGenerate}
-          disabled={busy || !draft.file}
+          disabled={busy || (!draft.file && !draft.imageUrl.trim())}
           className="btn-primary px-4 py-1.5 text-xs font-semibold disabled:opacity-50 justify-self-start"
         >
           {busy ? '생성 중... (누끼+배치)' : label}
@@ -315,16 +324,19 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   const [error, setError] = useState<string | null>(null);
   const [mainDraft, setMainDraft] = useState<ImageDraft>(newImageDraft());
   const [additionalDrafts, setAdditionalDrafts] = useState<ImageDraft[]>([newImageDraft()]);
+  const [editingCategory, setEditingCategory] = useState(false);
+  const [categoryInput, setCategoryInput] = useState(project.category || '');
 
   const images: any[] = project.thumbnail_images || [];
   const mainImage = images.find((i) => i.kind === 'main');
   const additionalImages = [...images.filter((i) => i.kind === 'additional')].sort((a, b) => a.position - b.position);
 
   function handleGenerateMain() {
-    if (!mainDraft.file) return;
+    if (!mainDraft.file && !mainDraft.imageUrl.trim()) return;
     setError(null);
     const fd = new FormData();
-    fd.set('image', mainDraft.file);
+    if (mainDraft.file) fd.set('image', mainDraft.file);
+    else fd.set('imageUrl', mainDraft.imageUrl.trim());
     fd.set('productPosition', mainDraft.position);
     fd.set('effectPrompt', mainDraft.effectPrompt);
     setBusyId('main-draft');
@@ -340,10 +352,11 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   }
 
   function handleGenerateAdditional(draft: ImageDraft) {
-    if (!draft.file) return;
+    if (!draft.file && !draft.imageUrl.trim()) return;
     setError(null);
     const fd = new FormData();
-    fd.set('image', draft.file);
+    if (draft.file) fd.set('image', draft.file);
+    else fd.set('imageUrl', draft.imageUrl.trim());
     fd.set('productPosition', draft.position);
     fd.set('effectPrompt', draft.effectPrompt);
     setBusyId(draft.id);
@@ -374,6 +387,34 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         <button onClick={onClose} className="text-xs text-inkSoft hover:text-ink">
           목록으로
         </button>
+      </div>
+
+      <div className="text-xs text-inkSoft">
+        {editingCategory ? (
+          <div className="flex items-center gap-2">
+            <input
+              value={categoryInput}
+              onChange={(e) => setCategoryInput(e.target.value)}
+              placeholder="카테고리/검색어 (예: 휴대용 선풍기) - 쿠팡 인기상품을 참고해서 효과를 더 퀄리티 있게 만들어요"
+              className="border border-paperLine bg-white px-2 py-1 text-xs flex-1"
+            />
+            <button
+              onClick={() =>
+                startTransition(() => {
+                  updateProjectCategory(project.id, categoryInput);
+                  setEditingCategory(false);
+                })
+              }
+              className="text-accent font-semibold"
+            >
+              저장
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setEditingCategory(true)} className="hover:text-ink">
+            {project.category ? `카테고리: ${project.category}` : '+ 카테고리 설정 (요즘 잘 팔리는 상품 참고용)'}
+          </button>
+        )}
       </div>
 
       <section className="grid gap-2">
@@ -466,6 +507,7 @@ export default function ThumbnailStudio({ projects }: { projects: any[] }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newCategory, setNewCategory] = useState('');
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -478,7 +520,7 @@ export default function ThumbnailStudio({ projects }: { projects: any[] }) {
   function handleCreate() {
     setError(null);
     startTransition(async () => {
-      const res = await createProject(newTitle);
+      const res = await createProject(newTitle, newCategory);
       if (!res || 'error' in res) {
         setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
         return;
@@ -486,6 +528,7 @@ export default function ThumbnailStudio({ projects }: { projects: any[] }) {
       setActiveId(res.id);
       setCreating(false);
       setNewTitle('');
+      setNewCategory('');
     });
   }
 
@@ -499,20 +542,28 @@ export default function ThumbnailStudio({ projects }: { projects: any[] }) {
       </div>
 
       {creating && (
-        <div className="flex gap-2 mb-4 bg-paper rounded-md p-3">
+        <div className="grid gap-2 mb-4 bg-paper rounded-md p-3">
+          <div className="flex gap-2">
+            <input
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="프로젝트 이름 (선택, 예: 여름 선풍기 썸네일)"
+              className="border border-paperLine bg-white px-2 py-1.5 text-sm flex-1"
+            />
+            <button
+              onClick={handleCreate}
+              disabled={isPending}
+              className="btn-primary px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
+            >
+              {isPending ? '생성 중...' : '만들기'}
+            </button>
+          </div>
           <input
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="프로젝트 이름 (선택, 예: 여름 선풍기 썸네일)"
-            className="border border-paperLine bg-white px-2 py-1.5 text-sm flex-1"
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            placeholder="카테고리/검색어 (선택, 예: 휴대용 선풍기) - 쿠팡 인기상품을 참고해서 효과를 더 퀄리티 있게 만들어요"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
           />
-          <button
-            onClick={handleCreate}
-            disabled={isPending}
-            className="btn-primary px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
-          >
-            {isPending ? '생성 중...' : '만들기'}
-          </button>
         </div>
       )}
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2 mb-3">{error}</p>}

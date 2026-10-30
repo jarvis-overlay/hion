@@ -8,6 +8,8 @@ import {
   applyThumbnailEffect,
   isImageVisuallyUnchanged,
   duplicateImageStrip,
+  fetchImageFromUrl,
+  fetchTopSellerReferenceImages,
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
 
@@ -23,7 +25,8 @@ function extFromContentType(contentType: string): string {
 }
 
 export async function createProject(
-  title: string
+  title: string,
+  category?: string
 ): Promise<{ error: string } | { success: true; id: string }> {
   const supabase = createClient();
   const {
@@ -32,13 +35,25 @@ export async function createProject(
 
   const { data, error } = await supabase
     .from('thumbnail_projects')
-    .insert({ title: title.trim() || null, author_email: user?.email })
+    .insert({ title: title.trim() || null, category: category?.trim() || null, author_email: user?.email })
     .select('id')
     .single();
 
   if (error || !data) return { error: error?.message || '프로젝트 생성에 실패했어요.' };
   revalidatePath(PATH);
   return { success: true, id: (data as { id: string }).id };
+}
+
+// 프로젝트 생성 후에도 "요즘 잘 팔리는 상품 참고" 카테고리를 나중에
+// 설정/수정할 수 있게 - 처음에 안 적었다고 다시 만들 필요 없게 한다.
+export async function updateProjectCategory(id: string, category: string) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('thumbnail_projects')
+    .update({ category: category.trim() || null })
+    .eq('id', id);
+  if (error) console.error('[thumbnails] updateProjectCategory 실패:', error.message);
+  revalidatePath(PATH);
 }
 
 export async function deleteProject(id: string) {
@@ -59,7 +74,8 @@ export async function addThumbnailImage(
 ): Promise<{ error: string } | { success: true; url: string }> {
   const supabase = createClient();
   const file = formData.get('image') as File | null;
-  if (!file || file.size === 0) return { error: '이미지를 첨부해주세요.' };
+  const imageUrl = String(formData.get('imageUrl') || '').trim();
+  if ((!file || file.size === 0) && !imageUrl) return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
 
   const productPosition = (String(formData.get('productPosition') || 'center') as ThumbnailPosition) || 'center';
   const effectPrompt = String(formData.get('effectPrompt') || '').trim();
@@ -68,8 +84,20 @@ export async function addThumbnailImage(
     await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const mimeType = file.type || 'image/jpeg';
+  let buffer: Buffer;
+  let mimeType: string;
+  if (file && file.size > 0) {
+    buffer = Buffer.from(await file.arrayBuffer());
+    mimeType = file.type || 'image/jpeg';
+  } else {
+    try {
+      const fetched = await fetchImageFromUrl(imageUrl);
+      buffer = fetched.buffer;
+      mimeType = fetched.mimeType;
+    } catch (e: any) {
+      return { error: e?.message || String(e) };
+    }
+  }
   const imageId = randomUUID();
   const inputPath = `thumbnails/${projectId}/${imageId}-input.${extFromContentType(mimeType)}`;
   const { error: upErr } = await supabase.storage.from(BUCKET).upload(inputPath, buffer, {
@@ -124,10 +152,26 @@ async function runGeneration(
   effectPrompt: string
 ): Promise<{ error: string } | { success: true; url: string }> {
   try {
+    // 효과(소품/연출 추가) 요청이 있을 때만 "요즘 잘 팔리는 상품" 참고
+    // 이미지를 같이 넣는다 - 기본 흰 배경 패키샷 자체는 쿠팡 규격상
+    // 항상 동일해야 해서 스타일 참고가 끼어들 자리가 없다.
+    let referenceImages: { buffer: Buffer; mimeType: string }[] = [];
+    if (effectPrompt.trim()) {
+      const { data: project } = await supabase
+        .from('thumbnail_projects')
+        .select('category')
+        .eq('id', projectId)
+        .maybeSingle();
+      if (project?.category) {
+        referenceImages = await fetchTopSellerReferenceImages(project.category);
+      }
+    }
+
     const generated = await generateThumbnailImage({
       productImage,
       position,
       effectPrompt: effectPrompt || undefined,
+      referenceImages,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
@@ -174,7 +218,14 @@ export async function editThumbnailImage(
     if (!res.ok) return { error: `현재 이미지를 불러오지 못했어요 (HTTP ${res.status})` };
     const buffer = Buffer.from(await res.arrayBuffer());
 
-    const edited = await applyThumbnailEffect(buffer, prompt);
+    const { data: project } = await supabase
+      .from('thumbnail_projects')
+      .select('category')
+      .eq('id', img.project_id)
+      .maybeSingle();
+    const referenceImages = project?.category ? await fetchTopSellerReferenceImages(project.category) : [];
+
+    const edited = await applyThumbnailEffect(buffer, prompt, referenceImages);
 
     if (await isImageVisuallyUnchanged(buffer, edited)) {
       return {
