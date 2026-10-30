@@ -245,6 +245,7 @@ function ImageCard({
       ) : (
         <div className={`${size} rounded bg-paper flex items-center justify-center text-xs text-inkSoft`}>생성 중...</div>
       )}
+      {img.error && <p className="text-[10px] text-warn text-center px-1 max-w-[16rem]">{img.error}</p>}
       <p className="text-[11px] text-inkSoft">{POSITION_LABEL[img.product_position as ThumbnailPosition] || '정중앙'}</p>
       {img.effect_prompt && <p className="text-[10px] text-inkSoft text-center px-1">효과: {img.effect_prompt}</p>}
       <div className="flex gap-2">
