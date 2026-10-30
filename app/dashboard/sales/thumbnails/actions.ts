@@ -121,6 +121,107 @@ export async function addThumbnailImage(
   return runGeneration(supabase, imageId, projectId, { buffer, mimeType }, productPosition, effectPrompt);
 }
 
+// URL(또는 파일) 하나만 넣으면 메인 썸네일 1장 + 추가 이미지 3~7장을
+// 한 번에 만들어달라는 요청 - 매번 "+ 행 추가"로 한 장씩 URL/효과를
+// 입력하지 않아도 되게, 같은 원본 사진을 위치/효과 프리셋을 돌려가며
+// 자동으로 여러 장 생성한다.
+const BATCH_EFFECT_PRESETS = [
+  '제품을 강조하는 깔끔한 그림자와 은은한 조명 효과를 추가해줘',
+  '배경에 입체감 있는 반사광과 하이라이트를 추가해줘',
+  '고급스러운 느낌의 은은한 그라데이션 포인트를 배경에 추가해줘',
+  '제품 주변에 부드러운 반사광을 추가해서 프리미엄 느낌을 줘',
+  '따뜻한 느낌의 조명과 약간의 입체 그림자를 추가해줘',
+  '시원한 느낌의 블루톤 포인트 조명을 배경에 추가해줘',
+  '제품이 돋보이도록 배경에 은은한 서클 조명 효과를 추가해줘',
+];
+const BATCH_POSITION_CYCLE: ThumbnailPosition[] = ['center', 'left', 'right', 'top', 'bottom'];
+
+export async function generateThumbnailBatch(
+  projectId: string,
+  formData: FormData
+): Promise<
+  | { error: string }
+  | { success: true; mainOk: boolean; additionalOk: number; additionalTotal: number }
+> {
+  const supabase = createClient();
+  const file = formData.get('image') as File | null;
+  const imageUrl = String(formData.get('imageUrl') || '').trim();
+  if ((!file || file.size === 0) && !imageUrl) return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
+
+  let additionalCount = Number(formData.get('additionalCount') || 5);
+  if (!Number.isFinite(additionalCount)) additionalCount = 5;
+  additionalCount = Math.max(3, Math.min(7, Math.round(additionalCount)));
+
+  let buffer: Buffer;
+  let mimeType: string;
+  if (file && file.size > 0) {
+    buffer = Buffer.from(await file.arrayBuffer());
+    mimeType = file.type || 'image/jpeg';
+  } else {
+    try {
+      const fetched = await fetchImageFromUrl(imageUrl);
+      buffer = fetched.buffer;
+      mimeType = fetched.mimeType;
+    } catch (e: any) {
+      return { error: e?.message || String(e) };
+    }
+  }
+
+  const batchId = randomUUID();
+  const inputPath = `thumbnails/${projectId}/${batchId}-input.${extFromContentType(mimeType)}`;
+  const { error: upErr } = await supabase.storage.from(BUCKET).upload(inputPath, buffer, {
+    contentType: mimeType,
+    upsert: true,
+  });
+  if (upErr) return { error: upErr.message };
+  const inputImageUrl = supabase.storage.from(BUCKET).getPublicUrl(inputPath).data.publicUrl;
+
+  // 메인 썸네일 - 쿠팡 검색결과용이라 효과 없이 깨끗한 흰 배경 패키샷으로
+  await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
+  const mainId = randomUUID();
+  const { error: mainInsertErr } = await supabase.from('thumbnail_images').insert({
+    id: mainId,
+    project_id: projectId,
+    kind: 'main',
+    position: 0,
+    input_image_url: inputImageUrl,
+    product_position: 'center',
+    effect_prompt: null,
+  });
+  if (mainInsertErr) return { error: mainInsertErr.message };
+  const mainResult = await runGeneration(supabase, mainId, projectId, { buffer, mimeType }, 'center', '');
+  const mainOk = !('error' in mainResult);
+
+  const { count: existingCount } = await supabase
+    .from('thumbnail_images')
+    .select('id', { count: 'exact', head: true })
+    .eq('project_id', projectId)
+    .eq('kind', 'additional');
+  const baseIndex = existingCount || 0;
+
+  let additionalOk = 0;
+  for (let i = 0; i < additionalCount; i++) {
+    const position = BATCH_POSITION_CYCLE[i % BATCH_POSITION_CYCLE.length];
+    const effectPrompt = BATCH_EFFECT_PRESETS[i % BATCH_EFFECT_PRESETS.length];
+    const imageId = randomUUID();
+    const { error: insertErr } = await supabase.from('thumbnail_images').insert({
+      id: imageId,
+      project_id: projectId,
+      kind: 'additional',
+      position: baseIndex + i,
+      input_image_url: inputImageUrl,
+      product_position: position,
+      effect_prompt: effectPrompt,
+    });
+    if (insertErr) continue;
+    const res = await runGeneration(supabase, imageId, projectId, { buffer, mimeType }, position, effectPrompt);
+    if (!('error' in res)) additionalOk++;
+  }
+
+  revalidatePath(PATH);
+  return { success: true, mainOk, additionalOk, additionalTotal: additionalCount };
+}
+
 export async function retryThumbnailImage(
   imageId: string
 ): Promise<{ error: string } | { success: true; url: string }> {

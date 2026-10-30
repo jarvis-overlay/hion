@@ -2,8 +2,10 @@ import { createClient } from '@/lib/supabase/server';
 import ThumbnailStudio from '@/components/ThumbnailStudio';
 
 // remove.bg + (선택) Gemini 효과 적용까지 이어질 수 있어서 기본
-// 타임아웃보다 넉넉하게 잡음 (상세페이지 제작과 동일한 이유).
-export const maxDuration = 120;
+// 타임아웃보다 넉넉하게 잡음 (상세페이지 제작과 동일한 이유). URL 하나로
+// 메인+추가이미지 최대 8장을 순차 생성하는 일괄 생성 기능이 추가되어
+// 소싱추천/경쟁사비교와 같은 수준(280초)으로 늘림.
+export const maxDuration = 280;
 
 export default async function ThumbnailsPage() {
   const supabase = createClient();

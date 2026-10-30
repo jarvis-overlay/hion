@@ -7,6 +7,7 @@ import {
   updateProjectCategory,
   deleteProject,
   addThumbnailImage,
+  generateThumbnailBatch,
   retryThumbnailImage,
   editThumbnailImage,
   duplicateThumbnailStrip,
@@ -327,6 +328,16 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   const [editingCategory, setEditingCategory] = useState(false);
   const [categoryInput, setCategoryInput] = useState(project.category || '');
 
+  // URL/사진 하나만 넣으면 매번 "+ 행 추가"로 직접 여러 장을 만들지
+  // 않아도, 메인 썸네일 1장 + 추가 이미지 3~7장을 자동으로 한 번에
+  // 만들어주는 일괄 생성 - 요청: "URL을 넣으면 메인 하나와 추가
+  // 이미지를 최소 3~7가지를 만들어줘야해".
+  const [batchFile, setBatchFile] = useState<File | null>(null);
+  const [batchPreview, setBatchPreview] = useState<string | null>(null);
+  const [batchUrl, setBatchUrl] = useState('');
+  const [batchCount, setBatchCount] = useState(5);
+  const [batchResult, setBatchResult] = useState<string | null>(null);
+
   const images: any[] = project.thumbnail_images || [];
   const mainImage = images.find((i) => i.kind === 'main');
   const additionalImages = [...images.filter((i) => i.kind === 'additional')].sort((a, b) => a.position - b.position);
@@ -369,6 +380,31 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
       }
       setAdditionalDrafts((prev) => prev.filter((d) => d.id !== draft.id));
       setAdditionalDrafts((prev) => (prev.length === 0 ? [newImageDraft()] : prev));
+    });
+  }
+
+  function handleBatchGenerate() {
+    if (!batchFile && !batchUrl.trim()) return;
+    setError(null);
+    setBatchResult(null);
+    const fd = new FormData();
+    if (batchFile) fd.set('image', batchFile);
+    else fd.set('imageUrl', batchUrl.trim());
+    fd.set('additionalCount', String(batchCount));
+    setBusyId('batch');
+    startTransition(async () => {
+      const res = await generateThumbnailBatch(project.id, fd);
+      setBusyId(null);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+        return;
+      }
+      setBatchResult(
+        `메인 썸네일 ${res.mainOk ? '생성 완료' : '생성 실패'} · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료`
+      );
+      setBatchFile(null);
+      setBatchPreview(null);
+      setBatchUrl('');
     });
   }
 
@@ -416,6 +452,76 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
           </button>
         )}
       </div>
+
+      <section className="card p-4 grid gap-2 border-2 border-accent/30">
+        <div>
+          <h3 className="text-sm font-semibold">URL 하나로 한 번에 만들기</h3>
+          <p className="text-[11px] text-inkSoft">
+            1688 등에서 복사한 사진 주소(또는 파일)를 넣으면, 메인 썸네일 1장과 추가 이미지 여러 장을 위치·효과를
+            바꿔가며 자동으로 한 번에 만들어줘요.
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[160px_1fr] items-start">
+          <label className="cursor-pointer block">
+            {batchPreview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={batchPreview} alt="" className="w-40 h-40 object-cover rounded bg-paper" />
+            ) : (
+              <div className="w-40 h-40 rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition">
+                클릭해서 상품 사진 첨부
+              </div>
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const raw = e.target.files?.[0] || null;
+                const f = raw ? await shrinkImageForUpload(raw) : null;
+                setBatchFile(f);
+                setBatchPreview(f ? URL.createObjectURL(f) : null);
+                if (f) setBatchUrl('');
+              }}
+            />
+          </label>
+          <div className="grid gap-1.5">
+            <input
+              value={batchUrl}
+              onChange={(e) => {
+                const v = e.target.value;
+                setBatchUrl(v);
+                if (v) {
+                  setBatchFile(null);
+                  setBatchPreview(null);
+                }
+              }}
+              placeholder="또는 이미지 URL 붙여넣기 (예: 1688에서 복사한 사진 주소)"
+              className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+            />
+            <label className="text-[11px] text-inkSoft">
+              추가 이미지 개수 ({batchCount}장)
+              <input
+                type="range"
+                min={3}
+                max={7}
+                value={batchCount}
+                onChange={(e) => setBatchCount(Number(e.target.value))}
+                className="w-full"
+              />
+            </label>
+            <button
+              onClick={handleBatchGenerate}
+              disabled={(isPending && busyId === 'batch') || (!batchFile && !batchUrl.trim())}
+              className="btn-primary px-4 py-1.5 text-xs font-semibold disabled:opacity-50 justify-self-start"
+            >
+              {isPending && busyId === 'batch'
+                ? `생성 중... (메인 1장 + 추가 ${batchCount}장, 시간이 좀 걸려요)`
+                : `메인 + 추가 ${batchCount}장 한 번에 생성`}
+            </button>
+            {batchResult && <p className="text-[11px] text-accent">{batchResult}</p>}
+          </div>
+        </div>
+      </section>
 
       <section className="grid gap-2">
         <div>
