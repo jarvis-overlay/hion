@@ -332,8 +332,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   // 않아도, 메인 썸네일 1장 + 추가 이미지 3~7장을 자동으로 한 번에
   // 만들어주는 일괄 생성 - 요청: "URL을 넣으면 메인 하나와 추가
   // 이미지를 최소 3~7가지를 만들어줘야해".
-  const [batchFile, setBatchFile] = useState<File | null>(null);
-  const [batchPreview, setBatchPreview] = useState<string | null>(null);
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [batchPreviews, setBatchPreviews] = useState<string[]>([]);
   const [batchUrl, setBatchUrl] = useState('');
   const [batchCount, setBatchCount] = useState(5);
   const [batchResult, setBatchResult] = useState<string | null>(null);
@@ -384,12 +384,15 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   }
 
   function handleBatchGenerate() {
-    if (!batchFile && !batchUrl.trim()) return;
+    if (batchFiles.length === 0 && !batchUrl.trim()) return;
     setError(null);
     setBatchResult(null);
     const fd = new FormData();
-    if (batchFile) fd.set('image', batchFile);
-    else fd.set('imageUrl', batchUrl.trim());
+    if (batchFiles.length > 0) {
+      batchFiles.forEach((f) => fd.append('images', f));
+    } else {
+      fd.set('imageUrl', batchUrl.trim());
+    }
     fd.set('additionalCount', String(batchCount));
     setBusyId('batch');
     startTransition(async () => {
@@ -402,8 +405,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
       setBatchResult(
         `메인 썸네일 ${res.mainOk ? '생성 완료' : '생성 실패'} · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료`
       );
-      setBatchFile(null);
-      setBatchPreview(null);
+      setBatchFiles([]);
+      setBatchPreviews([]);
       setBatchUrl('');
     });
   }
@@ -455,32 +458,47 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
 
       <section className="card p-4 grid gap-2 border-2 border-accent/30">
         <div>
-          <h3 className="text-sm font-semibold">URL 하나로 한 번에 만들기</h3>
+          <h3 className="text-sm font-semibold">한 번에 만들기</h3>
           <p className="text-[11px] text-inkSoft">
-            1688 등에서 복사한 사진 주소(또는 파일)를 넣으면, 메인 썸네일 1장과 추가 이미지 여러 장을 위치·효과를
-            바꿔가며 자동으로 한 번에 만들어줘요.
+            1688 소싱 확장프로그램 등으로 받은 상품 사진을 <strong>여러 장 한 번에 선택</strong>하면, 첫 장을
+            메인 썸네일로, 나머지는 그대로 추가 이미지로 만들어줘요(실제 컷이라 효과 합성 없이 흰 배경만
+            적용). 사진이 1장이거나 URL 하나만 있을 때는 위치·효과를 자동으로 바꿔가며 여러 장을 합성해요.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-[160px_1fr] items-start">
           <label className="cursor-pointer block">
-            {batchPreview ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={batchPreview} alt="" className="w-40 h-40 object-cover rounded bg-paper" />
+            {batchPreviews.length > 0 ? (
+              <div className="w-40 grid grid-cols-3 gap-1">
+                {batchPreviews.slice(0, 6).map((src, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img key={i} src={src} alt="" className="w-full h-12 object-cover rounded bg-paper" />
+                ))}
+                {batchPreviews.length > 6 && (
+                  <div className="w-full h-12 rounded bg-paper flex items-center justify-center text-[10px] text-inkSoft">
+                    +{batchPreviews.length - 6}
+                  </div>
+                )}
+                <div className="col-span-3 text-[11px] text-inkSoft text-center mt-1">
+                  {batchPreviews.length}장 선택됨
+                </div>
+              </div>
             ) : (
               <div className="w-40 h-40 rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition">
-                클릭해서 상품 사진 첨부
+                클릭해서 상품 사진 첨부 (여러 장 선택 가능)
               </div>
             )}
             <input
               type="file"
               accept="image/*"
+              multiple
               className="hidden"
               onChange={async (e) => {
-                const raw = e.target.files?.[0] || null;
-                const f = raw ? await shrinkImageForUpload(raw) : null;
-                setBatchFile(f);
-                setBatchPreview(f ? URL.createObjectURL(f) : null);
-                if (f) setBatchUrl('');
+                const raws = Array.from(e.target.files || []);
+                if (raws.length === 0) return;
+                const shrunk = await Promise.all(raws.map((r) => shrinkImageForUpload(r)));
+                setBatchFiles(shrunk);
+                setBatchPreviews(shrunk.map((f) => URL.createObjectURL(f)));
+                setBatchUrl('');
               }}
             />
           </label>
@@ -491,32 +509,37 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 const v = e.target.value;
                 setBatchUrl(v);
                 if (v) {
-                  setBatchFile(null);
-                  setBatchPreview(null);
+                  setBatchFiles([]);
+                  setBatchPreviews([]);
                 }
               }}
-              placeholder="또는 이미지 URL 붙여넣기 (예: 1688에서 복사한 사진 주소)"
-              className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
+              disabled={batchFiles.length > 1}
+              placeholder="또는 이미지 URL 1개 붙여넣기 (예: 1688에서 복사한 사진 주소)"
+              className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full disabled:opacity-50"
             />
-            <label className="text-[11px] text-inkSoft">
-              추가 이미지 개수 ({batchCount}장)
-              <input
-                type="range"
-                min={3}
-                max={7}
-                value={batchCount}
-                onChange={(e) => setBatchCount(Number(e.target.value))}
-                className="w-full"
-              />
-            </label>
+            {batchFiles.length <= 1 && (
+              <label className="text-[11px] text-inkSoft">
+                사진 1장으로 만들 때 추가 이미지 개수 ({batchCount}장)
+                <input
+                  type="range"
+                  min={3}
+                  max={7}
+                  value={batchCount}
+                  onChange={(e) => setBatchCount(Number(e.target.value))}
+                  className="w-full"
+                />
+              </label>
+            )}
             <button
               onClick={handleBatchGenerate}
-              disabled={(isPending && busyId === 'batch') || (!batchFile && !batchUrl.trim())}
+              disabled={(isPending && busyId === 'batch') || (batchFiles.length === 0 && !batchUrl.trim())}
               className="btn-primary px-4 py-1.5 text-xs font-semibold disabled:opacity-50 justify-self-start"
             >
               {isPending && busyId === 'batch'
-                ? `생성 중... (메인 1장 + 추가 ${batchCount}장, 시간이 좀 걸려요)`
-                : `메인 + 추가 ${batchCount}장 한 번에 생성`}
+                ? '생성 중... (시간이 좀 걸려요)'
+                : batchFiles.length > 1
+                  ? `선택한 사진 ${batchFiles.length}장으로 한 번에 생성`
+                  : `메인 + 추가 ${batchCount}장 한 번에 생성`}
             </button>
             {batchResult && <p className="text-[11px] text-accent">{batchResult}</p>}
           </div>
