@@ -36,6 +36,7 @@ export default function AiRecommendation({
   const [minReviewCount, setMinReviewCount] = useState('');
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
+  const [compactOnly, setCompactOnly] = useState(false);
   const [newExcludeLabel, setNewExcludeLabel] = useState('');
   const [isPendingExclude, startExcludeTransition] = useTransition();
   const [loadingCategories, setLoadingCategories] = useState(false);
@@ -84,6 +85,7 @@ export default function AiRecommendation({
     if (minReviewCount.trim()) filters.minReviewCount = Number(minReviewCount);
     if (minPrice.trim()) filters.minPrice = Number(minPrice);
     if (maxPrice.trim()) filters.maxPrice = Number(maxPrice);
+    if (compactOnly) filters.compactOnly = true;
     return filters;
   }
 
@@ -338,6 +340,19 @@ export default function AiRecommendation({
             </div>
             <p className="text-[10px] text-inkSoft -mt-1">
               ✅ 리뷰수/가격 조건은 실제 쿠팡 데이터로 코드에서 직접 걸러내서 100% 지켜져요.
+            </p>
+
+            <label className="flex items-center gap-2 text-xs text-inkSoft">
+              <input
+                type="checkbox"
+                checked={compactOnly}
+                onChange={(e) => setCompactOnly(e.target.checked)}
+                className="w-3.5 h-3.5"
+              />
+              배송비 적은 소형·경량 상품 위주로
+            </label>
+            <p className="text-[10px] text-inkSoft -mt-1">
+              ⚠️ 쿠팡 목록 데이터엔 실제 무게/규격 정보가 없어서 AI 판단에만 의존해요 - 100% 보장은 안 돼요.
             </p>
           </div>
         )}

@@ -41,6 +41,7 @@ export interface CustomFilters {
   minReviewCount?: number;
   minPrice?: number;
   maxPrice?: number;
+  compactOnly?: boolean;
 }
 
 function matchesCustomFilters(c: CoupangBestseller, filters?: CustomFilters): boolean {
@@ -299,6 +300,7 @@ async function runOneRound(
       contextSummary,
       excludeCategories,
       includeScope: customFilters?.includeScope,
+      compactOnly: customFilters?.compactOnly,
     });
   } catch (e: any) {
     return { error: e?.message || String(e) };
