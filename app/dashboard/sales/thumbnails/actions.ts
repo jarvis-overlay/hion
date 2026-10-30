@@ -146,7 +146,8 @@ async function insertAndGenerateImage(
   position: number,
   source: { buffer: Buffer; mimeType: string },
   productPosition: ThumbnailPosition,
-  effectPrompt: string
+  effectPrompt: string,
+  colorLabel: string | null = null
 ): Promise<{ error: string } | { success: true; url: string }> {
   const imageId = randomUUID();
   const inputPath = `thumbnails/${projectId}/${imageId}-input.${extFromContentType(source.mimeType)}`;
@@ -165,6 +166,7 @@ async function insertAndGenerateImage(
     input_image_url: inputImageUrl,
     product_position: productPosition,
     effect_prompt: effectPrompt || null,
+    color_label: colorLabel,
   });
   if (insertErr) return { error: insertErr.message };
 
@@ -176,52 +178,92 @@ export async function generateThumbnailBatch(
   formData: FormData
 ): Promise<
   | { error: string }
-  | { success: true; mainOk: boolean; additionalOk: number; additionalTotal: number }
+  | {
+      success: true;
+      mainOk: number;
+      mainTotal: number;
+      additionalOk: number;
+      additionalTotal: number;
+      colorGroups: number;
+    }
 > {
   const supabase = createClient();
-  const files = formData.getAll('images').filter((f): f is File => f instanceof File && f.size > 0);
+  const rawFiles = formData.getAll('images');
+  const rawLabels = formData.getAll('colorLabels');
+  const filePairs = rawFiles
+    .map((f, i) => ({ file: f, colorLabel: String(rawLabels[i] || '').trim() || null }))
+    .filter((p): p is { file: File; colorLabel: string | null } => p.file instanceof File && p.file.size > 0);
   const imageUrl = String(formData.get('imageUrl') || '').trim();
-  if (files.length === 0 && !imageUrl) return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
+  if (filePairs.length === 0 && !imageUrl) return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
 
-  await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
   const { count: existingCount } = await supabase
     .from('thumbnail_images')
     .select('id', { count: 'exact', head: true })
     .eq('project_id', projectId)
     .eq('kind', 'additional');
-  const baseIndex = existingCount || 0;
+  let baseIndex = existingCount || 0;
 
   // 1688 소싱 확장프로그램 등으로 실제 상품 사진을 여러 장 한 번에
   // 받아온 경우 - 사진마다 이미 서로 다른 실제 컷이라 효과를 합성해
-  // "변형"을 만들 필요가 없다. 첫 장을 메인, 나머지를 그대로 추가
-  // 이미지(흰 배경 패키샷)로 변환한다.
-  if (files.length > 1) {
+  // "변형"을 만들 필요가 없다. 색상 라벨이 같은 사진끼리 그룹으로 묶어
+  // 그룹별로 "첫 장 = 그 색상의 메인, 나머지 = 그 색상의 추가 이미지"로
+  // 완전히 별도 세트를 만든다("색상마다 완전히 별도 세트로 생성해달라"는
+  // 요청). 라벨을 안 붙이면 전체가 하나의 그룹으로 묶여 기존과 동일하게
+  // 동작한다.
+  if (filePairs.length > 1) {
     const sources = await Promise.all(
-      files.map(async (f) => ({ buffer: Buffer.from(await f.arrayBuffer()), mimeType: f.type || 'image/jpeg' }))
+      filePairs.map(async (p) => ({
+        buffer: Buffer.from(await p.file.arrayBuffer()),
+        mimeType: p.file.type || 'image/jpeg',
+        colorLabel: p.colorLabel,
+      }))
     );
-    const mainResult = await insertAndGenerateImage(supabase, projectId, 'main', 0, sources[0], 'center', '');
-    const mainOk = !('error' in mainResult);
 
+    const groups = new Map<string | null, typeof sources>();
+    for (const s of sources) {
+      if (!groups.has(s.colorLabel)) groups.set(s.colorLabel, []);
+      groups.get(s.colorLabel)!.push(s);
+    }
+
+    let mainOk = 0;
     let additionalOk = 0;
-    for (let i = 1; i < sources.length; i++) {
-      const res = await insertAndGenerateImage(supabase, projectId, 'additional', baseIndex + (i - 1), sources[i], 'center', '');
-      if (!('error' in res)) additionalOk++;
+    let additionalTotal = 0;
+    for (const [colorLabel, groupSources] of groups) {
+      // 이 색상의 기존 메인만 지우고 다른 색상의 메인은 그대로 둔다.
+      let delQuery = supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
+      delQuery = colorLabel ? delQuery.eq('color_label', colorLabel) : delQuery.is('color_label', null);
+      await delQuery;
+
+      const mainResult = await insertAndGenerateImage(
+        supabase, projectId, 'main', 0, groupSources[0], 'center', '', colorLabel
+      );
+      if (!('error' in mainResult)) mainOk++;
+
+      for (let i = 1; i < groupSources.length; i++) {
+        additionalTotal++;
+        const res = await insertAndGenerateImage(
+          supabase, projectId, 'additional', baseIndex++, groupSources[i], 'center', '', colorLabel
+        );
+        if (!('error' in res)) additionalOk++;
+      }
     }
     revalidatePath(PATH);
-    return { success: true, mainOk, additionalOk, additionalTotal: sources.length - 1 };
+    return { success: true, mainOk, mainTotal: groups.size, additionalOk, additionalTotal, colorGroups: groups.size };
   }
 
   // 사진 1장 또는 URL 1개만 있는 경우 - 위치·효과 프리셋을 자동으로
   // 돌려가며 하나의 원본으로 추가 이미지 3~7장을 합성해서 만든다.
+  await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main').is('color_label', null);
+
   let additionalCount = Number(formData.get('additionalCount') || 5);
   if (!Number.isFinite(additionalCount)) additionalCount = 5;
   additionalCount = Math.max(3, Math.min(7, Math.round(additionalCount)));
 
   let buffer: Buffer;
   let mimeType: string;
-  if (files.length === 1) {
-    buffer = Buffer.from(await files[0].arrayBuffer());
-    mimeType = files[0].type || 'image/jpeg';
+  if (filePairs.length === 1) {
+    buffer = Buffer.from(await filePairs[0].file.arrayBuffer());
+    mimeType = filePairs[0].file.type || 'image/jpeg';
   } else {
     try {
       const fetched = await fetchImageFromUrl(imageUrl);
@@ -233,7 +275,7 @@ export async function generateThumbnailBatch(
   }
 
   const mainResult = await insertAndGenerateImage(supabase, projectId, 'main', 0, { buffer, mimeType }, 'center', '');
-  const mainOk = !('error' in mainResult);
+  const mainOk = !('error' in mainResult) ? 1 : 0;
 
   let additionalOk = 0;
   for (let i = 0; i < additionalCount; i++) {
@@ -244,7 +286,7 @@ export async function generateThumbnailBatch(
   }
 
   revalidatePath(PATH);
-  return { success: true, mainOk, additionalOk, additionalTotal: additionalCount };
+  return { success: true, mainOk, mainTotal: 1, additionalOk, additionalTotal: additionalCount, colorGroups: 1 };
 }
 
 export async function retryThumbnailImage(

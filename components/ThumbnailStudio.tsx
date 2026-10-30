@@ -361,18 +361,24 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   // 이미지를 최소 3~7가지를 만들어줘야해".
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const [batchPreviews, setBatchPreviews] = useState<string[]>([]);
+  // 사진마다 색상을 태그해두면, 같은 색상끼리 묶어서 색상별로 완전히
+  // 별도 세트(메인+추가)를 만들어준다("색상마다 완전히 별도 세트로
+  // 생성해달라"는 요청) - 같은 색상 중 먼저 선택한 사진이 그 색상의
+  // 메인이 된다. 비워두면(태그 없음) 기존처럼 전체가 한 세트로 묶인다.
+  const [batchColorLabels, setBatchColorLabels] = useState<string[]>([]);
   const [batchUrl, setBatchUrl] = useState('');
   const [batchCount, setBatchCount] = useState(5);
   const [batchResult, setBatchResult] = useState<string | null>(null);
-  // 여러 장을 올렸을 때 "첫 번째 파일 = 메인"으로 무조건 고정하지 않고,
-  // 어떤 사진을 메인으로 쓸지 직접 고르고 필요 없는 사진은 빼서 개수도
-  // 조절하고 싶다는 요청으로 추가.
-  const [batchMainIndex, setBatchMainIndex] = useState(0);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
 
   const images: any[] = project.thumbnail_images || [];
-  const mainImage = images.find((i) => i.kind === 'main');
+  const mainImages = images.filter((i) => i.kind === 'main');
   const additionalImages = [...images.filter((i) => i.kind === 'additional')].sort((a, b) => a.position - b.position);
+  // 색상 라벨별로 묶어서 보여준다 - 라벨이 없는(null) 기존 데이터는
+  // 그대로 "기본" 그룹 하나로 표시돼서 이전 화면과 동일하게 보인다.
+  const colorGroupKeys = Array.from(
+    new Set([...mainImages, ...additionalImages].map((i) => i.color_label || ''))
+  ).sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)));
 
   function handleGenerateMain() {
     if (!mainDraft.file && !mainDraft.imageUrl.trim()) return;
@@ -421,13 +427,12 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     setBatchResult(null);
     const fd = new FormData();
     if (batchFiles.length > 0) {
-      // 서버는 항상 "첫 번째로 받은 파일 = 메인"으로 처리하므로, 사용자가
-      // 고른 메인 후보를 맨 앞으로 보내서 순서로 역할을 정한다.
-      const ordered =
-        batchFiles.length > 1
-          ? [batchFiles[batchMainIndex], ...batchFiles.filter((_, i) => i !== batchMainIndex)]
-          : batchFiles;
-      ordered.forEach((f) => fd.append('images', f));
+      // 색상 라벨이 같은 사진끼리 서버에서 그룹으로 묶여서, 같은 라벨
+      // 중 먼저 온 사진이 그 색상의 메인이 된다.
+      batchFiles.forEach((f, i) => {
+        fd.append('images', f);
+        fd.append('colorLabels', batchColorLabels[i] || '');
+      });
     } else {
       fd.set('imageUrl', batchUrl.trim());
     }
@@ -441,11 +446,13 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         return;
       }
       setBatchResult(
-        `메인 썸네일 ${res.mainOk ? '생성 완료' : '생성 실패'} · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료`
+        `메인 썸네일 ${res.mainOk}/${res.mainTotal}장` +
+          (res.colorGroups > 1 ? ` (색상 ${res.colorGroups}개)` : '') +
+          ` · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료`
       );
       setBatchFiles([]);
       setBatchPreviews([]);
-      setBatchMainIndex(0);
+      setBatchColorLabels([]);
       setBatchUrl('');
     });
   }
@@ -453,10 +460,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   function handleBatchFileRemove(index: number) {
     setBatchFiles((prev) => prev.filter((_, i) => i !== index));
     setBatchPreviews((prev) => prev.filter((_, i) => i !== index));
-    setBatchMainIndex((prev) => {
-      if (index === prev) return 0;
-      return index < prev ? prev - 1 : prev;
-    });
+    setBatchColorLabels((prev) => prev.filter((_, i) => i !== index));
   }
 
   function handleRetry(imageId: string) {
@@ -504,194 +508,235 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         )}
       </div>
 
-      <section className="card p-4 grid gap-2 border-2 border-accent/30">
+      <section className="card p-4 grid gap-3 border-2 border-accent/30">
         <div>
           <h3 className="text-sm font-semibold">한 번에 만들기</h3>
           <p className="text-[11px] text-inkSoft">
             1688 소싱 확장프로그램 등으로 받은 상품 사진을 <strong>여러 장 한 번에 선택</strong>하면 그대로
-            추가 이미지로 만들어줘요(실제 컷이라 효과 합성 없이 흰 배경만 적용) - 어떤 사진을 메인 썸네일로
-            쓸지는 아래에서 직접 고르고, 필요 없는 사진은 빼서 개수도 조절할 수 있어요. 사진이 1장이거나
-            URL 하나만 있을 때는 위치·효과를 자동으로 바꿔가며 여러 장을 합성해요.
+            추가 이미지로 만들어줘요(실제 컷이라 효과 합성 없이 흰 배경만 적용). 사진마다 <strong>색상을
+            태그</strong>해두면 같은 색상끼리 묶여서 색상별로 완전히 별도 세트(메인+추가)가 만들어져요 -
+            태그 안 한 사진은 전부 한 세트로 묶이고, 같은 색상 중 먼저 선택한 사진이 그 색상의 메인이 돼요.
+            사진이 1장이거나 URL 하나만 있을 때는 위치·효과를 자동으로 바꿔가며 여러 장을 합성해요.
           </p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-[160px_1fr] items-start">
-          <div>
-            {batchPreviews.length > 0 ? (
-              <div className="w-40 grid grid-cols-3 gap-1">
-                {batchPreviews.map((src, i) => (
-                  <div key={i} className="relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={src}
-                      alt=""
-                      className={`w-full h-12 object-cover rounded bg-paper ${
-                        i === batchMainIndex ? 'ring-2 ring-accent' : ''
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleBatchFileRemove(i)}
-                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-ink text-white text-[9px] leading-4 text-center"
-                      title="빼기"
-                    >
-                      ×
-                    </button>
-                    {batchFiles.length > 1 &&
-                      (i === batchMainIndex ? (
-                        <span className="absolute bottom-0 inset-x-0 bg-accent text-white text-[8px] text-center leading-3">
-                          메인
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setBatchMainIndex(i)}
-                          className="absolute bottom-0 inset-x-0 bg-black/40 text-white text-[8px] text-center leading-3 opacity-0 hover:opacity-100"
-                        >
-                          메인으로
-                        </button>
-                      ))}
-                  </div>
-                ))}
+
+        {batchFiles.length === 0 ? (
+          <button
+            type="button"
+            onClick={() => batchFileInputRef.current?.click()}
+            className="w-40 h-40 rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition"
+          >
+            클릭해서 상품 사진 첨부 (여러 장 선택 가능)
+          </button>
+        ) : (
+          <div className="grid gap-1.5 max-w-md">
+            {batchFiles.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 bg-paper rounded px-2 py-1">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={batchPreviews[i]} alt="" className="w-10 h-10 object-cover rounded shrink-0" />
+                <input
+                  value={batchColorLabels[i] || ''}
+                  onChange={(e) =>
+                    setBatchColorLabels((prev) => {
+                      const next = [...prev];
+                      next[i] = e.target.value;
+                      return next;
+                    })
+                  }
+                  placeholder="색상(선택, 예: 검정)"
+                  className="border border-paperLine bg-white px-2 py-1 text-xs flex-1 min-w-0"
+                />
                 <button
                   type="button"
-                  onClick={() => batchFileInputRef.current?.click()}
-                  className="w-full h-12 rounded bg-paper flex items-center justify-center text-[10px] text-inkSoft hover:bg-paperLine transition"
+                  onClick={() => handleBatchFileRemove(i)}
+                  className="text-[11px] text-inkSoft hover:text-red-700 shrink-0"
                 >
-                  + 추가
+                  삭제
                 </button>
-                <div className="col-span-3 text-[11px] text-inkSoft text-center mt-1">
-                  {batchPreviews.length}장 선택됨{batchFiles.length > 1 && ' · 사진을 눌러 메인 지정'}
-                </div>
               </div>
-            ) : (
+            ))}
+            <div className="flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => batchFileInputRef.current?.click()}
-                className="w-40 h-40 rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition"
+                className="text-xs text-accent font-semibold"
               >
-                클릭해서 상품 사진 첨부 (여러 장 선택 가능)
+                + 사진 추가
               </button>
-            )}
-            <input
-              ref={batchFileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={async (e) => {
-                const raws = Array.from(e.target.files || []);
-                if (raws.length === 0) return;
-                const shrunk = await Promise.all(raws.map((r) => shrinkImageForUpload(r)));
-                setBatchFiles((prev) => [...prev, ...shrunk]);
-                setBatchPreviews((prev) => [...prev, ...shrunk.map((f) => URL.createObjectURL(f))]);
-                setBatchUrl('');
-                e.target.value = '';
-              }}
-            />
+              <span className="text-[11px] text-inkSoft">{batchFiles.length}장 선택됨</span>
+            </div>
           </div>
-          <div className="grid gap-1.5">
-            <input
-              value={batchUrl}
-              onChange={(e) => {
-                const v = e.target.value;
-                setBatchUrl(v);
-                if (v) {
-                  setBatchFiles([]);
-                  setBatchPreviews([]);
-                }
-              }}
-              disabled={batchFiles.length > 1}
-              placeholder="또는 이미지 URL 1개 붙여넣기 (예: 1688에서 복사한 사진 주소)"
-              className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full disabled:opacity-50"
-            />
-            {batchFiles.length <= 1 && <UrlWarning url={batchUrl} />}
-            {batchFiles.length <= 1 && (
-              <label className="text-[11px] text-inkSoft">
-                사진 1장으로 만들 때 추가 이미지 개수 ({batchCount}장)
-                <input
-                  type="range"
-                  min={3}
-                  max={7}
-                  value={batchCount}
-                  onChange={(e) => setBatchCount(Number(e.target.value))}
-                  className="w-full"
-                />
-              </label>
-            )}
-            <button
-              onClick={handleBatchGenerate}
-              disabled={(isPending && busyId === 'batch') || (batchFiles.length === 0 && !batchUrl.trim())}
-              className="btn-primary px-4 py-1.5 text-xs font-semibold disabled:opacity-50 justify-self-start"
-            >
-              {isPending && busyId === 'batch'
-                ? '생성 중... (시간이 좀 걸려요)'
-                : batchFiles.length > 1
-                  ? `선택한 사진 ${batchFiles.length}장으로 한 번에 생성`
-                  : `메인 + 추가 ${batchCount}장 한 번에 생성`}
-            </button>
-            {batchResult && <p className="text-[11px] text-accent">{batchResult}</p>}
-          </div>
+        )}
+        <input
+          ref={batchFileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={async (e) => {
+            const raws = Array.from(e.target.files || []);
+            if (raws.length === 0) return;
+            const shrunk = await Promise.all(raws.map((r) => shrinkImageForUpload(r)));
+            setBatchFiles((prev) => [...prev, ...shrunk]);
+            setBatchPreviews((prev) => [...prev, ...shrunk.map((f) => URL.createObjectURL(f))]);
+            setBatchColorLabels((prev) => [...prev, ...shrunk.map(() => '')]);
+            setBatchUrl('');
+            e.target.value = '';
+          }}
+        />
+
+        <div className="grid gap-1.5 max-w-md">
+          <input
+            value={batchUrl}
+            onChange={(e) => {
+              const v = e.target.value;
+              setBatchUrl(v);
+              if (v) {
+                setBatchFiles([]);
+                setBatchPreviews([]);
+                setBatchColorLabels([]);
+              }
+            }}
+            disabled={batchFiles.length > 1}
+            placeholder="또는 이미지 URL 1개 붙여넣기 (예: 1688에서 복사한 사진 주소)"
+            className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full disabled:opacity-50"
+          />
+          {batchFiles.length <= 1 && <UrlWarning url={batchUrl} />}
+          {batchFiles.length <= 1 && (
+            <label className="text-[11px] text-inkSoft">
+              사진 1장으로 만들 때 추가 이미지 개수 ({batchCount}장)
+              <input
+                type="range"
+                min={3}
+                max={7}
+                value={batchCount}
+                onChange={(e) => setBatchCount(Number(e.target.value))}
+                className="w-full"
+              />
+            </label>
+          )}
+          <button
+            onClick={handleBatchGenerate}
+            disabled={(isPending && busyId === 'batch') || (batchFiles.length === 0 && !batchUrl.trim())}
+            className="btn-primary px-4 py-1.5 text-xs font-semibold disabled:opacity-50 justify-self-start"
+          >
+            {isPending && busyId === 'batch'
+              ? '생성 중... (시간이 좀 걸려요)'
+              : batchFiles.length > 1
+                ? `선택한 사진 ${batchFiles.length}장으로 한 번에 생성`
+                : `메인 + 추가 ${batchCount}장 한 번에 생성`}
+          </button>
+          {batchResult && <p className="text-[11px] text-accent">{batchResult}</p>}
         </div>
       </section>
 
-      <section className="grid gap-2">
+      <section className="grid gap-3">
         <div>
           <h3 className="text-sm font-semibold">메인 썸네일</h3>
-          <p className="text-[11px] text-inkSoft">쿠팡 검색결과에 노출되는 대표 이미지 1장이에요.</p>
+          <p className="text-[11px] text-inkSoft">
+            쿠팡 검색결과에 노출되는 대표 이미지예요. 색상을 태그해서 올리면 색상별로 메인이 따로 생겨요.
+          </p>
         </div>
-        {mainImage ? (
-          <div className="flex flex-wrap gap-4">
-            <ImageCard
-              img={mainImage}
-              size={LARGE}
-              onRetry={() => handleRetry(mainImage.id)}
-              onDelete={() => startTransition(() => deleteThumbnailImage(mainImage.id))}
-              busy={isPending && busyId === mainImage.id}
-            />
-            <div className="text-xs text-inkSoft self-center">
-              새 사진을 올리면 지금 메인 썸네일을 교체해요.
-              <div className="mt-2">
-                <DraftForm
-                  draft={mainDraft}
-                  onChange={(patch) => setMainDraft((prev) => ({ ...prev, ...patch }))}
-                  onGenerate={handleGenerateMain}
-                  busy={isPending && busyId === 'main-draft'}
-                  label="메인 썸네일 교체"
-                />
+
+        {colorGroupKeys.length <= 1 ? (
+          mainImages.length > 0 ? (
+            <div className="flex flex-wrap gap-4">
+              <ImageCard
+                img={mainImages[0]}
+                size={LARGE}
+                onRetry={() => handleRetry(mainImages[0].id)}
+                onDelete={() => startTransition(() => deleteThumbnailImage(mainImages[0].id))}
+                busy={isPending && busyId === mainImages[0].id}
+              />
+              <div className="text-xs text-inkSoft self-center">
+                새 사진을 올리면 지금 메인 썸네일을 교체해요.
+                <div className="mt-2">
+                  <DraftForm
+                    draft={mainDraft}
+                    onChange={(patch) => setMainDraft((prev) => ({ ...prev, ...patch }))}
+                    onGenerate={handleGenerateMain}
+                    busy={isPending && busyId === 'main-draft'}
+                    label="메인 썸네일 교체"
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <DraftForm
+              draft={mainDraft}
+              onChange={(patch) => setMainDraft((prev) => ({ ...prev, ...patch }))}
+              onGenerate={handleGenerateMain}
+              busy={isPending && busyId === 'main-draft'}
+              label="메인 썸네일 만들기"
+            />
+          )
         ) : (
-          <DraftForm
-            draft={mainDraft}
-            onChange={(patch) => setMainDraft((prev) => ({ ...prev, ...patch }))}
-            onGenerate={handleGenerateMain}
-            busy={isPending && busyId === 'main-draft'}
-            label="메인 썸네일 만들기"
-          />
+          <div className="grid gap-3">
+            {colorGroupKeys.map((colorKey) => {
+              const groupMain = mainImages.find((i) => (i.color_label || '') === colorKey);
+              return (
+                <div key={colorKey || '__default__'} className="grid gap-1">
+                  <p className="text-xs font-semibold text-accent">색상: {colorKey || '기본'}</p>
+                  {groupMain ? (
+                    <ImageCard
+                      img={groupMain}
+                      size={MEDIUM}
+                      onRetry={() => handleRetry(groupMain.id)}
+                      onDelete={() => startTransition(() => deleteThumbnailImage(groupMain.id))}
+                      busy={isPending && busyId === groupMain.id}
+                    />
+                  ) : (
+                    <p className="text-xs text-inkSoft">이 색상의 메인이 아직 없어요.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </section>
 
-      <section className="grid gap-2">
+      <section className="grid gap-3">
         <div>
           <h3 className="text-sm font-semibold">추가 이미지</h3>
           <p className="text-[11px] text-inkSoft">상세 갤러리에 들어가는 나머지 이미지예요. 여러 장 추가할 수 있어요.</p>
         </div>
 
-        {additionalImages.length > 0 && (
-          <div className="flex flex-wrap gap-3">
-            {additionalImages.map((img) => (
-              <ImageCard
-                key={img.id}
-                img={img}
-                size={MEDIUM}
-                onRetry={() => handleRetry(img.id)}
-                onDelete={() => startTransition(() => deleteThumbnailImage(img.id))}
-                busy={isPending && busyId === img.id}
-              />
-            ))}
-          </div>
-        )}
+        {colorGroupKeys.length <= 1
+          ? additionalImages.length > 0 && (
+              <div className="flex flex-wrap gap-3">
+                {additionalImages.map((img) => (
+                  <ImageCard
+                    key={img.id}
+                    img={img}
+                    size={MEDIUM}
+                    onRetry={() => handleRetry(img.id)}
+                    onDelete={() => startTransition(() => deleteThumbnailImage(img.id))}
+                    busy={isPending && busyId === img.id}
+                  />
+                ))}
+              </div>
+            )
+          : colorGroupKeys.map((colorKey) => {
+              const groupAdditional = additionalImages.filter((i) => (i.color_label || '') === colorKey);
+              if (groupAdditional.length === 0) return null;
+              return (
+                <div key={colorKey || '__default__'} className="grid gap-1">
+                  <p className="text-xs font-semibold text-accent">색상: {colorKey || '기본'}</p>
+                  <div className="flex flex-wrap gap-3">
+                    {groupAdditional.map((img) => (
+                      <ImageCard
+                        key={img.id}
+                        img={img}
+                        size={MEDIUM}
+                        onRetry={() => handleRetry(img.id)}
+                        onDelete={() => startTransition(() => deleteThumbnailImage(img.id))}
+                        busy={isPending && busyId === img.id}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
 
         <div className="grid gap-2">
           {additionalDrafts.map((d) => (
