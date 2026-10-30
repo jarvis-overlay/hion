@@ -11,6 +11,7 @@ import {
   type StrategyKey,
   type CustomFilters,
 } from '@/app/dashboard/sourcing/trends/actions';
+import { addPipelineCandidateFromRecommendation } from '@/app/dashboard/sourcing/pipeline/actions';
 import type { Season } from '@/lib/ai';
 import { Badge, MarketBadgeRow, strategyBucket, type StrategyBucket, STRATEGY_OPTIONS } from '@/components/MarketBadge';
 
@@ -50,6 +51,34 @@ export default function AiRecommendation({
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [products, setProducts] = useState<ProductRecommendation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 1단계에서 이미 실데이터로 찾은 후보를 다시 타이핑 안 하고 자동소싱
+  // 탭으로 바로 보낼 수 있게 - 카드별(index)로 전송 상태를 추적한다.
+  const [pipelineStatus, setPipelineStatus] = useState<Record<number, 'pending' | 'done' | string>>({});
+
+  function addToPipeline(p: ProductRecommendation, index: number) {
+    setPipelineStatus((prev) => ({ ...prev, [index]: 'pending' }));
+    const ref = p.coupangReferences[0];
+    const sourcing = p.sourcingLinks[0];
+    const toNumber = (v: string | null) => {
+      if (!v) return null;
+      const n = Number(v.replace(/[^0-9.]/g, ''));
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    addPipelineCandidateFromRecommendation({
+      title: p.item,
+      category: p.searchKeyword,
+      coupangPrice: toNumber(ref?.price ?? null),
+      coupangReviewCount: toNumber(ref?.reviewCount ?? null),
+      coupangLink: ref?.url ?? null,
+      coupangImageUrl: ref?.imageUrl ?? null,
+      marketScaleTier: p.badges?.marketScaleTier ?? null,
+      competitionTier: p.badges?.competitionTier ?? null,
+      supplierLink: sourcing?.url ?? null,
+      supplierNotes: sourcing ? `알리바바 참고가: ${sourcing.price ?? '가격 미상'} (${sourcing.nameKo})` : null,
+    }).then((res) => {
+      setPipelineStatus((prev) => ({ ...prev, [index]: 'error' in res ? res.error : 'done' }));
+    });
+  }
   // 카테고리를 연달아 클릭하면(예: 잘못 누르고 바로 다른 걸 누름) 두
   // 요청이 동시에 진행되다가 먼저 누른 요청이 나중에 끝나면 그 결과로
   // 화면이 덮어써지는 경쟁 상태가 있었다. 클릭마다 토큰을 새로 발급해서
@@ -582,9 +611,24 @@ export default function AiRecommendation({
               </div>
               )}
 
-              <p className="text-xs text-warn border-t border-paperLine/70 pt-3">
-                ⚠️ {p.caution}
-              </p>
+              <div className="flex items-center gap-2 border-t border-paperLine/70 pt-3 mb-2">
+                <button
+                  onClick={() => addToPipeline(p, i)}
+                  disabled={pipelineStatus[i] === 'pending' || pipelineStatus[i] === 'done'}
+                  className="btn-primary px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                >
+                  {pipelineStatus[i] === 'pending'
+                    ? '추가 중...'
+                    : pipelineStatus[i] === 'done'
+                      ? '✅ 자동소싱에 추가됨'
+                      : '자동소싱에 추가'}
+                </button>
+                {pipelineStatus[i] && pipelineStatus[i] !== 'pending' && pipelineStatus[i] !== 'done' && (
+                  <span className="text-xs text-warn">{pipelineStatus[i]}</span>
+                )}
+              </div>
+
+              <p className="text-xs text-warn">⚠️ {p.caution}</p>
             </div>
           ))}
         </div>

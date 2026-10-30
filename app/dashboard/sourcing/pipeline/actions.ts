@@ -40,6 +40,47 @@ export async function addPipelineCandidate(
   return { success: true };
 }
 
+// AI 소싱추천(1단계)에서 이미 실데이터로 찾은 쿠팡 후보를 수동으로
+// 다시 타이핑하지 않고 그대로 자동소싱 탭에 넣고 싶다는 요청으로
+// 추가함. 폼 입력이 아니라 추천 결과 객체를 그대로 받아서 저장한다.
+export async function addPipelineCandidateFromRecommendation(input: {
+  title: string;
+  category?: string | null;
+  coupangPrice?: number | null;
+  coupangReviewCount?: number | null;
+  coupangLink?: string | null;
+  coupangImageUrl?: string | null;
+  marketScaleTier?: string | null;
+  competitionTier?: string | null;
+  supplierLink?: string | null;
+  supplierNotes?: string | null;
+}): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: '로그인이 필요해요.' };
+
+  const { error } = await supabase.from('pipeline_candidates').insert({
+    title: input.title,
+    category: input.category || null,
+    coupang_price: input.coupangPrice ?? null,
+    coupang_review_count: input.coupangReviewCount ?? null,
+    coupang_link: input.coupangLink || null,
+    coupang_image_url: input.coupangImageUrl || null,
+    market_scale_tier: input.marketScaleTier || null,
+    competition_tier: input.competitionTier || null,
+    supplier_link: input.supplierLink || null,
+    supplier_notes: input.supplierNotes || null,
+    author_email: user.email,
+  });
+
+  if (error) return { error: error.message };
+
+  revalidatePath(PATH);
+  return { success: true };
+}
+
 // 카드 인라인 수정 - 쿠팡 후보 정보(1단계)와 1688 공급처 정보(2단계)를
 // 한 번에 고칠 수 있어야 해서 필드를 나누지 않고 한 폼으로 처리한다.
 export async function updatePipelineCandidate(
