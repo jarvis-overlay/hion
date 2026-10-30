@@ -29,6 +29,31 @@ const POSITION_LABEL: Record<ThumbnailPosition, string> = {
   right: '우측',
 };
 
+// 1688 "상품 페이지" 링크(예: detail.1688.com/offer/...html)를 사진
+// 주소로 착각해서 붙여넣는 실수가 반복돼서, 서버 에러가 뜨기 전에
+// 화면에서 먼저 알려준다 - 사진 파일 자체의 주소(보통 .jpg/.png 등으로
+// 끝남)만 여기 들어갈 수 있다.
+function looksLikeImageUrl(url: string): boolean {
+  try {
+    const path = new URL(url).pathname;
+    return /\.(jpe?g|png|webp|gif|bmp)$/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
+function UrlWarning({ url }: { url: string }) {
+  const v = url.trim();
+  if (!v || looksLikeImageUrl(v)) return null;
+  return (
+    <p className="text-[10px] text-warn">
+      ⚠️ 사진 파일 주소가 아니라 상품 페이지 링크 같아요. 1688에서 사진 위에 마우스 우클릭 →
+      &quot;이미지 주소 복사&quot;로 받은, .jpg/.png로 끝나는 주소를 넣어주세요. 소싱 확장프로그램으로
+      사진을 다운로드 폴더에 받으셨다면, URL 대신 왼쪽 &quot;사진 첨부&quot;로 그 파일을 직접 선택하세요.
+    </p>
+  );
+}
+
 interface ImageDraft {
   id: string;
   file: File | null;
@@ -93,6 +118,7 @@ function DraftForm({
           placeholder="또는 이미지 URL 붙여넣기 (예: 1688에서 복사한 사진 주소)"
           className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
         />
+        <UrlWarning url={draft.imageUrl} />
         <label className="text-[11px] text-inkSoft">제품 위치</label>
         <select
           value={draft.position}
@@ -517,6 +543,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
               placeholder="또는 이미지 URL 1개 붙여넣기 (예: 1688에서 복사한 사진 주소)"
               className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full disabled:opacity-50"
             />
+            {batchFiles.length <= 1 && <UrlWarning url={batchUrl} />}
             {batchFiles.length <= 1 && (
               <label className="text-[11px] text-inkSoft">
                 사진 1장으로 만들 때 추가 이미지 개수 ({batchCount}장)
