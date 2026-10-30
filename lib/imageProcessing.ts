@@ -246,6 +246,34 @@ export async function removeImageBackground(imageBuffer: Buffer, contentType: st
   return Buffer.from(arrayBuffer);
 }
 
+// remove.bg는 월 무료 호출이 금방 바닥나는데, 이 함수를 부르기 직전
+// cleanProductPhotoForCutout에서 Gemini가 이미 배경을 거의 순백색으로
+// 정리해준 상태라 - "흰색에 가까운 픽셀을 투명하게" 만드는 단순한
+// 색상 기반 처리만으로도 쓸만한 누끼가 나온다(API 호출/비용 없음).
+// remove.bg처럼 "이게 진짜 제품인지 배경인지"를 의미적으로 구분하진
+// 못해서, 제품 자체에 흰색/아주 밝은 색 부분(흰 티셔츠 등)이 있으면
+// 그 부분도 같이 투명해질 수 있다 - 품질이 안 좋으면 아래 호출부를
+// removeImageBackground(remove.bg)로 다시 바꾸면 된다.
+async function removeWhiteBackground(imageBuffer: Buffer): Promise<Buffer> {
+  const { data, info } = await sharp(imageBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+
+  // 거리가 WHITE_LOW 이하면 배경(완전 투명), WHITE_HIGH 이상이면 제품
+  // (완전 불透명), 그 사이는 경계선 안티에일리어싱을 위해 선형 보간한다.
+  const WHITE_LOW = 18;
+  const WHITE_HIGH = 60;
+  for (let i = 0; i < data.length; i += channels) {
+    const distance = 255 - Math.min(data[i], data[i + 1], data[i + 2]);
+    let alpha: number;
+    if (distance <= WHITE_LOW) alpha = 0;
+    else if (distance >= WHITE_HIGH) alpha = 255;
+    else alpha = Math.round(((distance - WHITE_LOW) / (WHITE_HIGH - WHITE_LOW)) * 255);
+    data[i + 3] = Math.min(data[i + 3], alpha);
+  }
+
+  return sharp(data, { raw: { width, height, channels } }).png().toBuffer();
+}
+
 // "상세페이지 제작" - 섹션 하나(첨부 이미지 + 키워드/분위기/설명)를
 // 근거로 상세페이지 한 장면을 만든다. 실측 결과 이미지 생성 모델이
 // 한글을 깨진 글자로 렌더링하는 문제가 프롬프트 지시만으로는 해결이
@@ -1338,7 +1366,7 @@ export interface GenerateThumbnailInput {
 export async function generateThumbnailImage(input: GenerateThumbnailInput): Promise<Buffer> {
   const cropped = await cropToProduct(input.productImage.buffer, input.productImage.mimeType);
   const cleaned = await cleanProductPhotoForCutout(cropped, input.productImage.mimeType);
-  const cutout = await removeImageBackground(cleaned.buffer, cleaned.mimeType);
+  const cutout = await removeWhiteBackground(cleaned.buffer);
   const base = await composeThumbnailImage(cutout, input.position);
   if (input.effectPrompt?.trim()) {
     return applyThumbnailEffect(base, input.effectPrompt.trim(), input.referenceImages || []);
