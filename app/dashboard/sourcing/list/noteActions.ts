@@ -5,6 +5,12 @@ import { createClient } from '@/lib/supabase/server';
 import { sendPushToAll } from '@/lib/webpush';
 
 const PATH = '/dashboard/sourcing/list';
+// item_notes는 소싱리스트와 자동소싱(pipeline_candidate) 양쪽이 같이
+// 쓰는 폴리모픽 테이블이라, 메모가 바뀌면 두 경로 다 갱신해야 한다.
+function revalidateNotePaths() {
+  revalidatePath(PATH);
+  revalidatePath('/dashboard/sourcing/pipeline');
+}
 // 새 버킷을 또 만들지 않고 detail-images 버킷을 재사용한다 (이미
 // allowed_users 쓰기 정책이 걸려 있음 - supabase/schema.sql 참고).
 const BUCKET = 'detail-images';
@@ -39,6 +45,14 @@ async function describeNoteEntity(
     const itemTitle = (data as any)?.sourcing_items?.title || '(상품 정보 없음)';
     const supplierTitle = (data as any)?.title || '(이름 없는 공급처)';
     return `${itemTitle} - 공급처 ${supplierTitle}`;
+  }
+  if (entityType === 'pipeline_candidate') {
+    const { data } = await supabase
+      .from('pipeline_candidates')
+      .select('title')
+      .eq('id', entityId)
+      .maybeSingle();
+    return data?.title ? `자동소싱 - ${data.title}` : '(이름 없는 자동소싱 후보)';
   }
   return entityType;
 }
@@ -108,7 +122,7 @@ export async function addItemNote(
     console.error('[item notes] 알림 준비 실패:', e);
   }
 
-  revalidatePath(PATH);
+  revalidateNotePaths();
   return { success: true };
 }
 
@@ -153,7 +167,7 @@ export async function updateItemNote(
   const { error } = await supabase.from('item_notes').update(patch).eq('id', id);
   if (error) return { error: error.message };
 
-  revalidatePath(PATH);
+  revalidateNotePaths();
   return { success: true };
 }
 
@@ -161,7 +175,7 @@ export async function deleteItemNote(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from('item_notes').delete().eq('id', id);
   if (error) console.error('[item notes] 삭제 실패:', error.message);
-  revalidatePath(PATH);
+  revalidateNotePaths();
 }
 
 // 작성할 땐 평범한 메모였는데 나중에 "이게 결론이었구나" 싶을 때도
@@ -170,7 +184,7 @@ export async function setItemNotePinned(id: string, pinned: boolean) {
   const supabase = createClient();
   const { error } = await supabase.from('item_notes').update({ pinned }).eq('id', id);
   if (error) console.error('[item notes] 고정 변경 실패:', error.message);
-  revalidatePath(PATH);
+  revalidateNotePaths();
 }
 
 // 메모 카테고리(가격/재고/품질 등)를 코드에 고정하지 않고 체크리스트
@@ -192,12 +206,12 @@ export async function addNoteCategory(label: string) {
     position: nextPosition,
   });
   if (error) console.error('[item notes] 카테고리 추가 실패:', error.message);
-  revalidatePath(PATH);
+  revalidateNotePaths();
 }
 
 export async function deleteNoteCategory(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from('item_note_categories').delete().eq('id', id);
   if (error) console.error('[item notes] 카테고리 삭제 실패:', error.message);
-  revalidatePath(PATH);
+  revalidateNotePaths();
 }
