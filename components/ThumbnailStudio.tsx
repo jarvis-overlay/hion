@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import {
   createProject,
@@ -364,6 +364,11 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   const [batchUrl, setBatchUrl] = useState('');
   const [batchCount, setBatchCount] = useState(5);
   const [batchResult, setBatchResult] = useState<string | null>(null);
+  // 여러 장을 올렸을 때 "첫 번째 파일 = 메인"으로 무조건 고정하지 않고,
+  // 어떤 사진을 메인으로 쓸지 직접 고르고 필요 없는 사진은 빼서 개수도
+  // 조절하고 싶다는 요청으로 추가.
+  const [batchMainIndex, setBatchMainIndex] = useState(0);
+  const batchFileInputRef = useRef<HTMLInputElement>(null);
 
   const images: any[] = project.thumbnail_images || [];
   const mainImage = images.find((i) => i.kind === 'main');
@@ -416,7 +421,13 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     setBatchResult(null);
     const fd = new FormData();
     if (batchFiles.length > 0) {
-      batchFiles.forEach((f) => fd.append('images', f));
+      // 서버는 항상 "첫 번째로 받은 파일 = 메인"으로 처리하므로, 사용자가
+      // 고른 메인 후보를 맨 앞으로 보내서 순서로 역할을 정한다.
+      const ordered =
+        batchFiles.length > 1
+          ? [batchFiles[batchMainIndex], ...batchFiles.filter((_, i) => i !== batchMainIndex)]
+          : batchFiles;
+      ordered.forEach((f) => fd.append('images', f));
     } else {
       fd.set('imageUrl', batchUrl.trim());
     }
@@ -434,7 +445,17 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
       );
       setBatchFiles([]);
       setBatchPreviews([]);
+      setBatchMainIndex(0);
       setBatchUrl('');
+    });
+  }
+
+  function handleBatchFileRemove(index: number) {
+    setBatchFiles((prev) => prev.filter((_, i) => i !== index));
+    setBatchPreviews((prev) => prev.filter((_, i) => i !== index));
+    setBatchMainIndex((prev) => {
+      if (index === prev) return 0;
+      return index < prev ? prev - 1 : prev;
     });
   }
 
@@ -487,34 +508,72 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
         <div>
           <h3 className="text-sm font-semibold">한 번에 만들기</h3>
           <p className="text-[11px] text-inkSoft">
-            1688 소싱 확장프로그램 등으로 받은 상품 사진을 <strong>여러 장 한 번에 선택</strong>하면, 첫 장을
-            메인 썸네일로, 나머지는 그대로 추가 이미지로 만들어줘요(실제 컷이라 효과 합성 없이 흰 배경만
-            적용). 사진이 1장이거나 URL 하나만 있을 때는 위치·효과를 자동으로 바꿔가며 여러 장을 합성해요.
+            1688 소싱 확장프로그램 등으로 받은 상품 사진을 <strong>여러 장 한 번에 선택</strong>하면 그대로
+            추가 이미지로 만들어줘요(실제 컷이라 효과 합성 없이 흰 배경만 적용) - 어떤 사진을 메인 썸네일로
+            쓸지는 아래에서 직접 고르고, 필요 없는 사진은 빼서 개수도 조절할 수 있어요. 사진이 1장이거나
+            URL 하나만 있을 때는 위치·효과를 자동으로 바꿔가며 여러 장을 합성해요.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-[160px_1fr] items-start">
-          <label className="cursor-pointer block">
+          <div>
             {batchPreviews.length > 0 ? (
               <div className="w-40 grid grid-cols-3 gap-1">
-                {batchPreviews.slice(0, 6).map((src, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img key={i} src={src} alt="" className="w-full h-12 object-cover rounded bg-paper" />
-                ))}
-                {batchPreviews.length > 6 && (
-                  <div className="w-full h-12 rounded bg-paper flex items-center justify-center text-[10px] text-inkSoft">
-                    +{batchPreviews.length - 6}
+                {batchPreviews.map((src, i) => (
+                  <div key={i} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={src}
+                      alt=""
+                      className={`w-full h-12 object-cover rounded bg-paper ${
+                        i === batchMainIndex ? 'ring-2 ring-accent' : ''
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleBatchFileRemove(i)}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-ink text-white text-[9px] leading-4 text-center"
+                      title="빼기"
+                    >
+                      ×
+                    </button>
+                    {batchFiles.length > 1 &&
+                      (i === batchMainIndex ? (
+                        <span className="absolute bottom-0 inset-x-0 bg-accent text-white text-[8px] text-center leading-3">
+                          메인
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setBatchMainIndex(i)}
+                          className="absolute bottom-0 inset-x-0 bg-black/40 text-white text-[8px] text-center leading-3 opacity-0 hover:opacity-100"
+                        >
+                          메인으로
+                        </button>
+                      ))}
                   </div>
-                )}
+                ))}
+                <button
+                  type="button"
+                  onClick={() => batchFileInputRef.current?.click()}
+                  className="w-full h-12 rounded bg-paper flex items-center justify-center text-[10px] text-inkSoft hover:bg-paperLine transition"
+                >
+                  + 추가
+                </button>
                 <div className="col-span-3 text-[11px] text-inkSoft text-center mt-1">
-                  {batchPreviews.length}장 선택됨
+                  {batchPreviews.length}장 선택됨{batchFiles.length > 1 && ' · 사진을 눌러 메인 지정'}
                 </div>
               </div>
             ) : (
-              <div className="w-40 h-40 rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition">
+              <button
+                type="button"
+                onClick={() => batchFileInputRef.current?.click()}
+                className="w-40 h-40 rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition"
+              >
                 클릭해서 상품 사진 첨부 (여러 장 선택 가능)
-              </div>
+              </button>
             )}
             <input
+              ref={batchFileInputRef}
               type="file"
               accept="image/*"
               multiple
@@ -523,12 +582,13 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 const raws = Array.from(e.target.files || []);
                 if (raws.length === 0) return;
                 const shrunk = await Promise.all(raws.map((r) => shrinkImageForUpload(r)));
-                setBatchFiles(shrunk);
-                setBatchPreviews(shrunk.map((f) => URL.createObjectURL(f)));
+                setBatchFiles((prev) => [...prev, ...shrunk]);
+                setBatchPreviews((prev) => [...prev, ...shrunk.map((f) => URL.createObjectURL(f))]);
                 setBatchUrl('');
+                e.target.value = '';
               }}
             />
-          </label>
+          </div>
           <div className="grid gap-1.5">
             <input
               value={batchUrl}
