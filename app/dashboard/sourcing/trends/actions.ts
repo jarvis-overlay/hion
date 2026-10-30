@@ -679,7 +679,58 @@ export async function runProductRecommendation(
     })
     .filter((r): r is ProductRecommendation => r !== null);
 
+  await cacheRecommendationsForPipeline(recommendations, category);
+
   return { recommendations };
+}
+
+// 실데이터로 검증된 추천을 "자동소싱" 탭에서 타이핑 없이 바로 담을 수
+// 있도록 임시 테이블에 적재해둔다. 자동소싱 탭에 넣거나(전환) 사용자가
+// 숨기면 그 행은 지워지므로, 여기서는 실패해도(테이블 미생성 등) 추천
+// 결과 자체를 보여주는 데는 지장이 없게 통째로 catch한다.
+function toNumberOrNull(v: string | null): number | null {
+  if (!v) return null;
+  const n = Number(v.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+async function cacheRecommendationsForPipeline(
+  recommendations: ProductRecommendation[],
+  category: string
+) {
+  try {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const rows = recommendations
+      .filter((r) => r.verified && r.coupangReferences.length > 0)
+      .map((r) => {
+        const ref = r.coupangReferences[0];
+        const sourcing = r.sourcingLinks[0];
+        return {
+          author_email: user.email,
+          item: r.item,
+          category,
+          coupang_price: toNumberOrNull(ref.price),
+          coupang_review_count: toNumberOrNull(ref.reviewCount),
+          coupang_link: ref.url,
+          coupang_image_url: ref.imageUrl,
+          market_scale_tier: r.badges?.marketScaleTier ?? null,
+          competition_tier: r.badges?.competitionTier ?? null,
+          supplier_link: sourcing?.url ?? null,
+          supplier_notes: sourcing ? `알리바바 참고가: ${sourcing.price ?? '가격 미상'} (${sourcing.nameKo})` : null,
+        };
+      });
+    if (rows.length === 0) return;
+
+    const { error } = await supabase.from('ai_product_recommendations').insert(rows);
+    if (error) console.error('[AI 추천] 자동소싱 캐시 적재 실패:', error.message);
+  } catch (e) {
+    console.error('[AI 추천] 자동소싱 캐시 적재 실패:', e);
+  }
 }
 
 export async function runKeywordTrend(

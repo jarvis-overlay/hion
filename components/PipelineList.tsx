@@ -3,12 +3,104 @@
 import { useMemo, useState, useTransition } from 'react';
 import {
   addPipelineCandidate,
+  addPipelineCandidateFromRecommendation,
   updatePipelineCandidate,
   updatePipelineStage,
   deletePipelineCandidate,
   promoteToSourcingList,
+  dismissRecommendation,
 } from '@/app/dashboard/sourcing/pipeline/actions';
 import NoteTimeline from './NoteTimeline';
+
+const MARKET_TIER_LABEL: Record<string, string> = {
+  'very-high': '매우 큼',
+  high: '큼',
+  mid: '중간',
+  low: '작음',
+  'very-low': '매우 작음',
+};
+const COMPETITION_TIER_LABEL: Record<string, string> = {
+  high: '높음',
+  mid: '보통',
+  low: '낮음',
+};
+
+function RecommendationCard({ rec }: { rec: any }) {
+  const [isPending, startTransition] = useTransition();
+  const [status, setStatus] = useState<'idle' | 'adding' | 'added' | string>('idle');
+
+  if (status === 'added') return null;
+
+  return (
+    <div className="card p-3 grid gap-1.5">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-sm">{rec.item}</p>
+          {rec.category && <p className="text-xs text-inkSoft">{rec.category}</p>}
+        </div>
+        <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-paper text-inkSoft ring-1 ring-paperLine whitespace-nowrap">
+          AI 추천
+        </span>
+      </div>
+      <div className="text-xs text-inkSoft grid gap-0.5">
+        {rec.coupang_price != null && <p>쿠팡 가격 {Number(rec.coupang_price).toLocaleString()}원</p>}
+        {rec.coupang_review_count != null && (
+          <p>리뷰 {Number(rec.coupang_review_count).toLocaleString()}개</p>
+        )}
+        {(rec.market_scale_tier || rec.competition_tier) && (
+          <p>
+            {rec.market_scale_tier && `시장규모 ${MARKET_TIER_LABEL[rec.market_scale_tier] || rec.market_scale_tier}`}
+            {rec.market_scale_tier && rec.competition_tier && ' · '}
+            {rec.competition_tier && `경쟁강도 ${COMPETITION_TIER_LABEL[rec.competition_tier] || rec.competition_tier}`}
+          </p>
+        )}
+        {rec.coupang_link && (
+          <a href={rec.coupang_link} target="_blank" rel="noreferrer" className="text-accent underline truncate">
+            쿠팡 링크
+          </a>
+        )}
+        {rec.supplier_notes && <p className="whitespace-pre-wrap">{rec.supplier_notes}</p>}
+      </div>
+      {typeof status === 'string' && status !== 'idle' && status !== 'adding' && (
+        <p className="text-xs text-warn">{status}</p>
+      )}
+      <div className="flex gap-3 text-xs">
+        <button
+          disabled={isPending}
+          onClick={() =>
+            startTransition(async () => {
+              setStatus('adding');
+              const res = await addPipelineCandidateFromRecommendation({
+                title: rec.item,
+                category: rec.category,
+                coupangPrice: rec.coupang_price,
+                coupangReviewCount: rec.coupang_review_count,
+                coupangLink: rec.coupang_link,
+                coupangImageUrl: rec.coupang_image_url,
+                marketScaleTier: rec.market_scale_tier,
+                competitionTier: rec.competition_tier,
+                supplierLink: rec.supplier_link,
+                supplierNotes: rec.supplier_notes,
+                recommendationId: rec.id,
+              });
+              setStatus('error' in res ? res.error : 'added');
+            })
+          }
+          className="text-accent font-semibold disabled:opacity-50"
+        >
+          담기
+        </button>
+        <button
+          disabled={isPending}
+          onClick={() => startTransition(() => dismissRecommendation(rec.id))}
+          className="text-inkSoft hover:text-ink disabled:opacity-50"
+        >
+          숨기기
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const STAGE_LABEL: Record<string, string> = {
   coupang_search: '①쿠팡서치',
@@ -292,10 +384,12 @@ export default function PipelineList({
   candidates,
   notes,
   noteCategories,
+  recommendations,
 }: {
   candidates: any[];
   notes: any[];
   noteCategories: { id: string; label: string }[];
+  recommendations: any[];
 }) {
   const [showPromoted, setShowPromoted] = useState(false);
 
@@ -307,6 +401,19 @@ export default function PipelineList({
 
   return (
     <div>
+      {recommendations.length > 0 && (
+        <div className="mb-5">
+          <p className="text-xs font-semibold text-inkSoft mb-2">
+            AI 소싱추천에서 발견된 후보 - 타이핑 없이 바로 담을 수 있어요
+          </p>
+          <div className="grid gap-2">
+            {recommendations.map((rec) => (
+              <RecommendationCard key={rec.id} rec={rec} />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-2">
         <AddCandidateForm onAdded={() => {}} />
         <button

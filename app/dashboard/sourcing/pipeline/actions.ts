@@ -54,6 +54,10 @@ export async function addPipelineCandidateFromRecommendation(input: {
   competitionTier?: string | null;
   supplierLink?: string | null;
   supplierNotes?: string | null;
+  // "자동소싱" 탭에 뜬 AI 추천 캐시(ai_product_recommendations) 행에서
+  // 담는 경우에만 넘어온다 - 담고 나면 그 캐시 행은 더 이상 필요 없으니
+  // 바로 지워서 "아직 안 담은 추천" 목록에서 사라지게 한다.
+  recommendationId?: string | null;
 }): Promise<{ error: string } | { success: true }> {
   const supabase = createClient();
   const {
@@ -77,8 +81,26 @@ export async function addPipelineCandidateFromRecommendation(input: {
 
   if (error) return { error: error.message };
 
+  if (input.recommendationId) {
+    const { error: delErr } = await supabase
+      .from('ai_product_recommendations')
+      .delete()
+      .eq('id', input.recommendationId);
+    if (delErr) console.error('[pipeline] 추천 캐시 삭제 실패:', delErr.message);
+  }
+
   revalidatePath(PATH);
+  revalidatePath('/dashboard/sourcing/trends');
   return { success: true };
+}
+
+// 자동소싱 탭에 뜬 AI 추천 후보가 별로일 때 - 담지 않고 그냥 목록에서
+// 치운다.
+export async function dismissRecommendation(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from('ai_product_recommendations').delete().eq('id', id);
+  if (error) console.error('[pipeline] 추천 숨기기 실패:', error.message);
+  revalidatePath(PATH);
 }
 
 // 카드 인라인 수정 - 쿠팡 후보 정보(1단계)와 1688 공급처 정보(2단계)를

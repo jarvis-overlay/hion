@@ -23,6 +23,15 @@ export default async function PipelinePage() {
     .select('*')
     .order('position', { ascending: true });
 
+  // AI 소싱추천(트렌드 탭)에서 실데이터로 검증되어 자동으로 적재된, 아직
+  // 자동소싱에 담지 않은 후보 - 탭을 옮기지 않고 여기서 바로 타이핑 없이
+  // 담을 수 있게 한다.
+  const { data: recommendations } = await supabase
+    .from('ai_product_recommendations')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(30);
+
   return (
     <div className="max-w-2xl">
       <h1 className="font-display text-2xl font-bold mb-1">자동소싱</h1>
@@ -34,6 +43,7 @@ export default async function PipelinePage() {
         candidates={candidates || []}
         notes={notes || []}
         noteCategories={noteCategories || []}
+        recommendations={recommendations || []}
       />
     </div>
   );
