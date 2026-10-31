@@ -646,3 +646,238 @@ insert into allowed_users (email) values
   ('dnr7350@gmail.com'),
   ('krispark917@gmail.com')
 on conflict (email) do nothing;
+
+
+-- ----------------------------------------------------------------------------
+-- 10. 이후 추가된 기능 (개별 마이그레이션을 합친 것 - 전부 여러 번 실행해도 안전)
+-- ----------------------------------------------------------------------------
+-- 소싱 보관함 / 우선순위
+alter table sourcing_items add column if not exists archived_at timestamptz;
+alter table sourcing_items add column if not exists priority text;
+alter table sourcing_items drop constraint if exists sourcing_items_priority_check;
+alter table sourcing_items add constraint sourcing_items_priority_check
+  check (priority is null or priority in ('1', '2', '3', 'waiting', 'ordering'));
+
+-- 마진 계산기 저장 항목
+alter table margin_entries add column if not exists intl_shipping numeric;
+alter table margin_entries add column if not exists coupon numeric;
+
+-- 메모 타임라인 (소싱 아이템/공급처 공용)
+create table if not exists item_notes (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  entity_type text not null,
+  entity_id uuid not null,
+  author_email text,
+  body text,
+  image_url text,
+  category text,
+  pinned boolean not null default false,
+  constraint item_notes_body_or_image check (body is not null or image_url is not null)
+);
+create index if not exists item_notes_entity_idx on item_notes (entity_type, entity_id, created_at desc);
+alter table item_notes enable row level security;
+drop policy if exists "item_notes_select" on item_notes;
+drop policy if exists "item_notes_insert" on item_notes;
+drop policy if exists "item_notes_update" on item_notes;
+drop policy if exists "item_notes_delete" on item_notes;
+create policy "item_notes_select" on item_notes
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "item_notes_insert" on item_notes
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "item_notes_update" on item_notes
+  for update using (auth.jwt() ->> 'email' in (select email from allowed_users))
+  with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "item_notes_delete" on item_notes
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+
+create table if not exists item_note_categories (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  label text not null unique,
+  position int not null default 0
+);
+insert into item_note_categories (label, position) values
+  ('문의/답변', 0), ('샘플', 1), ('발주확정', 2), ('결제', 3), ('선적', 4), ('기타', 5)
+on conflict (label) do nothing;
+alter table item_note_categories enable row level security;
+drop policy if exists "item_note_categories_select" on item_note_categories;
+drop policy if exists "item_note_categories_insert" on item_note_categories;
+drop policy if exists "item_note_categories_delete" on item_note_categories;
+create policy "item_note_categories_select" on item_note_categories
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "item_note_categories_insert" on item_note_categories
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "item_note_categories_delete" on item_note_categories
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+
+-- 체크리스트 자유 번역 기록
+create table if not exists sourcing_translation_history (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  sourcing_item_id uuid not null references sourcing_items(id) on delete cascade,
+  author_email text,
+  direction text not null, -- 'ko-zh' | 'zh-ko'
+  input text not null,
+  casual text,
+  formal text,
+  translation text
+);
+create index if not exists sourcing_translation_history_item_idx
+  on sourcing_translation_history (sourcing_item_id, created_at desc);
+alter table sourcing_translation_history enable row level security;
+drop policy if exists "sourcing_translation_history_select" on sourcing_translation_history;
+drop policy if exists "sourcing_translation_history_insert" on sourcing_translation_history;
+drop policy if exists "sourcing_translation_history_delete" on sourcing_translation_history;
+create policy "sourcing_translation_history_select" on sourcing_translation_history
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_translation_history_insert" on sourcing_translation_history
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_translation_history_delete" on sourcing_translation_history
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+
+-- AI 소싱 추천 제외 카테고리
+create table if not exists sourcing_excluded_categories (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  label text not null unique
+);
+alter table sourcing_excluded_categories enable row level security;
+drop policy if exists "sourcing_excluded_categories_select" on sourcing_excluded_categories;
+drop policy if exists "sourcing_excluded_categories_insert" on sourcing_excluded_categories;
+drop policy if exists "sourcing_excluded_categories_delete" on sourcing_excluded_categories;
+create policy "sourcing_excluded_categories_select" on sourcing_excluded_categories
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_excluded_categories_insert" on sourcing_excluded_categories
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_excluded_categories_delete" on sourcing_excluded_categories
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+
+-- 소싱 체크리스트 (공통 기본 항목 + 아이템별 체크)
+create table if not exists sourcing_checklist_templates (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  item_key text not null unique,
+  label text not null,
+  zh_hint text,
+  position int not null default 0
+);
+insert into sourcing_checklist_templates (item_key, label, zh_hint, position) values
+  ('made_in_china', 'MADE IN CHINA 스티커 부착 (제품 본체 + 포장박스)', '产品本体和单独包装盒上都需要贴"MADE IN CHINA"标签，请确认是否可以操作，以及是否需要额外费用。', 0),
+  ('unit_price', '최종 단가 확정 (수량별 할인 가능 여부 포함)', '请确认这个数量的最终单价，是否还有优惠空间。', 1),
+  ('stock_leadtime', '현재 재고 여부 + 결제 후 출고까지 소요일', '请问目前是否有现货，付款后大概几天可以发货？', 2),
+  ('unit_package', '개별 포장 크기 / 중량', '请提供单个产品包装后的尺寸和重量。', 3),
+  ('outer_box', '외박스 크기 / 총중량 / 박스당 수량 (CBM 계산용)', '请问外箱的尺寸是多少？长、宽、高分别是多少厘米，总重量多少，每箱装多少个？', 4),
+  ('barcode', '바코드 스티커 부착 가능 여부 + 비용', '如果我们提供条形码文件，是否可以帮我们贴条形码标签？如有费用，请告知。', 5),
+  ('qc', '출고 전 검수 (파손 / 스크래치 / 변형 확인)', '发货前请帮我们检查产品，尽量避免破损、划痕或变形。', 6),
+  ('manual', '조립설명서 / 조립영상 제공 여부 (조립형 제품)', '请问产品里面是否有安装说明书？如果没有，可以提供安装说明或安装视频吗？', 7),
+  ('payment', '결제수단 안내 (신용카드 / WorldFirst / 1688 결제)', '我们这边需要用信用卡或者WorldFirst进行付款，可以吗？', 8),
+  ('bulk_price', '본발주(대량) 시 단가 유지 조건', '如果这次样品确认没有问题，后续我们会考虑追加订购。请确认到时是否可以按照之前提供的价格合作。', 9)
+on conflict (item_key) do nothing;
+alter table sourcing_checklist_templates enable row level security;
+drop policy if exists "sourcing_checklist_templates_select" on sourcing_checklist_templates;
+drop policy if exists "sourcing_checklist_templates_insert" on sourcing_checklist_templates;
+drop policy if exists "sourcing_checklist_templates_update" on sourcing_checklist_templates;
+drop policy if exists "sourcing_checklist_templates_delete" on sourcing_checklist_templates;
+create policy "sourcing_checklist_templates_select" on sourcing_checklist_templates
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_checklist_templates_insert" on sourcing_checklist_templates
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_checklist_templates_update" on sourcing_checklist_templates
+  for update using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_checklist_templates_delete" on sourcing_checklist_templates
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+
+create table if not exists sourcing_item_checklist (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  sourcing_item_id uuid not null references sourcing_items(id) on delete cascade,
+  item_key text not null,
+  label text not null,
+  checked boolean not null default false,
+  note text,
+  zh_hint text,
+  unique (sourcing_item_id, item_key)
+);
+alter table sourcing_item_checklist enable row level security;
+drop policy if exists "sourcing_item_checklist_select" on sourcing_item_checklist;
+drop policy if exists "sourcing_item_checklist_insert" on sourcing_item_checklist;
+drop policy if exists "sourcing_item_checklist_update" on sourcing_item_checklist;
+drop policy if exists "sourcing_item_checklist_delete" on sourcing_item_checklist;
+create policy "sourcing_item_checklist_select" on sourcing_item_checklist
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_item_checklist_insert" on sourcing_item_checklist
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_item_checklist_update" on sourcing_item_checklist
+  for update using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "sourcing_item_checklist_delete" on sourcing_item_checklist
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+
+-- AI 소싱추천 결과 캐시 (자동소싱 탭에서 바로 담기용)
+create table if not exists ai_product_recommendations (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  author_email text,
+  item text not null,
+  category text,
+  coupang_price numeric,
+  coupang_review_count numeric,
+  coupang_link text,
+  coupang_image_url text,
+  market_scale_tier text,
+  competition_tier text,
+  supplier_link text,
+  supplier_notes text
+);
+alter table ai_product_recommendations enable row level security;
+drop policy if exists "ai_product_recommendations_select" on ai_product_recommendations;
+drop policy if exists "ai_product_recommendations_insert" on ai_product_recommendations;
+drop policy if exists "ai_product_recommendations_delete" on ai_product_recommendations;
+create policy "ai_product_recommendations_select" on ai_product_recommendations
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "ai_product_recommendations_insert" on ai_product_recommendations
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "ai_product_recommendations_delete" on ai_product_recommendations
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+
+-- 썸네일/상세페이지 "인기상품 참고"용 카테고리, 썸네일 색상별 세트
+alter table thumbnail_projects add column if not exists category text;
+alter table detail_page_projects add column if not exists category text;
+alter table thumbnail_images add column if not exists color_label text;
+
+-- 자동소싱 탭 (AI 추천 -> 1688 탐색 -> 발주협의 -> 이미지제작 -> 등록)
+create table if not exists pipeline_candidates (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  author_email text,
+  stage text not null default 'coupang_search'
+    check (stage in ('coupang_search', 'market_1688', 'negotiating', 'image_production', 'listed')),
+  title text not null,
+  category text,
+  coupang_price numeric,
+  coupang_review_count int,
+  coupang_link text,
+  coupang_image_url text,
+  market_scale_tier text,
+  competition_tier text,
+  supplier_link text,
+  supplier_price numeric,
+  supplier_notes text,
+  sourcing_item_id uuid references sourcing_items(id) on delete set null,
+  promoted_at timestamptz
+);
+alter table pipeline_candidates enable row level security;
+drop policy if exists "pipeline_candidates_select" on pipeline_candidates;
+drop policy if exists "pipeline_candidates_insert" on pipeline_candidates;
+drop policy if exists "pipeline_candidates_update" on pipeline_candidates;
+drop policy if exists "pipeline_candidates_delete" on pipeline_candidates;
+create policy "pipeline_candidates_select" on pipeline_candidates
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "pipeline_candidates_insert" on pipeline_candidates
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "pipeline_candidates_update" on pipeline_candidates
+  for update
+  using (auth.jwt() ->> 'email' in (select email from allowed_users))
+  with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "pipeline_candidates_delete" on pipeline_candidates
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
