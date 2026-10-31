@@ -3,6 +3,7 @@
 import { Fragment, useState, useTransition } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import DetailAutoComposer from '@/components/DetailAutoComposer';
+import DetailExportPanel from '@/components/DetailExportPanel';
 import {
   createProject,
   updateProjectCategory,
@@ -16,7 +17,9 @@ import {
   addSpecSection,
   updateSection,
   updateSpecSection,
+  updateSizeTableSection,
 } from '@/app/dashboard/sales/detail-pages/actions';
+import { decodeSizeTableRows, parseSizeTableText, sizeTableToText, DEFAULT_SIZE_NOTE } from '@/lib/detailOptions';
 
 // 이미지(왼쪽) - 문구(가운데) - 결과(오른쪽) - 관리 순서로 행이 쌓이는
 // 스프레드시트 형태. 미완성 행(초안, draft)을 여러 개 동시에 쌓아두고
@@ -359,6 +362,9 @@ interface EditState extends FieldValues {
   forceBackground: boolean;
   specTitle: string;
   specRows: SpecRowDraft[];
+  isSizeTable: boolean; // 사이즈표 장면 - 칸 대신 표 전체를 글로 고친다
+  sizeTableText: string;
+  sizeTableNote: string;
 }
 
 // 저장된 layout_style+theme에 해당하는 템플릿 카드 id (같은 조합을 쓰는 카드가
@@ -377,9 +383,13 @@ function editStateFromSection(s: any): EditState {
   const specRows: SpecRowDraft[] = Array.isArray(s.spec_rows)
     ? s.spec_rows.map((r: any) => ({ label: String(r?.label ?? ''), value: String(r?.value ?? '') }))
     : [];
+  const sizeTable = s.layout_style === 'spec' ? decodeSizeTableRows(s.spec_rows, s.spec_title) : null;
   return {
     sectionId: s.id,
     isSpec: s.layout_style === 'spec',
+    isSizeTable: !!sizeTable,
+    sizeTableText: sizeTable ? sizeTableToText(sizeTable) : '',
+    sizeTableNote: sizeTable?.note ?? DEFAULT_SIZE_NOTE,
     currentImageUrl: s.input_image_url || null,
     file: null,
     previewUrl: null,
@@ -401,8 +411,8 @@ function editStateFromSection(s: any): EditState {
     layoutStyle,
     theme,
     templateId: templateIdFor(layoutStyle, theme),
-    specTitle: s.spec_title || '제품 사양',
-    specRows: specRows.length ? specRows : [{ label: '', value: '' }],
+    specTitle: s.spec_title || (sizeTable ? '사이즈표' : '제품 사양'),
+    specRows: specRows.length && !sizeTable ? specRows : [{ label: '', value: '' }],
   };
 }
 
@@ -550,6 +560,29 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     setNotice(null);
     setBusyId(e.sectionId);
 
+    if (e.isSizeTable) {
+      const parsed = parseSizeTableText(e.sizeTableText);
+      if (!parsed.table) {
+        setBusyId(null);
+        setError(parsed.error || '사이즈표를 입력해주세요.');
+        return;
+      }
+      startTransition(async () => {
+        const res = await updateSizeTableSection(e.sectionId, {
+          ...parsed.table!,
+          title: e.specTitle,
+          note: e.sizeTableNote,
+        });
+        setBusyId(null);
+        if (!res || 'error' in res) {
+          setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+          return;
+        }
+        setEditing(null);
+        setNotice('사이즈표를 수정했어요.');
+      });
+      return;
+    }
     if (e.isSpec) {
       const rows = e.specRows.filter((r) => r.label.trim() || r.value.trim());
       if (rows.length === 0) {
@@ -817,7 +850,32 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
 
             {ed && (
               <div className="border-t border-paperLine bg-paper/60 p-3 grid gap-3 md:grid-cols-[280px_1fr]">
-                {ed.isSpec ? (
+                {ed.isSizeTable ? (
+                  <div className="md:col-span-2 grid gap-2">
+                    <input
+                      value={ed.specTitle}
+                      onChange={(e) => patchEdit({ specTitle: e.target.value })}
+                      placeholder="표 제목 (예: 사이즈표)"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs font-semibold"
+                    />
+                    <textarea
+                      value={ed.sizeTableText}
+                      onChange={(e) => patchEdit({ sizeTableText: e.target.value })}
+                      rows={6}
+                      spellCheck={false}
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+                    />
+                    <input
+                      value={ed.sizeTableNote}
+                      onChange={(e) => patchEdit({ sizeTableNote: e.target.value })}
+                      placeholder="표 아래 안내 문구"
+                      className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+                    />
+                    <p className="text-[11px] text-inkSoft">
+                      첫 줄이 열 제목, 이어지는 줄이 사이즈별 값이에요. 칸은 탭(엑셀에서 복사)·쉼표·공백으로 나눠요.
+                    </p>
+                  </div>
+                ) : ed.isSpec ? (
                   <div className="md:col-span-2 grid gap-2">
                     <input
                       value={ed.specTitle}
@@ -1172,6 +1230,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
           </button>
         </div>
       </div>
+
+      <DetailExportPanel projectId={project.id} readyCount={sections.filter((s) => s.output_image_url).length} />
 
       {notice && <p className="text-xs text-profit bg-profitBg rounded-md px-3 py-2">{notice}</p>}
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{error}</p>}

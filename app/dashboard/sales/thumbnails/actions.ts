@@ -8,6 +8,7 @@ import {
   applyThumbnailEffect,
   isImageVisuallyUnchanged,
   duplicateImageStrip,
+  enforceThumbnailSize,
   fetchImageFromUrl,
   fetchTopSellerReferenceImages,
   describeProductAppearance,
@@ -278,7 +279,7 @@ async function runStyledGeneration(
       appearanceSpec,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
       contentType: 'image/jpeg',
       upsert: true,
     });
@@ -687,7 +688,7 @@ async function runGeneration(
       referenceImages,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
       contentType: 'image/jpeg',
       upsert: true,
     });
@@ -748,7 +749,7 @@ export async function editThumbnailImage(
     }
 
     const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, edited, {
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(edited), {
       contentType: 'image/jpeg',
       upsert: true,
     });
@@ -791,7 +792,7 @@ export async function duplicateThumbnailStrip(
     const edited = await duplicateImageStrip(buffer, params);
 
     const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, edited, {
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(edited), {
       contentType: 'image/jpeg',
       upsert: true,
     });

@@ -1,15 +1,26 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import {
   uploadDetailSources,
   learnDetailFlowNow,
   planDetailPage,
   generatePlannedSections,
+  recolorPhotos,
+  addSizeTableSection,
   type PhotoReportItem,
 } from '@/app/dashboard/sales/detail-pages/actions';
-import type { PlannedSection, SellingOptions, SourceAnalysis } from '@/lib/detailOptions';
+import {
+  DEFAULT_SIZE_NOTE,
+  mergeSellingOptions,
+  parseSizeTableText,
+  planRecolorJobs,
+  type PlannedSection,
+  type SellingOptions,
+  type SourceAnalysis,
+} from '@/lib/detailOptions';
+import { DETAIL_SPEC_TEXT } from '@/lib/imageSpecs';
 import type { DetailFlowBrief } from '@/lib/detailCompose';
 
 // 여러 장의 중국 상품 사진을 한꺼번에 올리면 사진 속 중국어와 내용을 분석하고, 쿠팡 인기상품
@@ -30,7 +41,16 @@ interface SourceItem {
   overlaysRemoved?: number;
 }
 
-type Stage = 'idle' | 'upload' | 'flow' | 'plan' | 'generate' | 'done';
+type Stage = 'idle' | 'upload' | 'recolor' | 'flow' | 'plan' | 'generate' | 'done';
+
+// 올린 사진(또는 색상을 바꿔 만든 사진) 한 장 - 구성 기획에 넘기는 단위
+interface UploadedPhoto {
+  name: string;
+  colorLabel: string;
+  url: string;
+  analysis: SourceAnalysis | null;
+  converted?: boolean;
+}
 type GenStatus = 'pending' | 'running' | 'ok' | 'error';
 
 const TEMPLATE_LABEL: Record<string, string> = {
@@ -44,6 +64,7 @@ const TEMPLATE_LABEL: Record<string, string> = {
   'badge-list': '인증뱃지+리스트',
   'stat-highlight': '통계 강조',
   spec: '제품 사양 표',
+  'size-table': '사이즈표',
 };
 
 const CHUNK = 3;
@@ -59,6 +80,13 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
   const [category, setCategory] = useState<string>(project.category || '');
   const [colorsText, setColorsText] = useState('');
   const [sizesText, setSizesText] = useState('');
+  const [sizeText, setSizeText] = useState('');
+  const [sizeNote, setSizeNote] = useState(DEFAULT_SIZE_NOTE);
+  const [sizeBusy, setSizeBusy] = useState(false);
+  const [sizeMsg, setSizeMsg] = useState<string | null>(null);
+  const [recolorOn, setRecolorOn] = useState(true);
+  const [recolorProgress, setRecolorProgress] = useState({ done: 0, total: 0 });
+  const parsedSize = useMemo(() => parseSizeTableText(sizeText), [sizeText]);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -123,18 +151,23 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
 
   async function run() {
     if (busy || sources.length === 0) return;
+    if (sizeText.trim() && !parsedSize.table) {
+      setError(parsedSize.error || '사이즈표를 확인해주세요.');
+      return;
+    }
     setError(null);
     setSummary(null);
     setNotes([]);
     setPlan([]);
     setGenStatus([]);
     setPhotoReport([]);
+    setRecolorProgress({ done: 0, total: 0 });
 
     // 1) 사진 올리기 + 분석 (3장씩)
     setStage('upload');
     const items = sources.slice();
     setUploadProgress({ done: 0, total: items.length });
-    const uploaded: { item: SourceItem; url: string; analysis: SourceAnalysis | null }[] = [];
+    const uploaded: UploadedPhoto[] = [];
     let doneCount = 0;
     for (const group of chunks(items, CHUNK)) {
       group.forEach((it) => patchSource(it.id, { status: 'uploading', error: undefined }));
@@ -152,7 +185,7 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
           patchSource(it.id, { status: 'error', error: r?.error ?? '업로드 실패' });
         } else {
           patchSource(it.id, { status: 'done', analysisFailed: !r.analysis, overlaysRemoved: r.overlaysRemoved });
-          uploaded.push({ item: it, url: r.url, analysis: r.analysis });
+          uploaded.push({ name: it.file.name, colorLabel: it.colorLabel, url: r.url, analysis: r.analysis });
         }
       });
       doneCount += group.length;
@@ -162,6 +195,54 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
       setError('사진을 하나도 올리지 못했어요. 잠시 후 다시 시도해주세요.');
       setStage('idle');
       return;
+    }
+
+    // 1-2) 색상 변환: 내가 파는 색상의 사진이 없으면 다른 색 사진을 그 색으로 바꾼다 (검사를 통과한 것만 사용)
+    const recolorNotes: string[] = [];
+    if (recolorOn && (colorsText.trim() || uploaded.some((u) => u.colorLabel.trim()))) {
+      const sellingNow = mergeSellingOptions(colorsText, sizesText, uploaded.map((u) => u.colorLabel));
+      const jobs = planRecolorJobs(
+        uploaded.map((u) => ({ analysis: u.analysis, label: u.colorLabel.trim() || null })),
+        sellingNow
+      );
+      if (jobs.length > 0) {
+        setStage('recolor');
+        setRecolorProgress({ done: 0, total: jobs.length });
+        const base = uploaded.slice(); // 변환 대상 번호는 이 목록 기준
+        let done = 0;
+        for (const group of chunks(jobs, 2)) {
+          let results: Awaited<ReturnType<typeof recolorPhotos>>;
+          try {
+            results = await recolorPhotos(
+              project.id,
+              group.map((j) => ({ url: base[j.sourceIndex].url, from: j.from, to: j.to }))
+            );
+          } catch (e: any) {
+            results = group.map(() => ({ error: e?.message || '변환 요청이 실패했어요.' }));
+          }
+          group.forEach((j, k) => {
+            const r = results[k];
+            const src = base[j.sourceIndex];
+            if (r && 'success' in r) {
+              uploaded.push({
+                name: `${src.name} → ${j.to}`,
+                colorLabel: j.to,
+                url: r.url,
+                converted: true,
+                analysis: src.analysis
+                  ? { ...src.analysis, colorsShown: [j.to], koreanTexts: [], sizeChart: null, sizesMentioned: [] }
+                  : null,
+              });
+            } else {
+              recolorNotes.push(
+                `⚠ 사진 ${j.sourceIndex + 1}번을 "${j.to}" 색으로 바꾸지 못해서 쓰지 않았어요: ${r && 'error' in r ? r.error : '실패'}`
+              );
+            }
+          });
+          done += group.length;
+          setRecolorProgress({ done, total: jobs.length });
+        }
+      }
     }
 
     // 2) 쿠팡 인기상품 상세페이지 흐름 (저장된 게 있으면 바로, 없으면 학습 - 오래 걸릴 수 있음)
@@ -187,9 +268,10 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
         category,
         colorsText,
         sizesText,
+        sizeTable: parsedSize.table ? { ...parsedSize.table, note: sizeNote } : null,
         flow: learnedFlow,
         flowError: learnedFlow ? null : flowError,
-        sources: uploaded.map((u) => ({ url: u.url, colorLabel: u.item.colorLabel, analysis: u.analysis })),
+        sources: uploaded.map((u) => ({ url: u.url, colorLabel: u.colorLabel, analysis: u.analysis })),
       });
     } catch (e: any) {
       planRes = { error: e?.message || '구성 기획 요청이 실패했어요.' };
@@ -199,10 +281,10 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
       setStage('idle');
       return;
     }
-    setNotes(planRes.notes);
+    setNotes([...recolorNotes, ...planRes.notes]);
     setPlan(planRes.sections);
     setSelling(planRes.selling);
-    setPhotoReport(planRes.photoReport.map((p) => ({ ...p, name: uploaded[p.index]?.item.file.name ?? `사진 ${p.index + 1}` })));
+    setPhotoReport(planRes.photoReport.map((p) => ({ ...p, name: uploaded[p.index]?.name ?? `사진 ${p.index + 1}` })));
     setFlow(planRes.flow);
 
     // 4) 장면 생성 (3개씩)
@@ -255,6 +337,22 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
     setStage('done');
   }
 
+  async function addSizeOnly() {
+    if (!parsedSize.table) {
+      setSizeMsg(parsedSize.error || '사이즈표를 먼저 입력해주세요.');
+      return;
+    }
+    setSizeBusy(true);
+    setSizeMsg(null);
+    try {
+      const res = await addSizeTableSection(project.id, sectionCount, { ...parsedSize.table, note: sizeNote });
+      setSizeMsg('error' in res ? res.error : '사이즈표를 장면으로 추가했어요. 아래 목록에서 확인하세요.');
+    } catch (e: any) {
+      setSizeMsg(e?.message || '요청이 실패했어요. 다시 시도해주세요.');
+    }
+    setSizeBusy(false);
+  }
+
   const warnNoCategory = !category.trim();
 
   return (
@@ -263,9 +361,10 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
         <h3 className="text-sm font-semibold">한 번에 만들기 (사진 여러 장 → 상세페이지 전체)</h3>
         <p className="text-[11px] text-inkSoft leading-relaxed">
           중국 상품 사진을 <strong>여러 장 한꺼번에</strong> 올리면, 사진 속 중국어와 내용을 분석하고{' '}
-          <strong>쿠팡 인기상품 상세페이지의 흐름</strong>을 참고해서 장면을 순서대로 한 번에 만들어요. 장면 모양은
-          아래 표의 템플릿 규격(폭 860px)을 그대로 써요. 중국 사진에 색상이 5가지 나와도{' '}
-          <strong>아래에 적은 색상·사이즈만</strong> 상세페이지의 사진·문구·사양표에 들어가요.
+          <strong>쿠팡 인기상품 상세페이지의 흐름</strong>을 참고해서 장면을 순서대로 한 번에 만들어요. 이미지 규격은{' '}
+          <strong>{DETAIL_SPEC_TEXT}</strong>로 정확히 맞춰요. 중국 사진에 색상이 5가지 나와도{' '}
+          <strong>아래에 적은 색상·사이즈만</strong> 상세페이지에 들어가고, 사이즈 <strong>치수 숫자는 중국 사진에서 읽지 않고</strong>{' '}
+          아래에 직접 입력한 사이즈표로만 만들어요.
         </p>
       </div>
 
@@ -326,9 +425,83 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
       )}
       {!sizesText.trim() && (
         <p className="text-[11px] text-inkSoft max-w-3xl">
-          사이즈를 입력하지 않으면 상세페이지에 사이즈 정보(사이즈표 포함)를 넣지 않아요.
+          사이즈를 입력하지 않으면 상세페이지 문구·사양표에 사이즈 정보를 넣지 않아요.
         </p>
       )}
+
+      {/* 사이즈표 (한국 기준 실제 치수 - 직접 입력) */}
+      <div className="bg-paper rounded-lg p-3 grid gap-2 max-w-3xl text-xs">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="font-semibold">사이즈표 (한국 기준 실제 치수 · 직접 입력)</span>
+          <button
+            type="button"
+            onClick={addSizeOnly}
+            disabled={sizeBusy || busy || !parsedSize.table}
+            className="text-accent font-semibold disabled:opacity-40"
+          >
+            {sizeBusy ? '만드는 중...' : '사이즈표만 장면으로 추가'}
+          </button>
+        </div>
+        <textarea
+          value={sizeText}
+          onChange={(e) => {
+            setSizeText(e.target.value);
+            setSizeMsg(null);
+          }}
+          rows={5}
+          spellCheck={false}
+          placeholder={'첫 줄이 열 제목, 아래 줄이 사이즈별 값이에요 (엑셀에서 복사해 붙여넣어도 돼요)\n사이즈\t허리단면\t총길이\t허벅지단면\nM\t34\t24\t28\nL\t36\t25\t29'}
+          className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+        />
+        {sizeText.trim() && !parsedSize.table && parsedSize.error && <p className="text-warn">{parsedSize.error}</p>}
+        {parsedSize.table && (
+          <>
+            <div className="overflow-x-auto">
+              <table className="text-[11px] border border-paperLine bg-white">
+                <thead>
+                  <tr>
+                    {parsedSize.table.headers.map((h, i) => (
+                      <th key={i} className="border border-paperLine px-2 py-1 bg-ink text-white font-semibold">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {parsedSize.table.rows.map((r, ri) => (
+                    <tr key={ri}>
+                      {r.map((c, ci) => (
+                        <td key={ci} className={`border border-paperLine px-2 py-1 text-center ${ci === 0 ? 'font-semibold' : ''}`}>
+                          {c}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <input
+              value={sizeNote}
+              onChange={(e) => setSizeNote(e.target.value)}
+              placeholder="표 아래 안내 문구"
+              className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+            />
+          </>
+        )}
+        {sizeMsg && <p className="text-profit">{sizeMsg}</p>}
+        <p className="text-inkSoft">
+          중국 사진의 사이즈표 숫자는 한국으로 들여오면서 달라지므로 사진에서 읽지 않아요. 비워두면 사이즈표 장면은 만들지
+          않아요. 취급 사이즈를 입력했다면 그 사이즈 외의 행/열은 표에서 빼요.
+        </p>
+      </div>
+
+      <label className="flex items-start gap-2 text-[11px] text-inkSoft max-w-3xl">
+        <input type="checkbox" checked={recolorOn} onChange={(e) => setRecolorOn(e.target.checked)} className="mt-0.5" />
+        <span>
+          <strong className="text-ink">색상 자동 변환</strong> - 내가 파는 색상의 사진이 없으면, 다른 색 사진을 그 색으로 바꿔서
+          써요 (색상별 최대 2장). 바꾼 결과를 한 번 더 검사해서 색이 안 맞거나 모양이 달라진 사진은 쓰지 않아요.
+        </span>
+      </label>
 
       {/* 쿠팡 흐름 미리 확인 */}
       <div className="bg-paper rounded-lg p-3 grid gap-2 max-w-3xl text-xs">
@@ -472,9 +645,14 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
             1. 사진 올리고 분석 ({uploadProgress.done}/{uploadProgress.total})
             {stage !== 'upload' && ' ✓'}
           </p>
+          {recolorProgress.total > 0 && (
+            <p className={stage === 'recolor' ? 'font-semibold text-accent' : stage === 'upload' ? 'text-inkSoft/60' : 'text-inkSoft'}>
+              1-2. 내 색상 사진 만들기 - 색상 변환 ({recolorProgress.done}/{recolorProgress.total}){stage !== 'recolor' && stage !== 'upload' && ' ✓'}
+            </p>
+          )}
           <p
             className={
-              stage === 'flow' ? 'font-semibold text-accent' : stage === 'upload' ? 'text-inkSoft/60' : 'text-inkSoft'
+              stage === 'flow' ? 'font-semibold text-accent' : ['upload', 'recolor'].includes(stage) ? 'text-inkSoft/60' : 'text-inkSoft'
             }
           >
             2. 쿠팡 인기상품 상세페이지 흐름 확인{['plan', 'generate', 'done'].includes(stage) && ' ✓'}
@@ -483,7 +661,7 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
             className={
               stage === 'plan'
                 ? 'font-semibold text-accent'
-                : ['upload', 'flow'].includes(stage)
+                : ['upload', 'recolor', 'flow'].includes(stage)
                   ? 'text-inkSoft/60'
                   : 'text-inkSoft'
             }
@@ -559,7 +737,12 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
                     {p.sourceIndex !== null ? ` · 사진 ${p.sourceIndex + 1}번` : ''}
                   </span>
                   {p.kind === 'section' && p.fields.description && (
-                    <span className="block text-inkSoft truncate">“{p.fields.description}”</span>
+                    <span className="block text-inkSoft truncate">“{p.fields.description.replace(/\*\*/g, '')}”</span>
+                  )}
+                  {p.kind === 'sizechart' && p.sizeTable && (
+                    <span className="block text-inkSoft truncate">
+                      {p.sizeTable.headers.join(' / ')} · {p.sizeTable.rows.length}개 사이즈 (직접 입력한 표)
+                    </span>
                   )}
                   {p.kind === 'spec' && (
                     <span className="block text-inkSoft truncate">

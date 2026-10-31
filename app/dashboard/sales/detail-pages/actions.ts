@@ -8,6 +8,7 @@ import {
   composeDetailSectionImage,
   detectAndTranslateText,
   composeSpecTableSection,
+  composeSizeTableSection,
   fetchImageFromUrl,
   fetchTopSellerReferenceImages,
   type DetailSectionInput,
@@ -19,6 +20,7 @@ import { recommendDetailSectionCopy, planDetailSectionsRaw, type DetailCopyRecom
 import { removeOverlays } from '@/lib/overlayCleanup';
 import {
   analyzeSourceImage,
+  recolorWithVerification,
   learnDetailFlow,
   DEFAULT_DETAIL_FLOW,
   type DetailFlowBrief,
@@ -29,6 +31,10 @@ import {
   evaluatePhoto,
   finalizePlan,
   mergeSellingOptions,
+  normalizeSizeTable,
+  encodeSizeTableRows,
+  decodeSizeTableRows,
+  type SizeTableData,
   sanitizePlannedFields,
   sanitizeSpecRows,
   type PlannedFields,
@@ -278,6 +284,34 @@ export async function retrySection(
     .eq('id', sectionId)
     .single();
   if (error || !section) return { error: error?.message || '섹션을 찾을 수 없어요.' };
+
+  // 표 장면(사양표/사이즈표)은 사진 없이 저장된 내용으로 다시 그린다
+  if (section.layout_style === 'spec') {
+    const sizeTable = decodeSizeTableRows(section.spec_rows, section.spec_title);
+    if (sizeTable) return renderSizeTable(supabase, section.project_id, sectionId, sizeTable);
+    const rows: SpecRow[] = (Array.isArray(section.spec_rows) ? section.spec_rows : [])
+      .map((r: any) => ({ label: String(r?.label ?? ''), value: String(r?.value ?? '') }))
+      .filter((r: SpecRow) => r.label.trim() || r.value.trim());
+    if (rows.length === 0) return { error: '사양표에 항목이 없어요. 수정에서 항목을 입력해주세요.' };
+    try {
+      const generated = await composeSpecTableSection(rows, section.spec_title || undefined);
+      const outPath = `detail-pages/${section.project_id}/${sectionId}-output.jpg`;
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
+        contentType: 'image/jpeg',
+        upsert: true,
+      });
+      if (upErr) throw new Error(upErr.message);
+      const outputUrl = versioned(supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl);
+      await supabase.from('detail_page_sections').update({ output_image_url: outputUrl, error: null }).eq('id', sectionId);
+      revalidatePath(PATH);
+      return { success: true, url: outputUrl };
+    } catch (e: any) {
+      const message = e?.message || String(e);
+      await supabase.from('detail_page_sections').update({ error: message }).eq('id', sectionId);
+      revalidatePath(PATH);
+      return { error: message };
+    }
+  }
 
   let productImage: { buffer: Buffer; mimeType: string } | null = null;
   if (section.input_image_url) {
@@ -608,6 +642,82 @@ export async function addSpecSection(
   }
 }
 
+// 사이즈표 섹션 - 사용자가 직접 입력한 한국 기준 표를 그대로 그린다 (AI를 쓰지 않음).
+async function renderSizeTable(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  sectionId: string,
+  table: SizeTableData
+): Promise<{ error: string } | { success: true; url: string }> {
+  try {
+    const generated = await composeSizeTableSection(table);
+    const outPath = `detail-pages/${projectId}/${sectionId}-output.jpg`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (upErr) throw new Error(upErr.message);
+    const outputUrl = versioned(supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl);
+    await supabase.from('detail_page_sections').update({ output_image_url: outputUrl, error: null }).eq('id', sectionId);
+    revalidatePath(PATH);
+    return { success: true, url: outputUrl };
+  } catch (e: any) {
+    const message = e?.message || String(e);
+    await supabase.from('detail_page_sections').update({ error: message }).eq('id', sectionId);
+    revalidatePath(PATH);
+    return { error: message };
+  }
+}
+
+export async function addSizeTableSection(
+  projectId: string,
+  position: number,
+  input: SizeTableData
+): Promise<{ error: string } | { success: true; url: string }> {
+  const table = normalizeSizeTable(input);
+  if (!table) return { error: '사이즈표에 열 2개 이상, 행 1개 이상을 입력해주세요.' };
+  const supabase = createClient();
+  const sectionId = randomUUID();
+  const { error: insertErr } = await supabase.from('detail_page_sections').insert({
+    id: sectionId,
+    project_id: projectId,
+    position,
+    prompt_text: `사이즈표 (${table.rows.length}개 사이즈)`,
+    layout_style: 'spec',
+    theme: 'light',
+    spec_title: table.title || '사이즈표',
+    spec_rows: encodeSizeTableRows(table),
+  });
+  if (insertErr) return { error: insertErr.message };
+  return renderSizeTable(supabase, projectId, sectionId, table);
+}
+
+export async function updateSizeTableSection(
+  sectionId: string,
+  input: SizeTableData
+): Promise<{ error: string } | { success: true; url: string }> {
+  const table = normalizeSizeTable(input);
+  if (!table) return { error: '사이즈표에 열 2개 이상, 행 1개 이상을 입력해주세요.' };
+  const supabase = createClient();
+  const { data: section, error } = await supabase
+    .from('detail_page_sections')
+    .select('id, project_id, layout_style, spec_rows, spec_title')
+    .eq('id', sectionId)
+    .single();
+  if (error || !section) return { error: error?.message || '섹션을 찾을 수 없어요.' };
+  if (!decodeSizeTableRows(section.spec_rows)) return { error: '사이즈표 섹션이 아니에요.' };
+  const { error: updateErr } = await supabase
+    .from('detail_page_sections')
+    .update({
+      prompt_text: `사이즈표 (${table.rows.length}개 사이즈)`,
+      spec_title: table.title || '사이즈표',
+      spec_rows: encodeSizeTableRows(table),
+    })
+    .eq('id', sectionId);
+  if (updateErr) return { error: updateErr.message };
+  return renderSizeTable(supabase, section.project_id, sectionId, table);
+}
+
 // 사용자가 칸을 하나씩 채우는 대신 AI에게 초안을 맡긴다 - 원본 사진
 // OCR 결과(추출해뒀다면)와 프로젝트명, 이미 입력해둔 내용을 참고자료로
 // 넘긴다.
@@ -770,6 +880,7 @@ export interface DetailPlanInput {
   category: string;
   colorsText: string; // 취급 색상 (쉼표로 구분)
   sizesText: string; // 취급 사이즈 (쉼표로 구분)
+  sizeTable?: SizeTableData | null; // 직접 입력한 한국 기준 사이즈표 (없으면 사이즈표 장면 없음)
   sources: { url: string; colorLabel: string; analysis: SourceAnalysis | null }[];
   // 화면이 구성 기획 전에 먼저 학습해서 넘겨주는 쿠팡 흐름 (학습은 오래 걸릴 수 있어 요청을 나눔).
   // 학습에 실패했으면 flowError만 넘어오고, 둘 다 없으면 서버가 직접 학습/재사용한다.
@@ -860,7 +971,10 @@ export async function planDetailPage(
     notes.push('취급 색상을 입력하지 않아서 상세페이지에 색상 정보는 넣지 않았어요 (색상이 보이는 사진도 쓰지 않았어요).');
   }
   if (selling.sizes.length === 0) {
-    notes.push('취급 사이즈를 입력하지 않아서 상세페이지에 사이즈 정보는 넣지 않았어요.');
+    notes.push('취급 사이즈를 입력하지 않아서 상세페이지 문구·사양표에는 사이즈 정보를 넣지 않았어요.');
+  }
+  if (input.sizeTable && !normalizeSizeTable(input.sizeTable)) {
+    notes.push('⚠ 입력한 사이즈표를 표로 읽지 못해서 사이즈표 장면은 만들지 않았어요.');
   }
   analyses.forEach((a, i) => {
     if (!a && !labels[i]) notes.push(`사진 ${i + 1}번은 분석에 실패해서 참고하지 못했어요.`);
@@ -884,16 +998,15 @@ export async function planDetailPage(
         colorsShown: a?.colorsShown ?? [],
         usable: verdicts[i].usable,
         reason: verdicts[i].reason,
-        hasSizeChart: !!a?.sizeChart,
       })),
       templates: DETAIL_TEMPLATES.map((t) => ({ id: t.id, use: t.use, needsPhoto: t.needsPhoto })),
-      maxSections: MAX_PLANNED_SECTIONS - 1, // 마지막 한 칸은 사이즈표 사양 섹션용
+      maxSections: MAX_PLANNED_SECTIONS - 1, // 마지막 한 칸은 사이즈표 장면용
     });
   } catch (e: any) {
     return { error: `구성 기획에 실패했어요: ${e?.message || String(e)}` };
   }
 
-  const finalized = finalizePlan(raw, { verdicts, analyses, selling });
+  const finalized = finalizePlan(raw, { verdicts, analyses, selling, sizeTable: normalizeSizeTable(input.sizeTable) });
   verdicts.forEach((v, i) => {
     if (!v.usable) notes.push(`사진 ${i + 1}번은 상품 사진으로 쓰지 않았어요: ${v.reason}`);
   });
@@ -939,6 +1052,11 @@ async function generatePlannedSectionOne(
   selling: SellingOptions,
   forbiddenWords: string[]
 ): Promise<{ error: string } | { success: true; url: string }> {
+  if (planned.kind === 'sizechart') {
+    const table = normalizeSizeTable(planned.sizeTable);
+    if (!table) return { error: '사이즈표 내용이 없어요.' };
+    return addSizeTableSection(projectId, position, table);
+  }
   if (planned.kind === 'spec') {
     const cleaned = sanitizeSpecRows(planned.specRows || [], selling, forbiddenWords || []);
     if (cleaned.rows.length === 0) return { error: '사양표에 넣을 항목이 없어요.' };
@@ -966,6 +1084,36 @@ async function generatePlannedSectionOne(
   if (template.needsPhoto && sourceUrl) fd.set('imageUrl', sourceUrl);
   fd.set('skipReference', '1');
   return addSection(projectId, position, fd);
+}
+
+// 색상 변환: 내가 파는 색상의 사진이 없을 때 다른 색 사진을 그 색으로 바꾼다. 한 번에 최대 2장
+// (이미지 생성 + 검사를 최대 2번씩 해서 오래 걸림). 검사를 통과한 결과만 새 사진으로 올린다.
+export type RecolorResult = { error: string } | { success: true; url: string };
+
+export async function recolorPhotos(
+  projectId: string,
+  jobs: { url: string; from: string | null; to: string }[]
+): Promise<RecolorResult[]> {
+  if (!Array.isArray(jobs) || jobs.length === 0) return [{ error: '변환할 사진이 없어요.' }];
+  const supabase = createClient();
+  return mapLimit(jobs.slice(0, 2), 2, async (job): Promise<RecolorResult> => {
+    try {
+      const to = String(job.to || '').trim().slice(0, 20);
+      if (!to) return { error: '바꿀 색상이 없어요.' };
+      const img = await fetchImageFromUrl(job.url);
+      const r = await recolorWithVerification(img, job.from, to);
+      if (!r.success) return { error: r.error };
+      const path = `detail-pages/${projectId}/src-recolor-${randomUUID()}.jpg`;
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, r.buffer, {
+        contentType: 'image/jpeg',
+        upsert: true,
+      });
+      if (upErr) return { error: upErr.message };
+      return { success: true, url: supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl };
+    } catch (e: any) {
+      return { error: e?.message || String(e) };
+    }
+  });
 }
 
 // 한 번에 최대 3장면 (서버에서 동시에 생성). 결과는 받은 순서와 같은 순서로 돌려준다.

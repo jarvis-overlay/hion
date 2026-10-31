@@ -6,9 +6,11 @@
 //     "상세페이지가 어떤 순서로, 어떤 장면들로 흘러가는지"를 정리한다.
 // 두 결과를 합쳐 구성안을 짜는 건 lib/ai.ts(planDetailSections), 취급하지 않는
 // 색상/사이즈를 걸러내는 규칙은 lib/detailOptions.ts에 있다.
+import sharp from 'sharp';
 import { fetchCoupangBestsellers, fetchCoupangDetailImageUrls } from '@/lib/brightdata';
-import { fetchImageFromUrl, VISION_MODEL } from '@/lib/imageProcessing';
-import { normalizeSourceAnalysis, type SourceAnalysis } from '@/lib/detailOptions';
+import { fetchImageFromUrl, VISION_MODEL, IMAGE_GEN_MODEL } from '@/lib/imageProcessing';
+import { removeOverlays } from '@/lib/overlayCleanup';
+import { normalizeSourceAnalysis, colorHint, type SourceAnalysis } from '@/lib/detailOptions';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -80,11 +82,22 @@ export interface DetailFlowStep {
   note: string; // 인기상품에서 보이는 표현/배치 방식
 }
 
+// 인기상품 상세 이미지에서 읽은 글자/배치 습관 - 장면 템플릿과 문구 길이를 고를 때 참고한다
+export interface DetailVisualStyle {
+  themeTendency: 'light' | 'dark' | 'mixed'; // 문구 장면의 배경 톤
+  alignment: 'center' | 'left' | 'mixed'; // 글자 정렬
+  copyLength: 'short' | 'medium' | 'long'; // 한 장면의 문구 분량
+  usesEmphasis: boolean; // 핵심 단어를 색/굵기로 강조하는가
+  photoTextRatio: 'photo-heavy' | 'balanced' | 'text-heavy';
+  note: string; // 글자 크기·굵기·여백 등 눈에 띄는 특징
+}
+
 export interface DetailFlowBrief {
   summary: string;
   tone: string;
   sellingPoints: string[];
   flow: DetailFlowStep[];
+  visual?: DetailVisualStyle;
   analysis?: { products: number; detailImages: number; mainImages: number };
 }
 
@@ -122,6 +135,23 @@ function normalizeFlow(raw: any): DetailFlowBrief {
       .filter(Boolean)
       .slice(0, 8),
     flow,
+    visual: normalizeVisual(raw?.visual),
+  };
+}
+
+function pick<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(v as T) ? (v as T) : fallback;
+}
+
+function normalizeVisual(v: any): DetailVisualStyle | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  return {
+    themeTendency: pick(v.themeTendency, ['light', 'dark', 'mixed'] as const, 'mixed'),
+    alignment: pick(v.alignment, ['center', 'left', 'mixed'] as const, 'center'),
+    copyLength: pick(v.copyLength, ['short', 'medium', 'long'] as const, 'short'),
+    usesEmphasis: v.usesEmphasis === true,
+    photoTextRatio: pick(v.photoTextRatio, ['photo-heavy', 'balanced', 'text-heavy'] as const, 'balanced'),
+    note: String(v.note ?? '').trim().slice(0, 200),
   };
 }
 
@@ -188,9 +218,10 @@ ${detailNote}
 - flow는 상세페이지를 위에서 아래로 읽을 때의 장면 순서입니다 (6~9개). 각 장면의 title(장면 이름), purpose(그 장면이 하는 일), note(그 장면에서 흔히 쓰는 사진/문구/배치 방식)를 적으세요.
 - tone은 인기상품 문구의 어조(예: 간결·신뢰, 감성적, 기능 강조 등).
 - sellingPoints는 이 카테고리 인기상품이 공통으로 강조하는 장점 키워드(한국어 단어) 최대 6개.
+- visual은 상세 이미지에서 보이는 글자/배치 습관입니다: themeTendency(문구 장면 배경이 light/dark/mixed), alignment(글자 정렬 center/left/mixed), copyLength(한 장면 문구 분량 short/medium/long), usesEmphasis(핵심 단어를 색·굵기로 강조하는지 true/false), photoTextRatio(photo-heavy/balanced/text-heavy), note(글자 크기·굵기·여백 특징 한 줄).
 
 반드시 JSON 객체로만 응답하세요:
-{"summary":"공통 흐름 요약 2~3문장","tone":"...","sellingPoints":["..."],"flow":[{"title":"...","purpose":"...","note":"..."}]}`;
+{"summary":"공통 흐름 요약 2~3문장","tone":"...","sellingPoints":["..."],"flow":[{"title":"...","purpose":"...","note":"..."}],"visual":{"themeTendency":"light","alignment":"center","copyLength":"short","usesEmphasis":true,"photoTextRatio":"balanced","note":"..."}}`;
 
   const parts: Record<string, unknown>[] = [{ text: prompt }];
   for (const { img } of mains) parts.push({ inlineData: { mimeType: img.mimeType, data: img.buffer.toString('base64') } });
@@ -209,4 +240,94 @@ ${detailNote}
   const brief = normalizeFlow(raw);
   brief.analysis = { products: details.length, detailImages: detailCount, mainImages: mains.length };
   return brief;
+}
+
+
+// ---------------------------------------------------------------------------
+// 3) 상품 색상 변환: 내가 파는 색상의 사진이 없을 때 다른 색 사진을 그 색으로 바꾼다
+// ---------------------------------------------------------------------------
+// 이미지 생성 모델이 색만 바꾸라는 지시를 어기고 모양을 바꾸거나 다른 색을 섞는 일이 있어서, 만든 결과를
+// 비전 모델로 한 번 더 검사하고(원본과 비교) 통과한 것만 쓴다. 두 번 시도해도 통과하지 못하면 쓰지 않는다.
+async function recolorOnce(img: { buffer: Buffer; mimeType: string }, from: string | null, to: string): Promise<Buffer> {
+  const apiKey = requireEnv('GEMINI_API_KEY');
+  const hint = colorHint(to);
+  const prompt = `첨부된 사진은 판매 상품 사진입니다. **상품의 색상만** "${to}"${hint ? ` (${hint})` : ''}(으)로 바꿔주세요.${from ? ` 지금 상품 색상은 "${from}"입니다.` : ''}
+
+규칙(모두 필수):
+1. 상품의 모양, 비율, 소재 질감(주름·짜임·광택), 솔기, 부품, 그림자, 조명, 구도, 배경은 원본과 똑같이 유지하세요. 색만 바뀌어야 합니다.
+2. 상품이 아닌 것(사람 피부, 배경, 소품)의 색은 바꾸지 마세요.
+3. 결과 속 상품 전체가 "${to}" 한 가지 색이어야 합니다. 원본에 없는 다른 색의 무늬·로고·장식을 새로 만들지 마세요.
+4. 사진 속에 글자·아이콘이 있으면 모두 지우고 자연스러운 재질로 채우세요. 새 글자는 절대 그리지 마세요.
+5. 결과는 원본과 같은 비율의 사진 한 장입니다.`;
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ inlineData: { mimeType: img.mimeType, data: img.buffer.toString('base64') } }, { text: prompt }] }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      }),
+    }
+  );
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error?.message || `Gemini 이미지 생성 오류 (HTTP ${res.status})`);
+  const part = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
+  if (!part) throw new Error('색상을 바꾼 이미지를 받지 못했어요.');
+  return Buffer.from(part.inlineData.data, 'base64');
+}
+
+export interface RecolorCheck {
+  ok: boolean;
+  reason: string;
+}
+
+export async function verifyRecolor(
+  original: { buffer: Buffer; mimeType: string },
+  edited: Buffer,
+  to: string
+): Promise<RecolorCheck> {
+  const prompt = `두 장의 상품 사진을 비교하세요. 첫 번째는 원본, 두 번째는 상품 색상을 "${to}"(으)로 바꾸게 해서 만든 결과입니다. JSON 객체로만 답하세요.
+- productColor: 두 번째 사진에서 상품 본체의 색상을 한국어 색상명으로
+- matchesTarget: 두 번째 사진의 상품 본체가 "${to}" 한 가지 색으로 보이는가 (true/false). 다른 색의 무늬·줄·로고가 눈에 띄면 false
+- shapeUnchanged: 상품의 모양·비율·부품 개수·질감이 원본과 같은가 (true/false). 부품이 사라지거나 생기거나 모양이 달라졌으면 false
+- hasText: 두 번째 사진에 글자·숫자·로고가 보이는가 (true/false)
+- note: 문제가 있으면 한 줄로
+{"productColor":"","matchesTarget":true,"shapeUnchanged":true,"hasText":false,"note":""}`;
+  const text = await geminiVision([
+    { text: prompt },
+    { inlineData: { mimeType: original.mimeType, data: original.buffer.toString('base64') } },
+    { inlineData: { mimeType: 'image/jpeg', data: edited.toString('base64') } },
+  ]);
+  let r: any;
+  try {
+    r = parseJsonObject(text);
+  } catch {
+    return { ok: false, reason: '변환 결과를 검사하지 못했어요' };
+  }
+  if (r?.matchesTarget !== true) return { ok: false, reason: `색상이 "${to}"로 제대로 바뀌지 않았어요${r?.productColor ? ` (${r.productColor}로 보임)` : ''}` };
+  if (r?.shapeUnchanged !== true) return { ok: false, reason: '상품 모양이 원본과 달라졌어요' };
+  if (r?.hasText === true) return { ok: false, reason: '결과에 글자가 남아 있어요' };
+  return { ok: true, reason: '' };
+}
+
+export async function recolorWithVerification(
+  img: { buffer: Buffer; mimeType: string },
+  from: string | null,
+  to: string
+): Promise<{ success: true; buffer: Buffer } | { success: false; error: string }> {
+  let lastReason = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const raw = await recolorOnce(img, from, to);
+      let buf = await sharp(raw).jpeg({ quality: 92 }).toBuffer();
+      buf = (await removeOverlays(buf, 'image/jpeg')).buffer;
+      const check = await verifyRecolor(img, buf, to);
+      if (check.ok) return { success: true, buffer: buf };
+      lastReason = check.reason;
+    } catch (e: any) {
+      lastReason = e?.message || String(e);
+    }
+  }
+  return { success: false, error: lastReason || '색상 변환에 실패했어요' };
 }

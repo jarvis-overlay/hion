@@ -14,6 +14,7 @@ Supabase SQL Editor에서 아직 실행했는지 확인 안 된 `.sql` 파일 �
 - [x] `supabase/thumbnail_color_label.sql` — 썸네일 일괄생성 색상별 완전 별도 세트 생성용 컬럼 추가 (2026-10-31, 커밋 2a6629a)
 - [x] `supabase/pipeline_candidates.sql` — 자동소싱 탭 단계별 후보 테이블 (커밋 7ba816a, 위 체크리스트에서 빠져 있던 것)
 - [ ] `supabase/thumbnail_style_learning.sql` — 썸네일 "인기상품 스타일 학습" 저장 테이블(category_style_briefs) + 스타일 컷 재현용 컬럼(thumbnail_images.style_spec) (2026-11-01). 안 돌려도 동작은 하지만 스타일 저장/재사용과 실패 이미지의 같은 컷 재생성이 안 됨
+- [ ] `supabase/brand_templates.sql` — 상세페이지 "브랜드 템플릿" 저장 테이블(brand_templates) (2026-11-01). 안 돌려도 상세페이지 제작/다운로드는 되지만 내 브랜드 템플릿을 저장할 수 없고 기본 제공 색상 템플릿만 쓸 수 있음
 
 ## 오늘(2026-10-31) 추가된 SQL 전체 내용 (순서대로 실행)
 
@@ -82,6 +83,50 @@ create policy "category_style_briefs_delete" on category_style_briefs
   for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
 
 alter table thumbnail_images add column if not exists style_spec jsonb;
+
+notify pgrst, 'reload schema';
+```
+
+## 2026-11-01 추가된 SQL 전체 내용 2 (아직 미실행)
+
+```sql
+-- brand_templates.sql
+-- 상세페이지 "브랜드 템플릿" - 우리 브랜드의 색상/로고/머리글/바닥글(안내사항)을 저장해두고,
+-- 어떤 상세페이지든 마지막에 고른 템플릿으로 내보낼 때 적용한다.
+-- 안 돌려도 상세페이지 제작/다운로드는 되지만(기본 제공 색상 템플릿만 사용), 돌려야 내 브랜드 템플릿을 저장할 수 있다.
+create table if not exists brand_templates (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  brand_name text not null default '',
+  tagline text not null default '',
+  logo_url text,
+  primary_color text not null default '#1c1c1c',
+  accent_color text not null default '#7c4fd1',
+  apply_colors boolean not null default true,
+  header_enabled boolean not null default true,
+  footer_enabled boolean not null default true,
+  footer_title text not null default '안내사항',
+  footer_notice text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  author_email text
+);
+
+alter table brand_templates enable row level security;
+drop policy if exists "brand_templates_select" on brand_templates;
+drop policy if exists "brand_templates_insert" on brand_templates;
+drop policy if exists "brand_templates_update" on brand_templates;
+drop policy if exists "brand_templates_delete" on brand_templates;
+create policy "brand_templates_select" on brand_templates
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "brand_templates_insert" on brand_templates
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "brand_templates_update" on brand_templates
+  for update
+  using (auth.jwt() ->> 'email' in (select email from allowed_users))
+  with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "brand_templates_delete" on brand_templates
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
 
 notify pgrst, 'reload schema';
 ```

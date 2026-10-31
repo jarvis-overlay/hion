@@ -775,6 +775,14 @@ export async function planDetailSectionsRaw(input: {
     tone: string;
     sellingPoints: string[];
     flow: { title: string; purpose: string; note: string }[];
+    visual?: {
+      themeTendency: string;
+      alignment: string;
+      copyLength: string;
+      usesEmphasis: boolean;
+      photoTextRatio: string;
+      note: string;
+    };
   };
   selling: { colors: string[]; sizes: string[] };
   photos: {
@@ -787,7 +795,6 @@ export async function planDetailSectionsRaw(input: {
     colorsShown: string[];
     usable: boolean;
     reason: string | null;
-    hasSizeChart: boolean;
   }[];
   templates: { id: string; use: string; needsPhoto: boolean }[];
   maxSections: number;
@@ -804,7 +811,7 @@ export async function planDetailSectionsRaw(input: {
     .map((p) => {
       const head = `사진 ${p.index + 1}번 [${p.usable ? '사용 가능' : '사용 불가: ' + p.reason}] 종류=${p.role}${
         p.colorLabel ? ` / 색상=${p.colorLabel}` : ''
-      }${p.hasSizeChart ? ' / 사이즈표 있음' : ''}`;
+      }`;
       const body = [
         p.description && `  내용: ${p.description}`,
         p.facts.length ? `  확인된 사실: ${p.facts.join(' | ')}` : '',
@@ -825,7 +832,11 @@ export async function planDetailSectionsRaw(input: {
 요약: ${input.flow.summary}
 어조: ${input.flow.tone || '(없음)'}
 인기상품이 공통으로 강조하는 키워드(참고용, 이 상품에 해당하는지는 사진으로 확인될 때만): ${input.flow.sellingPoints.join(', ') || '(없음)'}
-${input.flow.flow.map((s, i) => `${i + 1}. ${s.title} - ${s.purpose} (${s.note})`).join('\n')}
+${input.flow.flow.map((s, i) => `${i + 1}. ${s.title} - ${s.purpose} (${s.note})`).join('\n')}${
+    input.flow.visual
+      ? `\n글자/배치 습관(인기상품에서 읽음): 문구 장면 배경 ${input.flow.visual.themeTendency}, 정렬 ${input.flow.visual.alignment}, 장면당 문구 분량 ${input.flow.visual.copyLength}, 핵심 단어 강조 ${input.flow.visual.usesEmphasis ? '많이 씀' : '적음'}, 사진:글자 비중 ${input.flow.visual.photoTextRatio}${input.flow.visual.note ? ` (${input.flow.visual.note})` : ''} → 템플릿 선택(밝은/어두운 톤)과 문구 길이를 여기에 맞추세요.`
+      : ''
+  }
 
 [내가 실제로 판매하는 옵션]
 - 색상: ${colorLine}
@@ -835,6 +846,7 @@ ${input.flow.flow.map((s, i) => `${i + 1}. ${s.title} - ${s.purpose} (${s.note})
 - 중국 사진에는 위보다 훨씬 많은 색상·사이즈가 나올 수 있지만, 나는 **위 옵션만** 판매합니다. 위에 없는 색상·사이즈는 문구·키워드·분위기·사양표 어디에도 절대 쓰지 마세요.
 - "N가지 색상", "N가지 사이즈"처럼 개수를 말할 때는 위에 적힌 개수와 정확히 같아야 합니다. 확신이 없으면 개수를 말하지 마세요.
 - 색상 이름을 문구에 쓸 때도 위 색상만 쓰세요. 색상을 바꾸는 지시(colorPrompt)는 쓰지 말고 빈 문자열로 두세요.
+- **치수 수치(cm·mm·가로세로 길이 등)는 어떤 문구·사양표에도 쓰지 마세요.** 중국 사진의 치수는 한국으로 가져오면서 달라지므로 쓰지 않고, 사이즈표는 제가 직접 입력한 표로 따로 만듭니다 (사이즈표 장면은 만들지 마세요).
 - "사용 불가"로 표시된 사진은 sourceIndex로 지정하지 마세요. 그 사진에서도 소재·기능 같은 **사실 정보**는 참고해도 되지만 색상 정보는 쓰지 마세요.
 
 [사진 분석 결과 (번호는 1부터)]
@@ -849,6 +861,7 @@ ${input.templates.map((t) => `- ${t.id}: ${t.use}${t.needsPhoto ? ' [사진 필�
 - keyword는 이미지 생성용 장면 키워드(배경·연출·확대 정도)이고 **상품의 모양·색을 바꾸는 내용이나 색상 이름은 쓰지 마세요**. mood는 분위기.
 - 문구는 한국어, 짧고 구체적으로 (description 헤드라인 18자 이내). **사진에서 확인되지 않는 소재·기능·수치·인증은 쓰지 마세요.** 사진 속 중국어 문구에서 확인된 사실을 근거로 하세요.
 - 최상급·과장·의학적 표현 금지: 최고, 1등, 1위, 최저가, 국내유일, 완벽, 100%, 무조건, 보장, 치료, 예방, 특허, 인증.
+- 헤드라인(description)에서 가장 강조할 핵심 구절 하나를 **이렇게** 별표 두 개로 감싸면 포인트 색 + 굵은 글씨로 강조됩니다 (장면당 최대 1곳, 별표를 글자 수에 세지 마세요).
 - 장면마다 서로 다른 문구여야 합니다. 이미 확인된 수치가 없으면 stat-highlight 템플릿은 쓰지 마세요.
 - listItems는 문자열 배열(3~4개, 각 14자 이내).
 - spec 장면의 specRows는 사진에서 확인된 사실(소재, 원산지, 구성 등)만 label/value로. 색상/사이즈 행은 넣어도 되지만 값은 위 옵션만 쓰세요.

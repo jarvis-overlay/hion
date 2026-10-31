@@ -133,9 +133,14 @@ export function evaluatePhoto(
   colorLabel: string | null
 ): PhotoVerdict {
   // 사이즈표 사진은 표(글자)가 대부분이라 상품 사진 배경으로 쓰면 표 모양이 다시 그려진다.
-  // 표의 내용은 사양표에 반영되므로 사진으로는 쓰지 않는다.
+  // 그리고 중국 사이즈표의 숫자는 한국으로 가져오면서 바뀌는 일이 많아 내용도 쓰지 않는다 -
+  // 사이즈표는 사용자가 직접 입력한 한국 기준 표로만 만든다.
   if (analysis?.role === 'size_chart') {
-    return { usable: false, color: null, reason: '사이즈표 사진이라 상품 사진으로는 쓰지 않아요 (표 내용은 사양표에 반영돼요)' };
+    return {
+      usable: false,
+      color: null,
+      reason: '중국 사이즈표 사진이라 쓰지 않아요 (사이즈표는 직접 입력한 표로 만들어요)',
+    };
   }
   const label = (colorLabel || '').trim();
   const shown = (analysis?.colorsShown || []).map((c) => c.trim()).filter(Boolean);
@@ -225,6 +230,75 @@ export function chartToSpecRows(chart: SizeChart | null): { label: string; value
 }
 
 // ---------------------------------------------------------------------------
+// 2-2) 사용자가 직접 입력하는 사이즈표 (한국 기준 실제 치수)
+// ---------------------------------------------------------------------------
+// 중국 사진의 사이즈표 숫자는 한국으로 가져오면서 바뀌므로 상세페이지의 사이즈표는 이 입력값으로만 만든다.
+export interface SizeTableData {
+  title?: string;
+  headers: string[];
+  rows: string[][];
+  note?: string;
+}
+
+export const SIZE_TABLE_LIMITS = { maxCols: 8, maxRows: 14, maxCell: 14 };
+export const DEFAULT_SIZE_NOTE = '※ 측정 방법에 따라 1~3cm 정도 오차가 있을 수 있습니다.';
+
+export function normalizeSizeTable(t: Partial<SizeTableData> | null | undefined): SizeTableData | null {
+  if (!t || !Array.isArray(t.headers) || !Array.isArray(t.rows)) return null;
+  const cell = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, SIZE_TABLE_LIMITS.maxCell);
+  const headers = t.headers.map(cell).slice(0, SIZE_TABLE_LIMITS.maxCols);
+  if (headers.length < 2 || headers.every((h) => !h)) return null;
+  const rows = t.rows
+    .filter((r) => Array.isArray(r))
+    .map((r) => headers.map((_, i) => cell((r as unknown[])[i])))
+    .filter((r) => r.some(Boolean))
+    .slice(0, SIZE_TABLE_LIMITS.maxRows);
+  if (rows.length === 0) return null;
+  return {
+    title: String(t.title ?? '').trim().slice(0, 20),
+    headers,
+    rows,
+    note: String(t.note ?? '').trim().slice(0, 120),
+  };
+}
+
+// 엑셀에서 복사한 표(탭)나 쉼표/공백으로 적은 글 -> 표. 첫 줄이 열 제목.
+export function parseSizeTableText(text: string): { table: SizeTableData | null; error: string | null } {
+  const lines = (text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return { table: null, error: null };
+  const sep = lines.some((l) => l.includes('\t')) ? /\t+/ : lines.some((l) => l.includes(',')) ? /\s*,\s*/ : lines.some((l) => l.includes('|')) ? /\s*\|\s*/ : /\s+/;
+  const grid = lines.map((l) => l.split(sep).map((c) => c.trim()));
+  const headers = grid[0];
+  if (headers.length < 2) return { table: null, error: '첫 줄에 열 제목을 2개 이상 적어주세요 (예: 사이즈 허리 총길이). 칸은 탭·쉼표·공백으로 나눠요.' };
+  if (grid.length < 2) return { table: null, error: '열 제목 아래에 사이즈별 행을 한 줄 이상 적어주세요.' };
+  if (headers.length > SIZE_TABLE_LIMITS.maxCols) return { table: null, error: `열은 ${SIZE_TABLE_LIMITS.maxCols}개까지 넣을 수 있어요.` };
+  if (grid.length - 1 > SIZE_TABLE_LIMITS.maxRows) return { table: null, error: `행은 ${SIZE_TABLE_LIMITS.maxRows}개까지 넣을 수 있어요.` };
+  const table = normalizeSizeTable({ headers, rows: grid.slice(1) });
+  if (!table) return { table: null, error: '표로 읽을 수 없어요. 열 제목과 값을 확인해주세요.' };
+  return { table, error: null };
+}
+
+// 입력한 표에 취급하지 않는 사이즈가 섞여 있으면 뺀다 (행 기준: 첫 칸이 사이즈, 열 기준: 제목이 사이즈).
+// 어느 쪽으로도 사이즈를 알아볼 수 없으면 입력한 그대로 둔다.
+export function filterSizeTable(
+  table: SizeTableData,
+  selling: SellingOptions
+): { table: SizeTableData; removed: string[]; unchecked: boolean } {
+  if (selling.sizes.length === 0) return { table, removed: [], unchecked: false };
+  const chart = filterSizeChart({ headers: table.headers, rows: table.rows }, selling);
+  if (!chart) return { table, removed: [], unchecked: true };
+  const removed: string[] = [];
+  const keptRows = new Set(chart.rows.map((r) => r.join('\u0001')));
+  for (const r of table.rows) {
+    if (!keptRows.has(r.join('\u0001')) && chart.headers.length === table.headers.length) removed.push(r[0]);
+  }
+  if (chart.headers.length < table.headers.length) {
+    for (const h of table.headers) if (!chart.headers.includes(h)) removed.push(h);
+  }
+  return { table: { ...table, headers: chart.headers, rows: chart.rows }, removed, unchecked: false };
+}
+
+// ---------------------------------------------------------------------------
 // 3) 문구 검사: 취급하지 않는 색상/사이즈/개수 표현이 있으면 걸러낸다
 // ---------------------------------------------------------------------------
 // 문구에 나오면 "색상 언급"으로 보는 단어들 (모든 표기). 일반 단어와 겹치는 것
@@ -235,6 +309,8 @@ const NOT_FOR_DETECTION = new Set(['자주', '커피', '크림', '살구', '와�
 const ALL_COLOR_WORDS = COLOR_GROUPS.flat().filter(
   (w) => /[가-힣]/.test(w) && w.length >= 2 && !NOT_FOR_DETECTION.has(w)
 );
+
+const MEASURE_RE = /\d+(?:\.\d+)?\s*(?:cm|mm|㎝|㎜|센티|센치|인치|inch)(?![A-Za-z])|\d+(?:\.\d+)?\s*[x×*]\s*\d+(?:\.\d+)?\s*(?:cm|mm|㎝|㎜)/gi;
 
 export function findOptionViolations(
   text: string,
@@ -270,6 +346,9 @@ export function findOptionViolations(
   for (const m of t.matchAll(sizeCountRe)) {
     if (Number(m[1]) !== selling.sizes.length) found.push(m[0]);
   }
+  // 치수 수치(92cm, 30mm, 20x30 등)는 중국 사진 기준이라 한국으로 들여오면서 달라질 수 있다.
+  // 치수는 사용자가 직접 입력한 사이즈표로만 보여주므로 문구에서는 걸러낸다.
+  for (const m of t.matchAll(MEASURE_RE)) found.push(`치수(${m[0].trim()})`);
 
   // 취급하지 않는 사이즈 표기 (대문자 단독 토큰: XL, 2XL, M ...)
   const sizeRe = /(?<![A-Za-z0-9])((?:[2-6]X{1,2}L)|XXXL|XXL|XL|XS|S|M|L)(?![A-Za-z0-9])/g;
@@ -459,7 +538,7 @@ export const DETAIL_TEMPLATES: DetailTemplateSpec[] = [
 ];
 
 export interface PlannedSection {
-  kind: 'section' | 'spec';
+  kind: 'section' | 'spec' | 'sizechart';
   templateId: string;
   layoutStyle: DetailLayout;
   theme: DetailTheme;
@@ -468,6 +547,7 @@ export interface PlannedSection {
   fields: PlannedFields;
   specTitle: string;
   specRows: { label: string; value: string }[];
+  sizeTable?: SizeTableData | null; // kind === 'sizechart'일 때 - 사용자가 입력한 한국 기준 사이즈표
 }
 
 export const EMPTY_FIELDS: PlannedFields = {
@@ -522,6 +602,7 @@ export function finalizePlan(
     verdicts: PhotoVerdict[];
     analyses: (SourceAnalysis | null)[];
     selling: SellingOptions;
+    sizeTable?: SizeTableData | null; // 사용자가 입력한 사이즈표 (없으면 사이즈표 장면을 만들지 않는다)
   }
 ): { sections: PlannedSection[]; notes: string[] } {
   const notes: string[] = [];
@@ -611,31 +692,157 @@ export function finalizePlan(
     );
   }
 
-  // 사이즈표: 원본 사진에서 읽은 표를 취급 사이즈만 남겨서 사양표로
-  if (sections.length < MAX_PLANNED_SECTIONS) {
-    for (const a of analyses) {
-      const filtered = filterSizeChart(a?.sizeChart ?? null, selling);
-      const rows = chartToSpecRows(filtered).filter((x) => x.value);
-      if (rows.length > 0) {
-        sections.push({
-          kind: 'spec',
-          templateId: 'spec',
-          layoutStyle: 'spec',
-          theme: 'light',
-          purpose: '사이즈 정보',
-          sourceIndex: null,
-          fields: { ...EMPTY_FIELDS },
-          specTitle: '사이즈 정보',
-          specRows: rows,
-        });
-        notes.push('사이즈표의 수치는 원본 사진에서 AI가 읽은 값이에요. 실제 치수와 맞는지 꼭 확인하세요.');
+  // 사이즈표: 사용자가 직접 입력한 한국 기준 표로만 만든다. (중국 사진의 사이즈표 숫자는 한국으로 가져오면서
+  // 바뀌므로 쓰지 않는다.) 취급하지 않는 사이즈가 섞여 있으면 빼고, 사양표 바로 앞에 넣는다.
+  if (ctx.sizeTable) {
+    const filtered = filterSizeTable(ctx.sizeTable, selling);
+    if (filtered.removed.length > 0) {
+      notes.push(`입력한 사이즈표에서 취급하지 않는 사이즈(${filtered.removed.join(', ')})는 뺐어요.`);
+    }
+    if (filtered.unchecked) {
+      notes.push('입력한 사이즈표에서 사이즈 칸을 알아보지 못해서, 취급 사이즈와 맞는지 검사하지 못하고 입력한 그대로 넣었어요.');
+    }
+    const sizeSection: PlannedSection = {
+      kind: 'sizechart',
+      templateId: 'size-table',
+      layoutStyle: 'spec',
+      theme: 'light',
+      purpose: '사이즈표',
+      sourceIndex: null,
+      fields: { ...EMPTY_FIELDS },
+      specTitle: filtered.table.title || '사이즈표',
+      specRows: [],
+      sizeTable: filtered.table,
+    };
+    let at = -1;
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (sections[i].kind === 'spec') {
+        at = i;
         break;
       }
     }
-  }
-  if (selling.sizes.length === 0 && analyses.some((a) => a?.sizeChart)) {
-    notes.push('취급 사이즈를 입력하지 않아서 사진의 사이즈표는 넣지 않았어요.');
+    if (at >= 0) sections.splice(at, 0, sizeSection);
+    else sections.push(sizeSection);
+  } else if (selling.sizes.length > 0) {
+    notes.push('사이즈표를 입력하지 않아서 사이즈표 장면은 만들지 않았어요 (중국 사진의 사이즈표 숫자는 쓰지 않아요).');
   }
 
   return { sections, notes: Array.from(new Set(notes)) };
+}
+
+// ---------------------------------------------------------------------------
+// 색상 변환 계획: 내가 파는 색상의 사진이 없으면, 다른 색(취급하지 않는 색 포함)의 사진을 그 색으로 바꿔서 쓴다
+// ---------------------------------------------------------------------------
+export interface RecolorJob {
+  sourceIndex: number; // 바꿀 사진 번호(0부터)
+  from: string | null; // 지금 색 (모르면 null)
+  to: string; // 바꿀 색 (취급 색상)
+}
+
+// 사진 한 장이 대표하는 단일 색상. 라벨이 있으면 라벨, 없으면 분석에서 한 가지 색만 나온 경우. 여러 색이면 null.
+export function resolvePhotoColor(analysis: SourceAnalysis | null, label: string | null): string | null {
+  const l = (label || '').trim();
+  if (l) return l;
+  const shown: string[] = [];
+  for (const c of (analysis?.colorsShown || []).map((x) => x.trim()).filter(Boolean)) {
+    if (!shown.some((s) => colorsMatch(s, c))) shown.push(c);
+  }
+  return shown.length === 1 ? shown[0] : null;
+}
+
+const RECOLOR_ROLES: SourceRole[] = ['hero', 'detail', 'usage', 'other'];
+
+// 취급 색상마다 그 색 사진이 없으면 변환 작업을 만든다. 색상 라인업/사이즈표/포장 사진은 바꾸지 않는다.
+// 우선순위: 취급하지 않는 단일 색 사진(그냥 두면 버려짐) > 다른 취급 색 사진 > 색을 모르는 상품 컷.
+export function planRecolorJobs(
+  photos: { analysis: SourceAnalysis | null; label: string | null }[],
+  selling: SellingOptions,
+  opts: { perColor?: number; maxJobs?: number } = {}
+): RecolorJob[] {
+  const perColor = opts.perColor ?? 2;
+  const maxJobs = opts.maxJobs ?? 6;
+  const info = photos.map((p, i) => {
+    const color = resolvePhotoColor(p.analysis, p.label);
+    const role = p.analysis?.role ?? 'other';
+    const distinct = new Set((p.analysis?.colorsShown || []).map((c) => canonicalColor(c)));
+    const convertible = RECOLOR_ROLES.includes(role) && (distinct.size <= 1 || !!(p.label || '').trim()) && !!p.analysis;
+    return { i, color, role, convertible };
+  });
+
+  const jobs: RecolorJob[] = [];
+  const timesUsed = new Map<number, number>();
+  for (const target of selling.colors) {
+    // 이미 그 색 사진이 있으면 변환하지 않는다
+    if (info.some((x) => x.color && colorsMatch(x.color, target))) continue;
+    const candidates = info
+      .filter((x) => x.convertible && !(x.color && colorsMatch(x.color, target)))
+      .map((x) => ({
+        ...x,
+        rank: x.color && !isSellingColor(x.color, selling) ? 0 : x.color ? 1 : 2,
+        roleRank: x.role === 'hero' ? 0 : x.role === 'usage' ? 1 : x.role === 'detail' ? 2 : 3,
+      }))
+      .sort((a, b) => a.rank - b.rank || (timesUsed.get(a.i) || 0) - (timesUsed.get(b.i) || 0) || a.roleRank - b.roleRank || a.i - b.i);
+    let n = 0;
+    for (const c of candidates) {
+      if (n >= perColor || jobs.length >= maxJobs) break;
+      if ((timesUsed.get(c.i) || 0) >= 2) continue;
+      jobs.push({ sourceIndex: c.i, from: c.color, to: target });
+      timesUsed.set(c.i, (timesUsed.get(c.i) || 0) + 1);
+      n++;
+    }
+    if (jobs.length >= maxJobs) break;
+  }
+  return jobs;
+}
+
+// 이미지 생성 지시에 같이 적을 색상 설명 (한국어 이름만으로는 색이 흔들려서 영어 표현을 덧붙인다)
+const COLOR_HINTS: Record<string, string> = {
+  '#0': 'jet black, deep black',
+  '#1': 'clean white',
+  '#2': 'medium light gray',
+  '#3': 'dark charcoal gray',
+  '#4': 'deep navy blue',
+  '#5': 'medium blue',
+  '#6': 'sky blue, light blue',
+  '#7': 'bright red',
+  '#8': 'deep wine burgundy red',
+  '#9': 'soft pink',
+  '#10': 'green',
+  '#11': 'olive khaki green',
+  '#12': 'mint green',
+  '#13': 'yellow',
+  '#14': 'orange',
+  '#15': 'purple violet',
+  '#16': 'brown',
+  '#17': 'beige',
+  '#18': 'gold',
+  '#19': 'silver',
+};
+export function colorHint(name: string): string {
+  return COLOR_HINTS[canonicalColor(name)] || '';
+}
+
+// 사이즈표 장면은 기존 사양표 컬럼(spec_title/spec_rows)에 그대로 저장한다 (새 컬럼/마이그레이션 없이).
+// spec_rows에는 표 전체를 JSON으로 담은 한 행을 넣고 라벨로 구분한다.
+export const SIZE_TABLE_ROW_LABEL = '__size_table__';
+
+export function encodeSizeTableRows(table: SizeTableData): { label: string; value: string }[] {
+  return [{ label: SIZE_TABLE_ROW_LABEL, value: JSON.stringify({ headers: table.headers, rows: table.rows, note: table.note || '' }) }];
+}
+
+export function decodeSizeTableRows(rows: unknown, title?: string | null): SizeTableData | null {
+  if (!Array.isArray(rows)) return null;
+  const hit = rows.find((r: any) => r && r.label === SIZE_TABLE_ROW_LABEL);
+  if (!hit) return null;
+  try {
+    const parsed = JSON.parse(String(hit.value));
+    return normalizeSizeTable({ ...parsed, title: title || '' });
+  } catch {
+    return null;
+  }
+}
+
+// 표를 편집용 글로 (parseSizeTableText의 반대) - 탭으로 칸을 나눈다
+export function sizeTableToText(table: SizeTableData): string {
+  return [table.headers, ...table.rows].map((r) => r.join('\t')).join('\n');
 }
