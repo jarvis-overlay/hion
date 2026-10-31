@@ -320,7 +320,7 @@ export async function recolorWithVerification(
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const raw = await recolorOnce(img, from, to);
-      let buf = await sharp(raw).jpeg({ quality: 92 }).toBuffer();
+      let buf: Buffer = await sharp(raw).jpeg({ quality: 92 }).toBuffer();
       buf = (await removeOverlays(buf, 'image/jpeg')).buffer;
       const check = await verifyRecolor(img, buf, to);
       if (check.ok) return { success: true, buffer: buf };

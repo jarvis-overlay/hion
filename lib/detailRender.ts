@@ -8,7 +8,7 @@
 //  - 줄바꿈은 글자 수가 아니라 실제 글자 폭으로 계산하고, 어절 단위로 끊고, 마지막 줄에 한 어절만 남지 않게 균형을 맞춘다
 //  - 핵심 단어는 **이렇게** 감싸면 포인트 컬러 + 굵게 (카피 문구에 쓰면 됨)
 //  - 여백을 넉넉히(위아래 120px), 본문은 읽기 좋은 폭(약 620px)으로 제한
-import sharp from 'sharp';
+import sharp, { type OverlayOptions } from 'sharp';
 import { createCanvas } from 'canvas';
 import { FONT_BOLD, FONT_EXTRABOLD, ensureKoreanFontRegistered } from './fonts';
 import { normalizeSizeTable, DEFAULT_SIZE_NOTE, SIZE_TABLE_LIMITS, type SizeTableData } from './detailOptions';
@@ -894,7 +894,7 @@ export async function composeBrandHeader(spec: BrandSpec, logo: Buffer | null): 
   ctx.fillRect(0, 0, W, H);
   const total = logoH + gap + height;
   const startY = Math.round((H - total) / 2);
-  const comps: sharp.OverlayOptions[] = [];
+  const comps: OverlayOptions[] = [];
   if (lg) comps.push({ input: lg.buf, left: Math.round((W - lg.w) / 2), top: startY });
   paintTiers(ctx, tiers, startY + logoH + gap, layout, W / 2);
   const base = await sharp(canvas.toBuffer('image/png')).composite(comps).png().toBuffer();
@@ -945,7 +945,7 @@ export async function composeBrandFooter(spec: BrandSpec, logo: Buffer | null): 
   ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.fillRect(margin, y - 24, innerW, 1);
 
-  const comps: sharp.OverlayOptions[] = [];
+  const comps: OverlayOptions[] = [];
   if (lg) {
     comps.push({ input: lg.buf, left: Math.round((W - lg.w) / 2), top: Math.round(y) });
     y += lg.h + 36;

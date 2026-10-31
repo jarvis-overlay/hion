@@ -570,7 +570,7 @@ ${FIDELITY_RULE}${
   if (!imagePart) {
     throw new Error('이미지 생성 결과를 받지 못했어요. 다시 시도해주세요.');
   }
-  let base = await sharp(Buffer.from(imagePart.inlineData.data, 'base64'))
+  let base: Buffer = await sharp(Buffer.from(imagePart.inlineData.data, 'base64'))
     .resize({ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, fit: 'cover' })
     .jpeg({ quality: 92 })
     .toBuffer();
