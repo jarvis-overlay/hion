@@ -23,6 +23,7 @@ import {
   type DetailSectionInput,
 } from './detailRender';
 import { DETAIL_IMAGE_WIDTH, THUMBNAIL_IMAGE_SIZE } from './imageSpecs';
+import { packageGrid } from './thumbnailPackage';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -787,4 +788,62 @@ export async function generateThumbnailImage(input: GenerateThumbnailInput): Pro
     return applyThumbnailEffect(base, input.effectPrompt.trim(), input.referenceImages || []);
   }
   return base;
+}
+
+// ---------------------------------------------------------------------------
+// 패키지(세트) 썸네일: 색상별 상품을 수량 그대로 한 장에 담는다
+// ---------------------------------------------------------------------------
+// AI에게 "두 개를 같이 그려줘"라고 시키면 개수·색상이 어긋나는 일이 있어서, 색상별 사진을 각각 누끼로
+// 따고(상품 위치 크롭 -> 글자 정리 -> 흰 배경 제거) 코드로 정확한 개수만큼 배치한다. 메인 썸네일과 같은
+// 규격(1000x1000 순백 배경, 상품이 86% 이내)이다.
+export async function composePackageCutouts(units: Buffer[]): Promise<Buffer> {
+  if (units.length === 0) throw new Error('패키지에 담을 상품이 없어요.');
+  const SIZE = THUMBNAIL_SIZE;
+  const maxDim = Math.round(SIZE * 0.86);
+  const pad = Math.round((SIZE - maxDim) / 2);
+  const { cols, rows } = packageGrid(units.length);
+  const cellW = maxDim / cols;
+  const cellH = maxDim / rows;
+
+  const placed: { input: Buffer; left: number; top: number }[] = [];
+  for (let i = 0; i < units.length; i++) {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    const inRow = r === rows - 1 ? units.length - r * cols : cols; // 마지막 줄이 모자라면 가운데로
+    const rowOffset = ((cols - inRow) * cellW) / 2;
+    // 이웃과 살짝 겹치게(세트 느낌) 칸보다 약간 넓게 그린다
+    const trimmed = await sharp(units[i]).trim().toBuffer();
+    const fitted = await sharp(trimmed)
+      .resize({ width: Math.round(cellW * 1.1), height: Math.round(cellH * 0.98), fit: 'inside' })
+      .toBuffer();
+    const m = await sharp(fitted).metadata();
+    const w = m.width || 1;
+    const h = m.height || 1;
+    placed.push({
+      input: fitted,
+      left: Math.round(pad + rowOffset + c * cellW + cellW / 2 - w / 2),
+      top: Math.round(pad + r * cellH + cellH / 2 - h / 2),
+    });
+  }
+  return sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: '#ffffff' } })
+    .composite(placed.map((p) => ({ input: p.input, left: Math.max(0, p.left), top: Math.max(0, p.top) })))
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
+export async function generatePackageThumbnail(
+  items: { productImage: { buffer: Buffer; mimeType: string }; quantity: number }[]
+): Promise<Buffer> {
+  const cutouts = await Promise.all(
+    items.map(async (it) => {
+      const cropped = await cropToProduct(it.productImage.buffer, it.productImage.mimeType);
+      const cleaned = await cleanProductPhotoForCutout(cropped, it.productImage.mimeType);
+      return removeWhiteBackground(cleaned.buffer);
+    })
+  );
+  const units: Buffer[] = [];
+  items.forEach((it, i) => {
+    for (let q = 0; q < it.quantity; q++) units.push(cutouts[i]);
+  });
+  return composePackageCutouts(units);
 }

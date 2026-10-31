@@ -411,6 +411,9 @@ function ProjectEditor({
   // 색상(묶음)마다 만들 추가 이미지 개수. 키는 색상 라벨('' = 색상 미지정/URL 입력).
   // 아직 안 건드린 색상은 기본 5장.
   const [batchCounts, setBatchCounts] = useState<Record<string, number>>({});
+  // 패키지(세트) 구성: 예) 검정 1 + 회색 1을 한 패키지로 파는 상품. 구성 그대로 한 장에 담은 메인 + 추가 이미지를 만든다.
+  const [packages, setPackages] = useState<{ id: string; items: { color: string; qty: number }[]; additional: number }[]>([]);
+  const [packageOnly, setPackageOnly] = useState(false);
   const [batchResult, setBatchResult] = useState<string | null>(null);
   const [batchNotes, setBatchNotes] = useState<string[]>([]);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
@@ -454,6 +457,15 @@ function ProjectEditor({
     batchFiles.filter((_, i) => (batchColorLabels[i] || '').trim() === key).length;
   const batchCountOf = (key: string) => Math.min(MAX_ADDITIONAL, Math.max(0, batchCounts[key] ?? DEFAULT_ADDITIONAL));
   const batchAdditionalTotal = batchColorKeys.reduce((sum, k) => sum + batchCountOf(k), 0);
+  // 패키지에 쓸 수 있는 색상 = 사진에 색상 라벨을 적은 색상
+  const packageColors = batchColorKeys.filter((k) => k);
+  const patchPackage = (id: string, fn: (p: (typeof packages)[number]) => (typeof packages)[number]) =>
+    setPackages((prev) => prev.map((p) => (p.id === id ? fn(p) : p)));
+  const validPackages = packages
+    .map((p) => ({ ...p, items: p.items.filter((i) => i.color && packageColors.includes(i.color) && i.qty >= 1) }))
+    .filter((p) => p.items.length > 0);
+  const packageUnitCount = (p: { items: { qty: number }[] }) => p.items.reduce((s, i) => s + i.qty, 0);
+  const usePackageOnly = packageOnly && validPackages.length > 0;
   const setBatchCountFor = (key: string, value: number) =>
     setBatchCounts((prev) => ({
       ...prev,
@@ -527,6 +539,8 @@ function ProjectEditor({
       fd.set('imageUrl', batchUrl.trim());
     }
     fd.set('category', batchCategory.trim());
+    fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional }))));
+    if (usePackageOnly) fd.set('packageOnly', '1');
     fd.set('additionalCount', String(DEFAULT_ADDITIONAL));
     fd.set(
       'additionalCounts',
@@ -543,6 +557,7 @@ function ProjectEditor({
       setBatchResult(
         `메인 썸네일 ${res.mainOk}/${res.mainTotal}장` +
           (res.colorGroups > 1 ? ` (색상 ${res.colorGroups}개)` : '') +
+          (res.packageTotal > 0 ? ` · 패키지 ${res.packageOk}/${res.packageTotal}개` : '') +
           ` · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료` +
           (res.styleKind === 'learned'
             ? ` (쿠팡 인기상품 ${res.styleSourceCount}개 분석${
@@ -555,6 +570,8 @@ function ProjectEditor({
       setBatchPreviews([]);
       setBatchColorLabels([]);
       setBatchCounts({});
+      setPackages([]);
+      setPackageOnly(false);
       setBatchUrl('');
     });
   }
@@ -877,6 +894,163 @@ function ProjectEditor({
               )}
             </div>
           )}
+          {batchFiles.length > 0 && (
+            <div className="grid gap-2 bg-paper rounded p-2.5">
+              <p className="text-[11px] font-semibold text-inkSoft">
+                패키지(세트) 구성 - 예: 검정 1 + 회색 1을 한 패키지로 판매
+              </p>
+              {packageColors.length === 0 ? (
+                <p className="text-[11px] text-inkSoft">
+                  패키지를 만들려면 위 사진마다 색상을 적어주세요 (예: 검정, 회색). 색상별 사진을 구성 수량대로 한 장에 담아요.
+                </p>
+              ) : (
+                <>
+                  {packages.map((p, pi) => (
+                    <div key={p.id} className="grid gap-1.5 bg-white rounded border border-paperLine p-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold">
+                          패키지 {pi + 1}{' '}
+                          <span className="font-normal text-inkSoft">
+                            ({p.items.map((i) => `${i.color || '색상 선택'} ${i.qty}`).join(' + ')})
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPackages((prev) => prev.filter((x) => x.id !== p.id))}
+                          className="text-[11px] text-inkSoft hover:text-red-700"
+                        >
+                          삭제
+                        </button>
+                      </div>
+                      {p.items.map((it, ii) => (
+                        <div key={ii} className="flex items-center gap-2 text-xs">
+                          <select
+                            value={it.color}
+                            onChange={(e) =>
+                              patchPackage(p.id, (x) => ({
+                                ...x,
+                                items: x.items.map((y, j) => (j === ii ? { ...y, color: e.target.value } : y)),
+                              }))
+                            }
+                            className="border border-paperLine bg-white px-2 py-1 text-xs flex-1 min-w-0"
+                          >
+                            <option value="">색상 선택</option>
+                            {packageColors.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              patchPackage(p.id, (x) => ({
+                                ...x,
+                                items: x.items.map((y, j) => (j === ii ? { ...y, qty: Math.max(1, y.qty - 1) } : y)),
+                              }))
+                            }
+                            disabled={it.qty <= 1}
+                            className="w-6 h-6 rounded border border-paperLine bg-white disabled:opacity-40"
+                            aria-label="수량 줄이기"
+                          >
+                            −
+                          </button>
+                          <span className="w-6 text-center font-mono">{it.qty}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              patchPackage(p.id, (x) => ({
+                                ...x,
+                                items: x.items.map((y, j) => (j === ii ? { ...y, qty: Math.min(6, y.qty + 1) } : y)),
+                              }))
+                            }
+                            disabled={it.qty >= 6 || packageUnitCount(p) >= 8}
+                            className="w-6 h-6 rounded border border-paperLine bg-white disabled:opacity-40"
+                            aria-label="수량 늘리기"
+                          >
+                            +
+                          </button>
+                          <span className="text-inkSoft">개</span>
+                          <button
+                            type="button"
+                            onClick={() => patchPackage(p.id, (x) => ({ ...x, items: x.items.filter((_, j) => j !== ii) }))}
+                            className="text-[11px] text-inkSoft hover:text-red-700"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            patchPackage(p.id, (x) => ({ ...x, items: [...x.items, { color: '', qty: 1 }] }))
+                          }
+                          disabled={packageUnitCount(p) >= 8}
+                          className="text-[11px] text-accent font-semibold disabled:opacity-40"
+                        >
+                          + 색상 추가
+                        </button>
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-inkSoft">추가 이미지</span>
+                          <button
+                            type="button"
+                            onClick={() => patchPackage(p.id, (x) => ({ ...x, additional: Math.max(0, x.additional - 1) }))}
+                            disabled={p.additional <= 0}
+                            className="w-6 h-6 rounded border border-paperLine bg-white disabled:opacity-40"
+                          >
+                            −
+                          </button>
+                          <span className="w-5 text-center font-mono">{p.additional}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              patchPackage(p.id, (x) => ({ ...x, additional: Math.min(MAX_ADDITIONAL, x.additional + 1) }))
+                            }
+                            disabled={p.additional >= MAX_ADDITIONAL}
+                            className="w-6 h-6 rounded border border-paperLine bg-white disabled:opacity-40"
+                          >
+                            +
+                          </button>
+                          <span className="text-inkSoft">장</span>
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPackages((prev) => [
+                        ...prev,
+                        {
+                          id: crypto.randomUUID(),
+                          items: packageColors.slice(0, 4).map((c) => ({ color: c, qty: 1 })),
+                          additional: 3,
+                        },
+                      ])
+                    }
+                    disabled={packages.length >= 4}
+                    className="text-xs text-accent font-semibold justify-self-start disabled:opacity-40"
+                  >
+                    + 패키지 추가 (색상별 1개씩으로 시작)
+                  </button>
+                  {packages.length > 0 && (
+                    <>
+                      <label className="flex items-center gap-2 text-[11px]">
+                        <input type="checkbox" checked={packageOnly} onChange={(e) => setPackageOnly(e.target.checked)} />
+                        패키지 이미지만 만들기 (색상별 개별 메인/추가 이미지는 만들지 않아요)
+                      </label>
+                      <p className="text-[11px] text-inkSoft">
+                        수량 1 = 그 색상 사진에 찍힌 상품 한 묶음(사진에 보이는 그대로)이에요. 패키지 메인은 색상별 사진을 누끼로
+                        따서 정해진 수량만큼 코드로 배치하므로 색상과 개수가 틀리지 않아요. 추가 이미지는 그 패키지 메인을 상품으로
+                        써서 만들어요.
+                      </p>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           <button
             onClick={handleBatchGenerate}
             disabled={(isPending && busyId === 'batch') || (batchFiles.length === 0 && !batchUrl.trim())}
@@ -884,7 +1058,9 @@ function ProjectEditor({
           >
             {isPending && busyId === 'batch'
               ? '생성 중... (시간이 좀 걸려요)'
-              : `메인 ${batchColorKeys.length}장 + 추가 ${batchAdditionalTotal}장 한 번에 생성`}
+              : usePackageOnly
+                ? `패키지 ${validPackages.length}개 (메인 ${validPackages.length}장 + 추가 ${validPackages.reduce((s, p) => s + p.additional, 0)}장) 한 번에 생성`
+                : `메인 ${batchColorKeys.length}장 + 추가 ${batchAdditionalTotal}장${validPackages.length > 0 ? ` + 패키지 ${validPackages.length}개 (메인 ${validPackages.length}장 + 추가 ${validPackages.reduce((s, p) => s + p.additional, 0)}장)` : ''} 한 번에 생성`}
           </button>
           {batchResult && <p className="text-[11px] text-accent">{batchResult}</p>}
           {batchNotes.map((n, i) => (

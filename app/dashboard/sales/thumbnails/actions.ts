@@ -12,8 +12,10 @@ import {
   fetchImageFromUrl,
   fetchTopSellerReferenceImages,
   describeProductAppearance,
+  generatePackageThumbnail,
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
+import { parsePackages, packageLabel, sameColor } from '@/lib/thumbnailPackage';
 import { generateThumbnailCopies, sanitizeThumbnailCopy } from '@/lib/ai';
 import {
   learnStyleBrief,
@@ -447,6 +449,8 @@ export async function generateThumbnailBatch(
       styleKind: 'learned' | 'default';
       styleSourceCount: number;
       styleAnalysis: StyleAnalysisInfo | null;
+      packageOk: number;
+      packageTotal: number;
       notes: string[];
     }
 > {
@@ -510,6 +514,11 @@ export async function generateThumbnailBatch(
   }
   const productName = (projectRow?.title || '').trim() || category;
   const notes: string[] = [];
+  // 패키지(세트) 구성: 예) 검정 1 + 회색 1. 색상별 개별 이미지 대신(또는 함께) 그 구성 그대로 담은 이미지를 만든다.
+  const parsedPackages = parsePackages(String(formData.get('packages') || '[]'));
+  const packages = parsedPackages.packages;
+  const packageOnly = formData.get('packageOnly') === '1' && packages.length > 0;
+  notes.push(...parsedPackages.warnings);
   let brief: StyleBrief = DEFAULT_STYLE_BRIEF;
   let styleKind: 'learned' | 'default' = 'default';
   let styleSourceCount = 0;
@@ -543,7 +552,8 @@ export async function generateThumbnailBatch(
   }
 
   // 4) 메인: 묶음(색상)마다 1장, 같은 색상의 기존 메인은 교체. 색상끼리는 2개씩 동시에.
-  const entries = Array.from(groups.entries());
+  const allGroups = Array.from(groups.entries());
+  const entries = packageOnly ? [] : allGroups;
   const mainResults = await mapLimit(entries, 2, async ([label, sources]) => {
     let del = supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
     del = label ? del.eq('color_label', label) : del.is('color_label', null);
@@ -553,6 +563,32 @@ export async function generateThumbnailBatch(
   const mainOk = mainResults.filter((r) => !('error' in r)).length;
   const mainErr = mainResults.find((r): r is { error: string } => 'error' in r);
   if (mainErr) notes.push(`메인 이미지 생성 실패: ${mainErr.error}`);
+
+  // 4-2) 패키지 메인: 색상별 사진을 누끼로 따서 정확한 수량만큼 한 장에 배치 (패키지 2개씩 동시에)
+  const packageResults = await mapLimit(packages, 2, async (p) => {
+    // 색상 이름은 올린 사진의 라벨 표기로 통일한다 (공백/대소문자만 다른 입력도 같은 색으로 봄)
+    const resolved = p.items.map((it) => ({ color: allGroups.find(([l]) => l && sameColor(l, it.color))?.[0] ?? it.color, qty: it.qty }));
+    const label = packageLabel({ items: resolved, additional: p.additional });
+    const items: { productImage: BatchSource; quantity: number }[] = [];
+    for (const it of p.items) {
+      const g = allGroups.find(([l]) => l && sameColor(l, it.color));
+      if (!g) return { label, p, error: `"${it.color}" 색상으로 표시한 사진이 없어요. 사진마다 색상을 적어주세요.` };
+      items.push({ productImage: g[1][0], quantity: it.qty });
+    }
+    try {
+      const composite = await generatePackageThumbnail(items);
+      const saved = await savePackageMain(supabase, projectId, label, composite);
+      if ('error' in saved) return { label, p, error: saved.error };
+      return { label, p, composite };
+    } catch (e: any) {
+      return { label, p, error: e?.message || String(e) };
+    }
+  });
+  const packagesOk = packageResults.filter((r): r is typeof r & { composite: Buffer } => 'composite' in r);
+  for (const r of packageResults) if ('error' in r) notes.push(`"${r.label}" 생성 실패: ${r.error}`);
+  if (packages.length > 0 && allGroups.every(([l]) => !l)) {
+    notes.push('⚠ 패키지는 사진마다 색상 라벨이 있어야 만들 수 있어요.');
+  }
 
   // 5) 추가 이미지: 색상마다 준비(문구·외형 명세)해서 한 줄로 세우고 3개씩 동시에 생성
   const { count: existingCount } = await supabase
@@ -566,7 +602,7 @@ export async function generateThumbnailBatch(
     nextIndex += countFor(label);
     return start;
   });
-  const prepared = await Promise.all(
+  const preparedEntries = await Promise.all(
     entries.map(([label, sources], i) =>
       prepareStyledGroup({
         productName,
@@ -579,6 +615,26 @@ export async function generateThumbnailBatch(
       })
     )
   );
+  // 패키지 추가 이미지: 패키지 메인(수량이 정확히 맞는 합성 이미지)을 상품 사진으로 써서 컷을 만든다
+  const packageStarts = packagesOk.map((r) => {
+    const start = nextIndex;
+    nextIndex += r.p.additional;
+    return start;
+  });
+  const preparedPackages = await Promise.all(
+    packagesOk.map((r, i) =>
+      prepareStyledGroup({
+        productName,
+        category,
+        brief,
+        sources: [{ buffer: r.composite, mimeType: 'image/jpeg' }],
+        count: r.p.additional,
+        label: r.label,
+        startIndex: packageStarts[i],
+      })
+    )
+  );
+  const prepared = [...preparedEntries, ...preparedPackages];
   if (prepared.some((p) => p.copyMissing)) notes.push('문구 생성에 실패해서 일부 이미지는 문구 없이 만들었어요.');
 
   const jobs = interleave(prepared.map((p) => p.jobs));
@@ -619,8 +675,40 @@ export async function generateThumbnailBatch(
     styleKind,
     styleSourceCount,
     styleAnalysis,
+    packageOk: packagesOk.length,
+    packageTotal: packages.length,
     notes: Array.from(new Set(notes)),
   };
+}
+
+// 패키지 메인: 이미 완성된 합성 이미지를 그대로 저장한다 (누끼 파이프라인을 다시 타지 않음).
+// 같은 패키지 구성의 기존 메인은 교체한다.
+async function savePackageMain(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  label: string,
+  composite: Buffer
+): Promise<{ error: string } | { success: true; url: string }> {
+  await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main').eq('color_label', label);
+  const imageId = randomUUID();
+  const body = await enforceThumbnailSize(composite);
+  const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
+  const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, body, { contentType: 'image/jpeg', upsert: true });
+  if (upErr) return { error: upErr.message };
+  const url = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl;
+  const { error: insertErr } = await supabase.from('thumbnail_images').insert({
+    id: imageId,
+    project_id: projectId,
+    kind: 'main',
+    position: 0,
+    input_image_url: url,
+    output_image_url: url,
+    product_position: 'center',
+    effect_prompt: null,
+    color_label: label,
+  });
+  if (insertErr) return { error: insertErr.message };
+  return { success: true, url };
 }
 
 export async function retryThumbnailImage(
