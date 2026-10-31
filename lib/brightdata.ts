@@ -246,3 +246,44 @@ export async function fetchAlibabaProducts(
   }
   return results;
 }
+
+
+// ---------------------------------------------------------------------------
+// 쿠팡 상품 페이지의 갤러리(판매자가 올린 추가 이미지) 이미지 주소
+// ---------------------------------------------------------------------------
+// 검색결과에는 대표 이미지 한 장뿐이라 "잘 팔리는 상품이 추가 이미지를 어떻게
+// 구성하는지"는 알 수 없다. 상품 페이지에는 대표 이미지 옆 작은 썸네일 줄(갤러리)이
+// 있어서 그 주소들을 뽑아 큰 크기로 바꿔 쓴다.
+//
+// 페이지 형태가 바뀌면 못 읽을 수 있어서(실제 쿠팡 페이지로 검증한 파서가 아님),
+// 못 읽으면 빈 배열을 돌려주고 호출한 쪽이 대표 이미지 분석으로 대체한다.
+export function extractCoupangGalleryImageUrls(markdown: string, limit = 8): string[] {
+  const re = /(?:https?:)?\/\/[a-z0-9.-]*coupangcdn\.com\/[^\s)\]"'<>\\]+?\.(?:jpe?g|png|webp)/gi;
+  const seen = new Set<string>();
+  const all: string[] = [];
+  for (const m of markdown.matchAll(re)) {
+    let u = m[0];
+    if (u.startsWith('//')) u = `https:${u}`;
+    // 같은 이미지가 크기만 다르게 여러 번 나오므로 "/image/" 뒤 경로로 중복을 제거한다
+    const key = u.split('/image/')[1] || u;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    all.push(u);
+  }
+
+  // 1순위: 대표 이미지 옆 갤러리 썸네일 줄(작은 크기로 나열됨). 추천/광고 상품
+  // 이미지는 더 큰 크기라서 크기로 구분한다.
+  const gallery = all.filter((u) => /\/thumbnails\/remote\/(?:48x48|50x50|60x60|92x92)ex\//.test(u));
+  // 2순위: 상품 이미지 경로의 앞쪽 이미지들
+  const fallback = all.filter((u) => /\/image\/(?:retail|vendor_inventory)\//.test(u));
+  const chosen = gallery.length >= 2 ? gallery : fallback;
+
+  return chosen
+    .slice(0, limit)
+    .map((u) => u.replace(/\/thumbnails\/remote\/\d+x\d+ex\//, '/thumbnails/remote/492x492ex/'));
+}
+
+export async function fetchCoupangGalleryImageUrls(productUrl: string, limit = 8): Promise<string[]> {
+  const md = await unlockerMarkdown(productUrl, { country: 'kr', timeoutMs: 45000, retries: 1 });
+  return extractCoupangGalleryImageUrls(md, limit);
+}

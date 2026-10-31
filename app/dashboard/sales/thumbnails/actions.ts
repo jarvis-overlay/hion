@@ -21,6 +21,7 @@ import {
   DEFAULT_STYLE_BRIEF,
   type StyleBrief,
   type StyleShot,
+  type StyleAnalysisInfo,
   type ShotCopyText,
 } from '@/lib/styledThumbnail';
 
@@ -218,7 +219,10 @@ async function getOrLearnBrief(
 // 화면의 "스타일 다시 학습" 버튼 - 저장된 걸 무시하고 지금 인기상품으로 새로 학습한다.
 export async function relearnStyle(
   projectId: string
-): Promise<{ error: string } | { success: true; sourceCount: number; warning: string | null }> {
+): Promise<
+  | { error: string }
+  | { success: true; sourceCount: number; analysis: StyleAnalysisInfo | null; warning: string | null }
+> {
   const supabase = createClient();
   const { data: project } = await supabase
     .from('thumbnail_projects')
@@ -232,6 +236,7 @@ export async function relearnStyle(
     return {
       success: true,
       sourceCount: r.sourceCount,
+      analysis: r.brief.analysis ?? null,
       warning: r.saveWarning
         ? `스타일은 분석했지만 저장하지 못했어요(${r.saveWarning}). supabase/thumbnail_style_learning.sql을 실행해주세요.`
         : null,
@@ -381,11 +386,13 @@ async function prepareStyledGroup(args: {
       productName: args.productName,
       category: args.category,
       sellingPoints: brief.sellingPoints,
-      shots: uniqueShots.map((s) => ({ id: s.id, title: s.title })),
+      shots: uniqueShots.map((s) => ({ id: s.id, title: s.title, layout: s.layout || 'caption' })),
     });
     for (const c of copies) {
       const shot = uniqueShots.find((s) => s.id === c.shotId);
-      if (shot) copyByShot.set(shot.id, sanitizeThumbnailCopy(c, shot.title));
+      // 헤드라인이 비었거나 금지어면 문구 없는 이미지로 둔다. 컷 이름(내부용)을 대신 쓰면
+      // "위에서 내려다본 컷" 같은 말이 고객용 이미지에 그대로 찍힌다.
+      if (shot) copyByShot.set(shot.id, sanitizeThumbnailCopy(c, ''));
     }
   } catch (e) {
     console.error('[thumbnails] 컷 문구 생성 실패:', e);
@@ -435,9 +442,10 @@ export async function generateThumbnailBatch(
       additionalOk: number;
       additionalTotal: number;
       colorGroups: number;
-      // 'learned' = 쿠팡 인기상품 분석 스타일, 'default' = 범용 기본 구성
+      // 'learned' = 쿠팡 인기상품 분석 스타일, 'default' = 범용 기본 구성(쿠팡 참고 없음)
       styleKind: 'learned' | 'default';
       styleSourceCount: number;
+      styleAnalysis: StyleAnalysisInfo | null;
       notes: string[];
     }
 > {
@@ -492,28 +500,45 @@ export async function generateThumbnailBatch(
     .select('title, category')
     .eq('id', projectId)
     .maybeSingle();
-  const category = (projectRow?.category || '').trim();
+  // 화면의 일괄 생성 박스에서 카테고리를 같이 보내면 그 값을 쓰고 프로젝트에도 저장한다
+  // (예전엔 화면 위쪽의 작은 링크로만 설정할 수 있어서 비워둔 채 만드는 일이 많았음).
+  const submittedCategory = formData.has('category') ? String(formData.get('category') || '').trim() : null;
+  const category = (submittedCategory ?? projectRow?.category ?? '').trim();
+  if (submittedCategory !== null && submittedCategory !== (projectRow?.category || '').trim()) {
+    await supabase.from('thumbnail_projects').update({ category: submittedCategory || null }).eq('id', projectId);
+  }
   const productName = (projectRow?.title || '').trim() || category;
   const notes: string[] = [];
   let brief: StyleBrief = DEFAULT_STYLE_BRIEF;
   let styleKind: 'learned' | 'default' = 'default';
   let styleSourceCount = 0;
+  let styleAnalysis: StyleAnalysisInfo | null = null;
   if (category) {
     try {
       const learned = await getOrLearnBrief(supabase, category);
       brief = learned.brief;
       styleKind = 'learned';
       styleSourceCount = learned.sourceCount;
+      styleAnalysis = learned.brief.analysis ?? null;
       if (learned.saveWarning) {
         notes.push(
           `학습한 스타일을 저장하지 못했어요(${learned.saveWarning}). supabase/thumbnail_style_learning.sql을 실행하면 다음부터 재사용돼요.`
         );
       }
     } catch (e: any) {
-      notes.push(`인기상품 스타일 학습에 실패해서 기본 구성으로 만들었어요: ${e?.message || String(e)}`);
+      notes.push(
+        `⚠ 쿠팡 인기상품을 참고하지 못했어요 - 인기상품 스타일 학습에 실패해서 범용 기본 구성으로 만들었어요: ${e?.message || String(e)}`
+      );
     }
   } else {
-    notes.push('카테고리를 설정하면 쿠팡 인기상품 스타일로 만들어요. 이번에는 기본 구성(스튜디오·디테일·연출 컷 등)으로 만들었어요.');
+    notes.push(
+      '⚠ 쿠팡 인기상품을 참고하지 않았어요 - 카테고리(쿠팡 검색어)가 비어 있어서 범용 기본 구성으로 만들었어요. 카테고리를 입력하면 인기상품을 분석해서 만들어요.'
+    );
+  }
+  if (styleKind === 'learned' && styleAnalysis && styleAnalysis.galleryImages === 0) {
+    notes.push(
+      '인기상품의 추가 이미지(상품 페이지 갤러리)는 읽지 못해서 검색결과 대표 이미지 기준으로 분석했어요. 참고 수준이 낮을 수 있어요.'
+    );
   }
 
   // 4) 메인: 묶음(색상)마다 1장, 같은 색상의 기존 메인은 교체. 색상끼리는 2개씩 동시에.
@@ -592,6 +617,7 @@ export async function generateThumbnailBatch(
     colorGroups: entries.length,
     styleKind,
     styleSourceCount,
+    styleAnalysis,
     notes: Array.from(new Set(notes)),
   };
 }
@@ -790,4 +816,25 @@ export async function deleteThumbnailImage(id: string) {
   const { error } = await supabase.from('thumbnail_images').delete().eq('id', id);
   if (error) console.error('[thumbnails] deleteThumbnailImage 실패:', error.message);
   revalidatePath(PATH);
+}
+
+// 선택한 이미지를 한 번에 삭제 (화면에서 체크한 카드들). 한 번에 많이 지워도 되지만
+// 실수로 다른 프로젝트 이미지가 섞여 들어오는 걸 막기 위해 projectId를 같이 받아
+// 그 프로젝트 안의 이미지만 지운다.
+export async function deleteThumbnailImages(
+  projectId: string,
+  ids: string[]
+): Promise<{ error: string } | { success: true; deleted: number }> {
+  const clean = Array.from(new Set((ids || []).filter((x) => typeof x === 'string' && x)));
+  if (clean.length === 0) return { error: '삭제할 이미지를 선택해주세요.' };
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('thumbnail_images')
+    .delete()
+    .eq('project_id', projectId)
+    .in('id', clean)
+    .select('id');
+  if (error) return { error: error.message };
+  revalidatePath(PATH);
+  return { success: true, deleted: (data || []).length };
 }

@@ -672,33 +672,56 @@ ${chineseText}
 
 
 // ---------------------------------------------------------------------------
-// 썸네일 추가 이미지용 한국어 문구 (헤드라인 + 보조문구)
+// 썸네일 추가 이미지용 한국어 문구
 // ---------------------------------------------------------------------------
 // 이미지 속 글자는 AI가 그리면 깨지므로, 여기서는 문구만 만들고 실제 글자는
 // 서버에서 폰트로 합성한다 (lib/styledThumbnail.ts). 쿠팡 광고/표시 심의에
 // 걸리기 쉬운 최상급·의학적 표현과, 상품명에 근거 없는 소재/수치 단정은
 // 막는다 - AI가 사실과 다른 스펙을 지어내는 게 가장 위험하기 때문이다.
+//
+// 컷의 레이아웃에 따라 필요한 문구가 다르다:
+//   caption: 헤드라인 + 보조문구 한 줄
+//   bullets: 헤드라인 + 짧은 포인트 3개 (체크 목록)
+//   badge:   헤드라인 + 모서리 배지(6자 이내)
+export type CopyLayout = 'caption' | 'bullets' | 'badge';
+
 export interface ThumbnailCopy {
   shotId: string;
   headline: string;
   sub: string;
+  points: string[];
+  badge: string;
 }
 
 const BANNED_COPY = /(최고|1\s*등|1\s*위|최저가|국내\s*유일|세계\s*최초|완벽|100\s*%|무조건|보장|치료|예방|의학|특허|인증)/;
 
-export function sanitizeThumbnailCopy(c: Partial<ThumbnailCopy>, fallbackHeadline: string): { headline: string; sub: string } {
-  let headline = String(c.headline || '').replace(/\s+/g, ' ').trim().slice(0, 18);
-  let sub = String(c.sub || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+const clean = (v: unknown, max: number) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+// 금지어가 들어간 항목은 고치지 않고 버린다. 헤드라인이 비거나 금지어면 fallbackHeadline을
+// 쓰는데, 내부용 컷 이름 같은 걸 넣으면 고객에게 그대로 노출되므로 빈 문자열을 넘기고
+// (= 문구 없는 이미지) 쓰는 쪽이 그렇게 처리한다.
+export function sanitizeThumbnailCopy(
+  c: Partial<ThumbnailCopy>,
+  fallbackHeadline: string
+): { headline: string; sub: string; points: string[]; badge: string } {
+  let headline = clean(c.headline, 18);
   if (!headline || BANNED_COPY.test(headline)) headline = fallbackHeadline;
+  let sub = clean(c.sub, 30);
   if (BANNED_COPY.test(sub)) sub = '';
-  return { headline, sub };
+  const points = (Array.isArray(c.points) ? c.points : [])
+    .map((p) => clean(p, 16))
+    .filter((p) => p && !BANNED_COPY.test(p))
+    .slice(0, 3);
+  let badge = clean(c.badge, 8);
+  if (BANNED_COPY.test(badge)) badge = '';
+  return { headline, sub, points, badge };
 }
 
 export async function generateThumbnailCopies(input: {
   productName: string;
   category: string;
   sellingPoints: string[];
-  shots: { id: string; title: string }[];
+  shots: { id: string; title: string; layout: CopyLayout }[];
 }): Promise<ThumbnailCopy[]> {
   if (input.shots.length === 0) return [];
   const prompt = `쿠팡에 올릴 상품의 "추가 이미지" 위에 얹을 한국어 문구를 컷마다 만들어주세요.
@@ -707,18 +730,23 @@ export async function generateThumbnailCopies(input: {
 카테고리: ${input.category}
 이 카테고리 인기상품이 공통으로 강조하는 키워드(참고용, 이 상품에 해당하는지는 확인 안 됨): ${input.sellingPoints.join(', ') || '(없음)'}
 
-컷 목록:
-${input.shots.map((s) => `- ${s.id}: ${s.title}`).join('\n')}
+컷 목록 (레이아웃별로 필요한 항목이 다릅니다):
+${input.shots.map((s) => `- ${s.id}: ${s.title} [레이아웃: ${s.layout}]`).join('\n')}
 
-규칙:
-- headline은 12자 이내의 짧은 한국어, sub는 22자 이내의 보조 문구(없어도 됨, 빈 문자열 가능).
+레이아웃별 작성 규칙:
+- caption: headline(12자 이내)과 sub(22자 이내 보조 문구, 비워도 됨)
+- bullets: headline(12자 이내)과 points(짧은 장점 문구 3개, 각 14자 이내)
+- badge: headline(12자 이내), sub(22자 이내, 비워도 됨), badge(6자 이내의 짧은 강조 단어)
+
+공통 규칙:
 - 컷의 성격에 맞는 문구를 쓰세요 (예: 디테일 컷이면 마감/촉감, 정리 컷이면 보관/사용 편의).
 - **상품명에 근거가 없는 소재·기능·수치·인증은 절대 쓰지 마세요.** (예: 상품명에 "면"이 없는데 "순면", "냉감"이 없는데 "냉감", 임의의 %, 인증 문구 금지) 참고용 키워드도 상품명이나 컷 성격에서 확실히 뒷받침될 때만 쓰세요. 애매하면 "편안한 착용감", "깔끔한 마감"처럼 누구에게나 맞는 일반적인 표현을 쓰세요.
 - 최상급·과장·의학적 표현 금지: 최고, 1등, 1위, 최저가, 국내유일, 완벽, 100%, 무조건, 보장, 치료, 예방, 특허, 인증.
-- 컷마다 서로 다른 문구여야 합니다.
+- 컷마다 서로 다른 문구여야 합니다. 같은 표현("정교한 마감" 등)을 반복하지 마세요.
+- 해당 레이아웃에 쓰지 않는 항목은 빈 값("" 또는 [])으로 두세요.
 
 JSON 배열로만 응답하세요:
-[{"shotId":"컷 id 그대로","headline":"...","sub":"..."}]`;
+[{"shotId":"컷 id 그대로","headline":"...","sub":"...","points":["..."],"badge":"..."}]`;
 
   const text = await callClaude(prompt);
   const arr = parseJsonArray(text);
@@ -728,5 +756,7 @@ JSON 배열로만 응답하세요:
       shotId: String(x.shotId),
       headline: String(x.headline || ''),
       sub: String(x.sub || ''),
+      points: Array.isArray(x.points) ? x.points.map((p: unknown) => String(p ?? '')) : [],
+      badge: String(x.badge || ''),
     }));
 }

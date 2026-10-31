@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import {
   createProject,
@@ -13,6 +13,7 @@ import {
   editThumbnailImage,
   duplicateThumbnailStrip,
   deleteThumbnailImage,
+  deleteThumbnailImages,
 } from '@/app/dashboard/sales/thumbnails/actions';
 
 // 썸네일은 상세페이지 섹션과 달리 그 자체가 결과물이라 "좀 크게 보여야
@@ -156,12 +157,17 @@ function ImageCard({
   onRetry,
   onDelete,
   busy,
+  selected = false,
+  onToggleSelect,
 }: {
   img: any;
   size: string;
   onRetry: () => void;
   onDelete: () => void;
   busy: boolean;
+  // 여러 장을 골라 한 번에 지우기 위한 선택 상태 (안 넘기면 체크박스 없음)
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   // 이미 나온 결과를 처음부터 다시 만들지 않고, 프롬프트로 부분 수정만
   // 하고 싶다는 요청으로 추가함 - 수정도 같은 이미지에 덮어써서 생성/
@@ -213,7 +219,25 @@ function ImageCard({
   }
 
   return (
-    <div className="card p-2 grid gap-1.5 justify-items-center">
+    <div
+      className={`card p-2 grid gap-1.5 justify-items-center relative ${
+        selected ? '!outline-2 !outline-accent bg-accentBg/40' : ''
+      }`}
+    >
+      {onToggleSelect && (
+        <label
+          className="absolute top-3 left-3 z-10 w-7 h-7 rounded-md bg-white/90 border border-paperLine shadow-sm flex items-center justify-center cursor-pointer"
+          title="선택 (여러 장 한 번에 삭제)"
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="w-4 h-4 accent-[#F5285C]"
+            aria-label="이 이미지 선택"
+          />
+        </label>
+      )}
       {img.output_image_url ? (
         <div className={`${size} relative`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -388,7 +412,35 @@ function ProjectEditor({
   // 아직 안 건드린 색상은 기본 5장.
   const [batchCounts, setBatchCounts] = useState<Record<string, number>>({});
   const [batchResult, setBatchResult] = useState<string | null>(null);
+  const [batchNotes, setBatchNotes] = useState<string[]>([]);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
+
+  // 일괄 생성 박스의 카테고리(쿠팡 검색어) - 이걸로 인기상품을 분석해서 참고한다.
+  // 위쪽 카테고리 설정과 같은 값이라, 거기서 바꾸면 여기도 따라가게 동기화한다.
+  const [batchCategory, setBatchCategory] = useState(project.category || '');
+  useEffect(() => {
+    setBatchCategory(project.category || '');
+  }, [project.category]);
+
+  // 여러 장 선택해서 한 번에 삭제
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteMsg, setDeleteMsg] = useState<string | null>(null);
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const selectMany = (ids: string[], on: boolean) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
 
   const DEFAULT_ADDITIONAL = 5;
   const MAX_ADDITIONAL = 8;
@@ -462,6 +514,7 @@ function ProjectEditor({
     if (batchFiles.length === 0 && !batchUrl.trim()) return;
     setError(null);
     setBatchResult(null);
+    setBatchNotes([]);
     const fd = new FormData();
     if (batchFiles.length > 0) {
       // 색상 라벨이 같은 사진끼리 서버에서 그룹으로 묶여서, 같은 라벨
@@ -473,6 +526,7 @@ function ProjectEditor({
     } else {
       fd.set('imageUrl', batchUrl.trim());
     }
+    fd.set('category', batchCategory.trim());
     fd.set('additionalCount', String(DEFAULT_ADDITIONAL));
     fd.set(
       'additionalCounts',
@@ -491,10 +545,12 @@ function ProjectEditor({
           (res.colorGroups > 1 ? ` (색상 ${res.colorGroups}개)` : '') +
           ` · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료` +
           (res.styleKind === 'learned'
-            ? ` (쿠팡 인기상품 ${res.styleSourceCount}개 분석 스타일 적용)`
-            : ' (기본 구성)') +
-          (res.notes.length ? `\n${res.notes.join('\n')}` : '')
+            ? ` (쿠팡 인기상품 ${res.styleSourceCount}개 분석${
+                res.styleAnalysis ? ` · 갤러리 이미지 ${res.styleAnalysis.galleryImages}장` : ''
+              } 스타일 적용)`
+            : ' (범용 기본 구성 - 쿠팡 참고 없음)')
       );
+      setBatchNotes(res.notes);
       setBatchFiles([]);
       setBatchPreviews([]);
       setBatchColorLabels([]);
@@ -515,8 +571,36 @@ function ProjectEditor({
         return;
       }
       setStyleMsg(
-        `쿠팡 인기상품 ${res.sourceCount}개를 분석해서 스타일을 새로 학습했어요.` + (res.warning ? ` ${res.warning}` : '')
+        `쿠팡 인기상품 ${res.sourceCount}개를 분석해서 스타일을 새로 학습했어요.` +
+          (res.analysis
+            ? res.analysis.galleryImages > 0
+              ? ` (상품 ${res.analysis.galleryProducts}개의 추가 이미지 ${res.analysis.galleryImages}장 포함)`
+              : ' 다만 상품 페이지의 추가 이미지는 읽지 못해서 대표 이미지만 분석했어요.'
+            : '') +
+          (res.warning ? ` ${res.warning}` : '')
       );
+    });
+  }
+
+  // 존재하지 않게 된 이미지는 선택에서 빼서 개수가 어긋나지 않게 한다
+  const existingIds = new Set<string>((project.thumbnail_images || []).map((i: any) => i.id));
+  const selectedList = Array.from(selectedIds).filter((id) => existingIds.has(id));
+
+  function handleDeleteSelected() {
+    if (selectedList.length === 0) return;
+    if (!window.confirm(`선택한 이미지 ${selectedList.length}장을 삭제할까요? 되돌릴 수 없어요.`)) return;
+    setError(null);
+    setDeleteMsg(null);
+    setBusyId('bulk-delete');
+    startTransition(async () => {
+      const res = await deleteThumbnailImages(project.id, selectedList);
+      setBusyId(null);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '삭제에 실패했어요. 다시 시도해주세요.');
+        return;
+      }
+      setSelectedIds(new Set());
+      setDeleteMsg(`${res.deleted}장을 삭제했어요.`);
     });
   }
 
@@ -596,11 +680,24 @@ function ProjectEditor({
           </div>
           {styleBrief?.brief ? (
             <>
+              {styleBrief.brief.analysis ? (
+                <p className={styleBrief.brief.analysis.galleryImages > 0 ? 'text-profit' : 'text-warn'}>
+                  {styleBrief.brief.analysis.galleryImages > 0
+                    ? `분석 범위: 대표 이미지 ${styleBrief.brief.analysis.mainImages}장 + 상품 ${styleBrief.brief.analysis.galleryProducts}개의 추가 이미지(갤러리) ${styleBrief.brief.analysis.galleryImages}장`
+                    : `분석 범위: 대표 이미지 ${styleBrief.brief.analysis.mainImages}장만 (상품 페이지의 추가 이미지는 읽지 못했어요)`}
+                </p>
+              ) : (
+                <p className="text-warn">
+                  예전 방식(대표 이미지만 분석)으로 학습된 스타일이에요. "스타일 다시 학습"을 누르면 추가 이미지까지
+                  분석해요.
+                </p>
+              )}
               <p className="text-inkSoft leading-relaxed">{styleBrief.brief.summary}</p>
               <div className="flex flex-wrap gap-1.5">
                 {(styleBrief.brief.shots || []).map((s: any) => (
                   <span key={s.id} className="px-2 py-0.5 rounded-full bg-white border border-paperLine text-[11px]">
                     {s.title}
+                    {s.layout === 'bullets' ? ' · 목록형' : s.layout === 'badge' ? ' · 배지형' : ''}
                   </span>
                 ))}
               </div>
@@ -626,6 +723,25 @@ function ProjectEditor({
             사진이 그 색상의 메인). 추가 이미지 개수는 아래에서 색상별로 정할 수 있어요. 문구는 AI가 만든
             초안이니 사실과 다른 내용이 없는지 확인하세요.
           </p>
+        </div>
+
+        <div className="grid gap-1 max-w-md">
+          <label className="text-[11px] font-semibold text-inkSoft">
+            쿠팡 검색어(카테고리) - 이 검색어의 인기상품을 분석해서 참고해요
+          </label>
+          <input
+            value={batchCategory}
+            onChange={(e) => setBatchCategory(e.target.value)}
+            placeholder="예: 남성 팬티, 휴대용 선풍기"
+            className={`border bg-white px-2 py-1.5 text-xs w-full ${
+              batchCategory.trim() ? 'border-paperLine' : 'border-warn'
+            }`}
+          />
+          {!batchCategory.trim() && (
+            <p className="text-[11px] text-warn">
+              비워두면 쿠팡 인기상품을 참고하지 않고 범용 기본 구성으로 만들어요.
+            </p>
+          )}
         </div>
 
         {batchFiles.length === 0 ? (
@@ -770,7 +886,17 @@ function ProjectEditor({
               ? '생성 중... (시간이 좀 걸려요)'
               : `메인 ${batchColorKeys.length}장 + 추가 ${batchAdditionalTotal}장 한 번에 생성`}
           </button>
-          {batchResult && <p className="text-[11px] text-accent whitespace-pre-line">{batchResult}</p>}
+          {batchResult && <p className="text-[11px] text-accent">{batchResult}</p>}
+          {batchNotes.map((n, i) => (
+            <p
+              key={i}
+              className={`text-[11px] rounded px-2 py-1.5 ${
+                n.startsWith('⚠') ? 'bg-warnBg text-warn font-semibold' : 'bg-paper text-inkSoft'
+              }`}
+            >
+              {n}
+            </p>
+          ))}
         </div>
       </section>
 
@@ -791,6 +917,8 @@ function ProjectEditor({
                 onRetry={() => handleRetry(mainImages[0].id)}
                 onDelete={() => startTransition(() => deleteThumbnailImage(mainImages[0].id))}
                 busy={isPending && busyId === mainImages[0].id}
+                selected={selectedIds.has(mainImages[0].id)}
+                onToggleSelect={() => toggleSelect(mainImages[0].id)}
               />
               <div className="text-xs text-inkSoft self-center">
                 새 사진을 올리면 지금 메인 썸네일을 교체해요.
@@ -828,6 +956,8 @@ function ProjectEditor({
                       onRetry={() => handleRetry(groupMain.id)}
                       onDelete={() => startTransition(() => deleteThumbnailImage(groupMain.id))}
                       busy={isPending && busyId === groupMain.id}
+                      selected={selectedIds.has(groupMain.id)}
+                      onToggleSelect={() => toggleSelect(groupMain.id)}
                     />
                   ) : (
                     <p className="text-xs text-inkSoft">이 색상의 메인이 아직 없어요.</p>
@@ -840,9 +970,30 @@ function ProjectEditor({
       </section>
 
       <section className="grid gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">추가 이미지</h3>
-          <p className="text-[11px] text-inkSoft">상세 갤러리에 들어가는 나머지 이미지예요. 여러 장 추가할 수 있어요.</p>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="text-sm font-semibold">추가 이미지</h3>
+            <p className="text-[11px] text-inkSoft">
+              상세 갤러리에 들어가는 나머지 이미지예요. 여러 장 추가할 수 있고, 카드 왼쪽 위 체크박스로 골라서 한
+              번에 삭제할 수 있어요.
+            </p>
+          </div>
+          {additionalImages.length > 0 && (
+            <div className="flex gap-3 text-[11px]">
+              <button
+                type="button"
+                onClick={() => selectMany(additionalImages.map((i) => i.id), true)}
+                className="text-accent font-semibold"
+              >
+                추가 이미지 전체 선택
+              </button>
+              {selectedList.length > 0 && (
+                <button type="button" onClick={() => setSelectedIds(new Set())} className="text-inkSoft hover:text-ink">
+                  선택 해제
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {colorGroupKeys.length <= 1
@@ -856,6 +1007,8 @@ function ProjectEditor({
                     onRetry={() => handleRetry(img.id)}
                     onDelete={() => startTransition(() => deleteThumbnailImage(img.id))}
                     busy={isPending && busyId === img.id}
+                    selected={selectedIds.has(img.id)}
+                    onToggleSelect={() => toggleSelect(img.id)}
                   />
                 ))}
               </div>
@@ -865,7 +1018,19 @@ function ProjectEditor({
               if (groupAdditional.length === 0) return null;
               return (
                 <div key={colorKey || '__default__'} className="grid gap-1">
-                  <p className="text-xs font-semibold text-accent">색상: {colorKey || '기본'}</p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs font-semibold text-accent">색상: {colorKey || '기본'}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ids = groupAdditional.map((i) => i.id);
+                        selectMany(ids, !ids.every((id) => selectedIds.has(id)));
+                      }}
+                      className="text-[11px] text-inkSoft hover:text-ink underline"
+                    >
+                      {groupAdditional.every((i) => selectedIds.has(i.id)) ? '이 색상 선택 해제' : '이 색상 전체 선택'}
+                    </button>
+                  </div>
                   <div className="flex flex-wrap gap-3">
                     {groupAdditional.map((img) => (
                       <ImageCard
@@ -875,6 +1040,8 @@ function ProjectEditor({
                         onRetry={() => handleRetry(img.id)}
                         onDelete={() => startTransition(() => deleteThumbnailImage(img.id))}
                         busy={isPending && busyId === img.id}
+                        selected={selectedIds.has(img.id)}
+                        onToggleSelect={() => toggleSelect(img.id)}
                       />
                     ))}
                   </div>
@@ -904,7 +1071,30 @@ function ProjectEditor({
         </div>
       </section>
 
+      {deleteMsg && <p className="text-xs text-profit bg-profitBg rounded-md px-3 py-2">{deleteMsg}</p>}
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{error}</p>}
+
+      {/* 선택한 이미지가 있으면 화면 아래에 떠서 어디서든 한 번에 삭제할 수 있게 한다 */}
+      {selectedList.length > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full bg-ink text-white px-5 py-2.5 shadow-xl text-xs">
+          <span className="font-semibold">{selectedList.length}장 선택됨</span>
+          <button
+            type="button"
+            onClick={handleDeleteSelected}
+            disabled={isPending && busyId === 'bulk-delete'}
+            className="rounded-full bg-accent px-3 py-1 font-semibold disabled:opacity-50"
+          >
+            {isPending && busyId === 'bulk-delete' ? '삭제 중...' : '선택 삭제'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="text-white/70 hover:text-white"
+          >
+            해제
+          </button>
+        </div>
+      )}
     </div>
   );
 }
