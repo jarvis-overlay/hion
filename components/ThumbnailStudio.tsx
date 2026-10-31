@@ -414,6 +414,7 @@ function ProjectEditor({
   // 패키지(세트) 구성: 예) 검정 1 + 회색 1을 한 패키지로 파는 상품. 구성 그대로 한 장에 담은 메인 + 추가 이미지를 만든다.
   const [packages, setPackages] = useState<{ id: string; items: { color: string; qty: number }[]; additional: number }[]>([]);
   const [packageOnly, setPackageOnly] = useState(false);
+  const [productNote, setProductNote] = useState('');
   const [batchResult, setBatchResult] = useState<string | null>(null);
   const [batchNotes, setBatchNotes] = useState<string[]>([]);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
@@ -539,6 +540,7 @@ function ProjectEditor({
       fd.set('imageUrl', batchUrl.trim());
     }
     fd.set('category', batchCategory.trim());
+    fd.set('productNote', productNote.trim());
     fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional }))));
     if (usePackageOnly) fd.set('packageOnly', '1');
     fd.set('additionalCount', String(DEFAULT_ADDITIONAL));
@@ -893,6 +895,18 @@ function ProjectEditor({
                 </p>
               )}
             </div>
+          )}
+          {(batchFiles.length > 0 || batchUrl.trim()) && (
+            <label className="grid gap-1 text-[11px] font-semibold text-inkSoft">
+              상품 특징 메모 (AI가 꼭 지킬 내용 - 추가 이미지 전체에 적용)
+              <textarea
+                value={productNote}
+                onChange={(e) => setProductNote(e.target.value)}
+                rows={2}
+                placeholder="예: 허벅지까지 올라오는 롱양말(니하이)이에요. 스타킹·타이츠·발목양말처럼 그리지 마세요."
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs font-normal text-ink"
+              />
+            </label>
           )}
           {batchFiles.length > 0 && (
             <div className="grid gap-2 bg-paper rounded p-2.5">

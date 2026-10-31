@@ -183,6 +183,7 @@ interface StyledSpec {
   shot: StyleShot;
   copy: ShotCopyText | null;
   brief: Pick<StyleBrief, 'background' | 'props' | 'lighting'>;
+  note?: string; // 상품 특징 메모/수정 요청 (다시 만들 때도 같이 적용)
 }
 
 async function getOrLearnBrief(
@@ -279,6 +280,7 @@ async function runStyledGeneration(
       shot: spec.shot,
       copy: spec.copy,
       appearanceSpec,
+      note: spec.note,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
@@ -376,6 +378,7 @@ async function prepareStyledGroup(args: {
   count: number;
   label: string | null;
   startIndex: number;
+  note?: string;
 }): Promise<{ jobs: StyledJob[]; copyMissing: boolean }> {
   const { brief, sources, count } = args;
   if (count <= 0) return { jobs: [], copyMissing: false };
@@ -413,6 +416,7 @@ async function prepareStyledGroup(args: {
       shot,
       copy: copyByShot.get(shot.id) ?? null,
       brief: { background: brief.background, props: brief.props, lighting: brief.lighting },
+      ...(args.note ? { note: args.note } : {}),
     },
   }));
   return { jobs, copyMissing: copyByShot.size === 0 };
@@ -513,6 +517,7 @@ export async function generateThumbnailBatch(
     await supabase.from('thumbnail_projects').update({ category: submittedCategory || null }).eq('id', projectId);
   }
   const productName = (projectRow?.title || '').trim() || category;
+  const productNote = String(formData.get('productNote') || '').trim().slice(0, 400);
   const notes: string[] = [];
   // 패키지(세트) 구성: 예) 검정 1 + 회색 1. 색상별 개별 이미지 대신(또는 함께) 그 구성 그대로 담은 이미지를 만든다.
   const parsedPackages = parsePackages(String(formData.get('packages') || '[]'));
@@ -612,6 +617,7 @@ export async function generateThumbnailBatch(
         count: countFor(label),
         label,
         startIndex: startIndexes[i],
+        note: productNote,
       })
     )
   );
@@ -631,6 +637,7 @@ export async function generateThumbnailBatch(
         count: r.p.additional,
         label: r.label,
         startIndex: packageStarts[i],
+        note: productNote,
       })
     )
   );
@@ -814,6 +821,22 @@ export async function editThumbnailImage(
   const { data: img, error } = await supabase.from('thumbnail_images').select('*').eq('id', imageId).single();
   if (error || !img) return { error: error?.message || '이미지를 찾을 수 없어요.' };
   if (!img.output_image_url) return { error: '먼저 썸네일이 생성된 후에 수정할 수 있어요.' };
+
+  // 스타일 적용 이미지(문구 합성 포함)는 완성본을 AI로 고치지 않고, 요청을 반영해 배경 사진부터 같은 컷/문구로 다시 만든다
+  // (완성본 편집은 AI가 문구를 건드리거나 결과를 못 돌려주는 일이 잦고, 상품 외형 보존 규칙도 안 탄다).
+  if (img.style_spec?.shot && img.input_image_url) {
+    try {
+      const src = await fetchImageFromUrl(img.input_image_url);
+      const spec = img.style_spec as StyledSpec;
+      const nextSpec: StyledSpec = { ...spec, note: [spec.note, prompt].filter(Boolean).join('\n') };
+      await supabase.from('thumbnail_images').update({ style_spec: nextSpec }).eq('id', imageId);
+      const r = await runStyledGeneration(supabase, imageId, img.project_id, src, nextSpec);
+      if ('error' in r) return r;
+      return { success: true, url: r.url };
+    } catch (e: any) {
+      return { error: e?.message || String(e) };
+    }
+  }
 
   try {
     const res = await fetch(img.output_image_url);

@@ -526,15 +526,20 @@ export async function generateStyledAdditionalImage(input: {
   shot: StyleShot;
   copy: ShotCopyText | null;
   appearanceSpec?: string | null;
+  note?: string | null; // 사용자가 적은 상품 특징/수정 요청 - 최우선으로 지킨다
 }): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
   const spec =
     input.appearanceSpec === undefined ? await describeProductAppearance(input.productImage) : input.appearanceSpec;
   const layout: ShotLayout = input.shot.layout || 'caption';
 
+  const note = (input.note || '').trim();
   const instruction = `${NO_TEXT_RULE}
 
-${FIDELITY_RULE}${
+${FIDELITY_RULE}${note ? `
+
+[사용자 요청 - 다른 모든 지시보다 우선합니다. 상품의 길이·모양 같은 외형 요청은 첨부된 상품 사진 속 실제 모습과 맞추세요]
+${note}` : ''}${
     spec ? `\n\n[상품 외형 명세 - 결과물 속 상품은 반드시 이 명세와 일치해야 합니다]\n${spec}` : ''
   }
 
