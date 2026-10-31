@@ -292,7 +292,7 @@ async function runStyledGeneration(
       upsert: true,
     });
     if (upErr) throw new Error(upErr.message);
-    const outputUrl = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl;
+    const outputUrl = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl + `?v=${Date.now()}`;
 
     const { error: updateErr } = await supabase
       .from('thumbnail_images')
@@ -796,7 +796,7 @@ async function runGeneration(
       upsert: true,
     });
     if (upErr) throw new Error(upErr.message);
-    const outputUrl = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl;
+    const outputUrl = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl + `?v=${Date.now()}`;
 
     const { error: updateErr } = await supabase
       .from('thumbnail_images')
@@ -837,7 +837,7 @@ export async function editThumbnailImage(
       const src = await fetchImageFromUrl(img.input_image_url);
       const spec = img.style_spec as StyledSpec;
       const nextSpec: StyledSpec = { ...spec, note: [spec.note, prompt].filter(Boolean).join('\n') };
-      await supabase.from('thumbnail_images').update({ style_spec: nextSpec }).eq('id', imageId);
+      await supabase.from('thumbnail_images').update({ style_spec: nextSpec, effect_prompt: prompt }).eq('id', imageId);
       const r = await runStyledGeneration(supabase, imageId, img.project_id, src, nextSpec);
       if ('error' in r) return r;
       return { success: true, url: r.url };
