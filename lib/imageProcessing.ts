@@ -860,3 +860,15 @@ export async function generatePackageThumbnail(
   });
   return composePackageCutouts(units);
 }
+
+// 상품 사진에서 상품만 따낸 투명 배경 PNG. ready=true면 이미 흰 배경에 상품만 있는 이미지(패키지 합성 등)라
+// 크롭/글자 정리(AI) 없이 흰 배경만 제거한다.
+export async function cutoutProductPhoto(
+  productImage: { buffer: Buffer; mimeType: string },
+  opts: { ready?: boolean } = {}
+): Promise<Buffer> {
+  if (opts.ready) return sharp(await removeWhiteBackground(productImage.buffer)).trim().toBuffer();
+  const cropped = await cropToProduct(productImage.buffer, productImage.mimeType);
+  const cleaned = await cleanProductPhotoForCutout(cropped, productImage.mimeType);
+  return sharp(await removeWhiteBackground(cleaned.buffer)).trim().toBuffer();
+}

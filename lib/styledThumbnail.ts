@@ -13,12 +13,14 @@
 //      폰트로 서버에서 합성한다 (상세페이지 제작과 같은 방식). 문구 배치는 컷마다
 //      캡션/포인트 목록/배지 중 학습한 방식을 쓴다.
 import sharp from 'sharp';
+import { createHash } from 'crypto';
 import { removeOverlays } from '@/lib/overlayCleanup';
 import { createCanvas } from 'canvas';
 import { fetchCoupangBestsellers, fetchCoupangGalleryImageUrls } from '@/lib/brightdata';
 import {
   fetchImageFromUrl,
   describeProductAppearance,
+  cutoutProductPhoto,
   ensureKoreanFontRegistered,
   FONT_BOLD,
   FONT_EXTRABOLD,
@@ -520,6 +522,92 @@ function textAreaNote(layout: ShotLayout, position: 'top' | 'bottom'): string {
   return `이후 ${side} 25% 영역에 문구를 얹을 예정이므로 그 영역은 단순하고 어두워져도 괜찮은 배경으로 비워두고, 상품은 ${other}에 크고 또렷하게 배치하세요.`;
 }
 
+// ---------------------------------------------------------------------------
+// 실사 합성: 상품은 내 사진에서 따낸 그대로, AI는 상품 없는 배경 장면만 만든다
+// ---------------------------------------------------------------------------
+// AI가 상품을 "다시 그리면" 길이·모양·색이 바뀌는 일이 잦아서(롱양말이 짧아지고, 신은 모습과 펼친 모습이
+// 섞이는 등), 상품 자체는 실제 사진의 누끼를 그대로 얹고 AI는 배경/소품 장면만 만든다.
+const cutoutCache = new Map<string, Promise<Buffer>>();
+function cachedCutout(img: { buffer: Buffer; mimeType: string }, ready: boolean): Promise<Buffer> {
+  const key = createHash('sha1').update(img.buffer).digest('hex') + (ready ? ':r' : '');
+  let p = cutoutCache.get(key);
+  if (!p) {
+    p = cutoutProductPhoto(img, { ready });
+    p.catch(() => cutoutCache.delete(key)); // 실패는 캐시하지 않는다
+    cutoutCache.set(key, p);
+    if (cutoutCache.size > 12) cutoutCache.delete(cutoutCache.keys().next().value as string);
+  }
+  return p;
+}
+
+// 상품이 놓일 영역(문구 반대편)
+export function productPlacement(textPosition: 'top' | 'bottom', size = THUMBNAIL_SIZE) {
+  const S = size;
+  return textPosition === 'top'
+    ? { x: 0.06 * S, y: 0.3 * S, w: 0.88 * S, h: 0.66 * S }
+    : { x: 0.06 * S, y: 0.04 * S, w: 0.88 * S, h: 0.66 * S };
+}
+
+async function generateEmptyScene(input: {
+  brief: Pick<StyleBrief, 'background' | 'props' | 'lighting'>;
+  shot: StyleShot;
+  productName?: string | null;
+}): Promise<Buffer> {
+  const apiKey = requireEnv('GEMINI_API_KEY');
+  const area = input.shot.textPosition === 'top' ? '아래쪽 65%' : '위쪽 65%';
+  const instruction = `${NO_TEXT_RULE}
+
+쿠팡 상품 페이지 "추가 이미지"의 **배경 장면만** 만들어주세요. 정사각형(1:1).
+**상품은 절대 그리지 마세요**${input.productName ? ` (${input.productName} 및 비슷한 종류의 물건·의류·신발도 그리지 마세요)` : ''}. 나중에 실제 상품 사진을 그 자리에 따로 합성할 거라, ${area} 영역의 가운데는 상품이 놓일 수 있게 비워두고 바닥/표면이 자연스럽게 이어지게 하세요. 사람이나 신체 일부도 넣지 마세요.
+- 배경/분위기: ${input.brief.background || '(없음)'}
+- 소품/연출: ${input.brief.props || '(없음)'} (상품이 아닌 소품만, 가장자리에 작게)
+- 조명/색감: ${input.brief.lighting || '(없음)'}
+장면 참고: ${input.shot.scene}`;
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: instruction }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } }),
+    }
+  );
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error?.message || `Gemini 이미지 생성 오류 (HTTP ${res.status})`);
+  const part = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
+  if (!part) throw new Error('배경 장면을 받지 못했어요.');
+  return sharp(Buffer.from(part.inlineData.data, 'base64'))
+    .resize({ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, fit: 'cover' })
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
+export async function placeCutoutOnScene(scene: Buffer, cutout: Buffer, textPosition: 'top' | 'bottom'): Promise<Buffer> {
+  const S = THUMBNAIL_SIZE;
+  const area = productPlacement(textPosition, S);
+  const fitted = await sharp(cutout)
+    .resize({ width: Math.round(area.w), height: Math.round(area.h), fit: 'inside' })
+    .toBuffer();
+  const m = await sharp(fitted).metadata();
+  const w = m.width || 1;
+  const h = m.height || 1;
+  const left = Math.round(area.x + (area.w - w) / 2);
+  const top = Math.round(area.y + (area.h - h) / 2);
+  // 바닥 그림자: 상품 모양을 검게 칠해 흐리게 한 뒤 살짝 아래로
+  const shadow = await sharp(fitted)
+    .ensureAlpha()
+    .modulate({ brightness: 0 })
+    .blur(14)
+    .linear([1, 1, 1, 0.35], [0, 0, 0, 0])
+    .toBuffer();
+  return sharp(scene)
+    .composite([
+      { input: shadow, left: Math.max(0, left + 6), top: Math.max(0, Math.min(S - h, top + 18)) },
+      { input: fitted, left, top },
+    ])
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
 export async function generateStyledAdditionalImage(input: {
   productImage: { buffer: Buffer; mimeType: string };
   brief: Pick<StyleBrief, 'background' | 'props' | 'lighting'>;
@@ -527,7 +615,24 @@ export async function generateStyledAdditionalImage(input: {
   copy: ShotCopyText | null;
   appearanceSpec?: string | null;
   note?: string | null; // 사용자가 적은 상품 특징/수정 요청 - 최우선으로 지킨다
+  productName?: string | null;
+  readyCutout?: boolean; // 이미 흰 배경에 상품만 있는 사진(패키지 합성)
+  composite?: boolean; // false면 실사 합성 없이 AI가 상품까지 그리는 예전 방식
 }): Promise<Buffer> {
+  if (input.composite !== false) {
+    try {
+      const [scene, cutout] = await Promise.all([
+        generateEmptyScene({ brief: input.brief, shot: input.shot, productName: input.productName }),
+        cachedCutout(input.productImage, !!input.readyCutout),
+      ]);
+      const base: Buffer = await placeCutoutOnScene(scene, cutout, input.shot.textPosition);
+      if (!input.copy || !input.copy.headline) return base;
+      return overlayThumbnailCopy(base, input.copy, input.shot.textPosition, input.shot.layout || 'caption');
+    } catch (e) {
+      // 누끼/배경 생성이 실패하면 예전 방식(AI가 상품까지 그림)으로 대신 만든다
+      console.error('[styledThumbnail] 실사 합성 실패, AI 생성으로 대체:', e);
+    }
+  }
   const apiKey = requireEnv('GEMINI_API_KEY');
   const spec =
     input.appearanceSpec === undefined ? await describeProductAppearance(input.productImage) : input.appearanceSpec;

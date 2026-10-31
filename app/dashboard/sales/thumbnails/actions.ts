@@ -184,6 +184,8 @@ interface StyledSpec {
   copy: ShotCopyText | null;
   brief: Pick<StyleBrief, 'background' | 'props' | 'lighting'>;
   note?: string; // 상품 특징 메모/수정 요청 (다시 만들 때도 같이 적용)
+  productName?: string;
+  fromPackage?: boolean; // 입력 사진이 패키지 합성 이미지(흰 배경에 상품만)
 }
 
 async function getOrLearnBrief(
@@ -281,6 +283,8 @@ async function runStyledGeneration(
       copy: spec.copy,
       appearanceSpec,
       note: spec.note,
+      productName: spec.productName,
+      readyCutout: !!spec.fromPackage,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
@@ -379,6 +383,7 @@ async function prepareStyledGroup(args: {
   label: string | null;
   startIndex: number;
   note?: string;
+  fromPackage?: boolean;
 }): Promise<{ jobs: StyledJob[]; copyMissing: boolean }> {
   const { brief, sources, count } = args;
   if (count <= 0) return { jobs: [], copyMissing: false };
@@ -417,6 +422,8 @@ async function prepareStyledGroup(args: {
       copy: copyByShot.get(shot.id) ?? null,
       brief: { background: brief.background, props: brief.props, lighting: brief.lighting },
       ...(args.note ? { note: args.note } : {}),
+      productName: args.productName,
+      ...(args.fromPackage ? { fromPackage: true } : {}),
     },
   }));
   return { jobs, copyMissing: copyByShot.size === 0 };
@@ -638,6 +645,7 @@ export async function generateThumbnailBatch(
         label: r.label,
         startIndex: packageStarts[i],
         note: productNote,
+        fromPackage: true,
       })
     )
   );
