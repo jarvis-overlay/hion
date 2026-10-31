@@ -827,7 +827,22 @@ export async function editThumbnailImage(
       .maybeSingle();
     const referenceImages = project?.category ? await fetchTopSellerReferenceImages(project.category) : [];
 
-    const edited = await applyThumbnailEffect(buffer, prompt, referenceImages);
+    // 스타일 적용 이미지는 이미 한국어 문구가 들어 있어서 문구를 지우지 않게 하고, 원본 상품 사진을 같이 보여줘서
+    // "롱양말로" 같은 외형 요청을 실제 상품 모습에 맞추게 한다.
+    let productPhoto: { buffer: Buffer; mimeType: string } | null = null;
+    if (img.input_image_url) {
+      try {
+        productPhoto = await fetchImageFromUrl(img.input_image_url);
+      } catch {
+        productPhoto = null;
+      }
+    }
+    const opts = { preserveText: !!img.style_spec?.shot, productPhoto };
+    let edited = await applyThumbnailEffect(buffer, prompt, referenceImages, opts);
+    // 변화가 거의 없으면 한 번 더 분명하게 시도한다
+    if (await isImageVisuallyUnchanged(buffer, edited)) {
+      edited = await applyThumbnailEffect(buffer, prompt, referenceImages, { ...opts, insist: true });
+    }
 
     if (await isImageVisuallyUnchanged(buffer, edited)) {
       return {

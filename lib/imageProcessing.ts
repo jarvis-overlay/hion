@@ -533,7 +533,8 @@ export async function composeThumbnailImage(
 export async function applyThumbnailEffect(
   imageBuffer: Buffer,
   effectPrompt: string,
-  referenceImages: { buffer: Buffer; mimeType: string }[] = []
+  referenceImages: { buffer: Buffer; mimeType: string }[] = [],
+  opts: { preserveText?: boolean; productPhoto?: { buffer: Buffer; mimeType: string } | null; insist?: boolean } = {}
 ): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
 
@@ -542,15 +543,27 @@ export async function applyThumbnailEffect(
       ? `\n\n[참고용 - 이 카테고리에서 실제로 잘 팔리는 경쟁 상품 썸네일 ${referenceImages.length}장이 먼저 첨부돼 있습니다] 그 사진 속 상품이나 문구를 베끼지 말고, 효과/연출/소품 배치처럼 "잘 팔리는 썸네일이 공통적으로 갖는 스타일 요소"만 참고해서 아래 요청에 반영해주세요.`
       : '';
 
-  const instruction = `**절대 이미지 안에 어떤 문자·숫자·기호도 넣지 마세요.** 아래 상품 썸네일 사진을 아래 "요청 사항"에 맞게 수정해주세요. 요청 사항은 상품 개수를 늘리거나 배치를 바꾸는 것처럼 상품 자체에 관한 내용이어도 반드시 반영하세요. 요청 사항에서 따로 언급하지 않은 부분(상품의 색상·재질·전체적인 디자인 등)만 원본 그대로 유지하면 됩니다. 쿠팡 상품 썸네일이라는 걸 감안해서 상품이 가려지거나 알아보기 어려워지면 안 됩니다.${referenceRule}
+  const textRule = opts.preserveText
+    ? '이미지에 이미 들어 있는 한국어 문구(글자 내용·위치·글꼴·색)는 한 글자도 바꾸지 말고 그대로 두세요. 새로운 문자는 추가하지 마세요.'
+    : '**절대 이미지 안에 어떤 문자·숫자·기호도 넣지 마세요.**';
+  const photoRule = opts.productPhoto
+    ? '\n\n[실제 판매 상품 사진이 마지막에 추가로 첨부돼 있습니다] 요청 사항에서 상품의 길이·모양·색 같은 외형을 말하면, 이 실제 상품 사진 속 모습과 똑같이 맞춰서 수정하세요.'
+    : '';
+  const insistRule = opts.insist
+    ? '\n\n이전 시도에서 눈에 띄는 변화가 없었습니다. 이번에는 요청한 부분이 한눈에 확실히 달라지도록 분명하게 수정하세요.'
+    : '';
+  const instruction = `${textRule} 아래 상품 썸네일 사진을 아래 "요청 사항"에 맞게 수정해주세요. 요청 사항은 상품 개수를 늘리거나 배치를 바꾸는 것처럼 상품 자체에 관한 내용이어도 반드시 반영하세요. 요청 사항에서 따로 언급하지 않은 부분(상품의 색상·재질·전체적인 디자인 등)만 원본 그대로 유지하면 됩니다. 쿠팡 상품 썸네일이라는 걸 감안해서 상품이 가려지거나 알아보기 어려워지면 안 됩니다.${referenceRule}
 
-요청 사항: ${effectPrompt}`;
+요청 사항: ${effectPrompt}${photoRule}${insistRule}`;
 
   const parts: Record<string, unknown>[] = [{ text: instruction }];
   for (const ref of referenceImages) {
     parts.push({ inlineData: { mimeType: ref.mimeType, data: ref.buffer.toString('base64') } });
   }
   parts.push({ inlineData: { mimeType: 'image/jpeg', data: imageBuffer.toString('base64') } });
+  if (opts.productPhoto) {
+    parts.push({ inlineData: { mimeType: opts.productPhoto.mimeType, data: opts.productPhoto.buffer.toString('base64') } });
+  }
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
