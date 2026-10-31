@@ -869,10 +869,27 @@ export async function editThumbnailImage(
       }
     }
     const opts = { preserveText: !!img.style_spec?.shot, productPhoto };
-    let edited = await applyThumbnailEffect(buffer, prompt, referenceImages, opts);
+    const run = async (refs: typeof referenceImages, o: typeof opts & { insist?: boolean }) => {
+      try {
+        return await applyThumbnailEffect(buffer, prompt, refs, o);
+      } catch (e: any) {
+        if (!String(e?.message || '').startsWith('NOIMG:')) throw e;
+        // 이미지를 못 받았으면 참고 이미지 없이(요청+현재 이미지+원본 사진만) 한 번 더 시도한다
+        try {
+          return await applyThumbnailEffect(buffer, prompt, [], { ...o, insist: true });
+        } catch (e2: any) {
+          const msg = String(e2?.message || '');
+          if (msg.startsWith('NOIMG:')) {
+            throw new Error(`AI가 수정된 이미지를 돌려주지 않았어요 (${msg.slice(6)}). 사람이 나온 사진은 AI가 거부하는 일이 있어요 - 요청을 "사람 없이 상품만"처럼 바꿔 적거나, 원본 사진을 상품만 나온 사진으로 바꿔서 다시 만들어주세요.`);
+          }
+          throw e2;
+        }
+      }
+    };
+    let edited = await run(referenceImages, opts);
     // 변화가 거의 없으면 한 번 더 분명하게 시도한다
     if (await isImageVisuallyUnchanged(buffer, edited)) {
-      edited = await applyThumbnailEffect(buffer, prompt, referenceImages, { ...opts, insist: true });
+      edited = await run(referenceImages, { ...opts, insist: true });
     }
 
     if (await isImageVisuallyUnchanged(buffer, edited)) {

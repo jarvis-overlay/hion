@@ -583,7 +583,12 @@ export async function applyThumbnailEffect(
 
   const imagePart = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
   if (!imagePart) {
-    throw new Error('효과 적용 결과를 받지 못했어요. 프롬프트를 조금 더 구체적으로 적어서 다시 시도해주세요.');
+    // AI가 이미지를 안 돌려준 이유(안전 필터/거절 문구)를 같이 알려줘야 원인을 알 수 있다
+    const block = json?.promptFeedback?.blockReason;
+    const finish = json?.candidates?.[0]?.finishReason;
+    const said = String((json.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || '').join(' ')).trim().slice(0, 160);
+    const why = [block && `차단: ${block}`, finish && finish !== 'STOP' && `종료: ${finish}`, said && `AI 답변: ${said}`].filter(Boolean).join(' / ');
+    throw new Error(`NOIMG:${why || '이유 없음'}`);
   }
   const edited = Buffer.from(imagePart.inlineData.data, 'base64');
   return sharp(edited)
@@ -798,7 +803,13 @@ export async function generateThumbnailImage(input: GenerateThumbnailInput): Pro
   const cutout = await removeWhiteBackground(cleaned.buffer);
   const base = await composeThumbnailImage(cutout, input.position);
   if (input.effectPrompt?.trim()) {
-    return applyThumbnailEffect(base, input.effectPrompt.trim(), input.referenceImages || []);
+    try {
+      return await applyThumbnailEffect(base, input.effectPrompt.trim(), input.referenceImages || []);
+    } catch (e: any) {
+      const m = String(e?.message || '');
+      if (m.startsWith('NOIMG:')) throw new Error(`효과 적용 결과를 받지 못했어요 (${m.slice(6)}). 프롬프트를 조금 더 구체적으로 적어서 다시 시도해주세요.`);
+      throw e;
+    }
   }
   return base;
 }
