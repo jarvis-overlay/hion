@@ -287,3 +287,34 @@ export async function fetchCoupangGalleryImageUrls(productUrl: string, limit = 8
   const md = await unlockerMarkdown(productUrl, { country: 'kr', timeoutMs: 45000, retries: 1 });
   return extractCoupangGalleryImageUrls(md, limit);
 }
+
+// ---------------------------------------------------------------------------
+// 쿠팡 상품 페이지의 "상세 설명" 이미지(판매자가 올린 긴 상세페이지 이미지) 주소
+// ---------------------------------------------------------------------------
+// 상세페이지가 어떤 순서/구성으로 흘러가는지 배우려면 상위 상품의 상세 설명 이미지를
+// 봐야 한다. 갤러리 썸네일(/thumbnails/remote/)과 달리 판매자가 올린 원본 이미지
+// 경로(vendor_inventory 등)를 쓴다. 실제 쿠팡 페이지로 검증한 파서가 아니라서 못 읽으면
+// 빈 배열을 돌려주고, 호출한 쪽이 다른 이미지로 대체한다.
+export function extractCoupangDetailImageUrls(markdown: string, limit = 10): string[] {
+  const re = /(?:https?:)?\/\/[a-z0-9.-]*coupangcdn\.com\/[^\s)\]"'<>\\]+?\.(?:jpe?g|png|webp)/gi;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of markdown.matchAll(re)) {
+    let u = m[0];
+    if (u.startsWith('//')) u = `https:${u}`;
+    if (/\/thumbnails\/remote\//.test(u)) continue; // 갤러리/추천 썸네일
+    if (/(?:icon|badge|logo|sprite|banner|rocket)/i.test(u)) continue;
+    if (!/\/image\/(?:vendor_inventory|product|retail\/images|landing|content)\b|vendor_inventory|\/vendoritem\//.test(u)) continue;
+    const key = u.split('/image/')[1] || u;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(u);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export async function fetchCoupangDetailImageUrls(productUrl: string, limit = 10): Promise<string[]> {
+  const md = await unlockerMarkdown(productUrl, { country: 'kr', timeoutMs: 45000, retries: 1 });
+  return extractCoupangDetailImageUrls(md, limit);
+}

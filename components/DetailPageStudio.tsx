@@ -2,6 +2,7 @@
 
 import { Fragment, useState, useTransition } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
+import DetailAutoComposer from '@/components/DetailAutoComposer';
 import {
   createProject,
   updateProjectCategory,
@@ -711,6 +712,8 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
           </button>
         )}
       </div>
+
+      <DetailAutoComposer project={project} sectionCount={sections.length} />
 
       <div className="card overflow-hidden">
         <div className={`grid ${GRID_COLS} bg-paper text-[11px] font-semibold text-inkSoft`}>

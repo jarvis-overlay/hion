@@ -3,7 +3,7 @@ import DetailPageStudio from '@/components/DetailPageStudio';
 
 // Gemini 이미지 생성 1회 호출이 꽤 걸릴 수 있어서(수십 초) 기본
 // 타임아웃보다 넉넉하게 잡음.
-export const maxDuration = 120;
+export const maxDuration = 280;
 
 export default async function DetailPagesPage() {
   const supabase = createClient();

@@ -15,7 +15,26 @@ import {
   type DetailSectionTheme,
   type SpecRow,
 } from '@/lib/imageProcessing';
-import { recommendDetailSectionCopy, type DetailCopyRecommendation } from '@/lib/ai';
+import { recommendDetailSectionCopy, planDetailSectionsRaw, type DetailCopyRecommendation } from '@/lib/ai';
+import {
+  analyzeSourceImage,
+  learnDetailFlow,
+  DEFAULT_DETAIL_FLOW,
+  type DetailFlowBrief,
+} from '@/lib/detailCompose';
+import {
+  DETAIL_TEMPLATES,
+  MAX_PLANNED_SECTIONS,
+  evaluatePhoto,
+  finalizePlan,
+  mergeSellingOptions,
+  sanitizePlannedFields,
+  sanitizeSpecRows,
+  type PlannedFields,
+  type PlannedSection,
+  type SellingOptions,
+  type SourceAnalysis,
+} from '@/lib/detailOptions';
 
 const BUCKET = 'detail-images';
 const PATH = '/dashboard/sales/detail-pages';
@@ -223,7 +242,9 @@ export async function addSection(
   });
   if (insertErr) return { error: insertErr.message };
 
-  return runGeneration(supabase, sectionId, projectId, input, productImage);
+  return runGeneration(supabase, sectionId, projectId, input, productImage, null, {
+    skipReference: formData.get('skipReference') === '1',
+  });
 }
 
 // DB 컬럼 이름으로 바꾼 섹션 입력값 (추가/수정 공용)
@@ -293,7 +314,8 @@ async function runGeneration(
   projectId: string,
   input: DetailSectionInput,
   productImage: { buffer: Buffer; mimeType: string } | null,
-  reuseBackground: Buffer | null = null
+  reuseBackground: Buffer | null = null,
+  options: { skipReference?: boolean } = {}
 ): Promise<{ error: string } | { success: true; url: string }> {
   try {
     let background = reuseBackground;
@@ -305,7 +327,10 @@ async function runGeneration(
         .select('category')
         .eq('id', projectId)
         .maybeSingle();
-      const referenceImages = project?.category ? await fetchTopSellerReferenceImages(project.category) : [];
+      // 한 번에 만들기는 구성을 짤 때 쿠팡 인기상품을 이미 분석했으므로, 섹션마다 쿠팡을
+      // 다시 크롤링하지 않는다 (섹션 수만큼 반복되면 느리고 크롤링 한도에 걸림).
+      const referenceImages =
+        project?.category && !options.skipReference ? await fetchTopSellerReferenceImages(project.category) : [];
       background = await generateDetailBackground(input, productImage, referenceImages);
       // 배경 보관은 편의 기능이라 실패해도 생성 자체는 계속한다
       // (못 남기면 나중에 수정할 때 배경을 새로 만들게 될 뿐).
@@ -600,4 +625,345 @@ export async function deleteSection(id: string) {
   const { error } = await supabase.from('detail_page_sections').delete().eq('id', id);
   if (error) console.error('[detail-pages] deleteSection 실패:', error.message);
   revalidatePath(PATH);
+}
+
+
+// ---------------------------------------------------------------------------
+// 한 번에 만들기: 여러 장의 중국 상품 사진 + 쿠팡 인기상품 흐름 -> 상세페이지 전체
+// ---------------------------------------------------------------------------
+// 화면(클라이언트)이 단계를 하나씩 호출하는 구조다:
+//   1) uploadDetailSources - 사진을 3장씩 묶어 올리고 분석 (서버에서 동시에 처리)
+//   2) planDetailPage      - 쿠팡 인기상품 흐름 + 사진 분석 + 취급 옵션 -> 장면 목록
+//   3) generatePlannedSections - 장면을 3개씩 묶어 생성 (서버에서 동시에 처리)
+// 한 요청에 전부 몰아넣으면 서버 제한 시간/본문 크기에 걸려 일부만 만들어지고, 서버 액션을 따로
+// 여러 번 부르면 클라이언트가 차례로 하나씩만 실행하기 때문에 3개씩 묶어서 부른다.
+
+export type UploadedSource =
+  | { error: string }
+  | { success: true; url: string; analysis: SourceAnalysis | null; analysisError: string | null };
+
+async function uploadAndAnalyze(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  file: File | null
+): Promise<UploadedSource> {
+  if (!file || file.size === 0) return { error: '이미지를 첨부해주세요.' };
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const mimeType = file.type || 'image/jpeg';
+  const path = `detail-pages/${projectId}/src-${randomUUID()}.${extFromContentType(mimeType)}`;
+  const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, buffer, {
+    contentType: mimeType,
+    upsert: true,
+  });
+  if (upErr) return { error: upErr.message };
+  const url = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+
+  // 분석에 실패해도 사진 자체는 올라간 것으로 처리한다 (색상 라벨을 붙였다면 그걸 믿고 쓸 수 있음)
+  let analysis: SourceAnalysis | null = null;
+  let analysisError: string | null = null;
+  try {
+    analysis = await analyzeSourceImage({ buffer, mimeType });
+  } catch (e: any) {
+    analysisError = e?.message || String(e);
+  }
+  return { success: true, url, analysis, analysisError };
+}
+
+// 한 번에 최대 3장 (서버에서 동시에 올리고 분석). 결과는 받은 순서와 같은 순서로 돌려준다.
+export async function uploadDetailSources(projectId: string, formData: FormData): Promise<UploadedSource[]> {
+  const files = formData.getAll('images').filter((f): f is File => f instanceof File);
+  if (files.length === 0) return [{ error: '이미지를 첨부해주세요.' }];
+  const supabase = createClient();
+  return mapLimit(files.slice(0, 3), 3, (file) => uploadAndAnalyze(supabase, projectId, file));
+}
+
+// 쿠팡 상세페이지 흐름은 카테고리별로 저장해두고 14일 재사용한다 (크롤링이 느리고 한도가
+// 있어서). 저장은 썸네일 스타일과 같은 테이블을 쓰되 키 앞에 "상세흐름:"을 붙여 구분한다.
+const DETAIL_FLOW_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const flowKey = (category: string) => `상세흐름:${category.trim()}`;
+
+async function getOrLearnDetailFlow(
+  supabase: ReturnType<typeof createClient>,
+  category: string,
+  force = false
+): Promise<{ flow: DetailFlowBrief; fromCache: boolean; saveWarning: string | null }> {
+  const key = flowKey(category);
+  if (!force) {
+    const { data, error } = await supabase
+      .from('category_style_briefs')
+      .select('brief, learned_at')
+      .eq('category', key)
+      .maybeSingle();
+    if (!error && data?.brief?.flow && Date.now() - new Date(data.learned_at).getTime() < DETAIL_FLOW_TTL_MS) {
+      return { flow: data.brief as DetailFlowBrief, fromCache: true, saveWarning: null };
+    }
+  }
+  const flow = await learnDetailFlow(category);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { error: saveErr } = await supabase.from('category_style_briefs').upsert(
+    {
+      category: key,
+      brief: flow,
+      source_count: flow.analysis?.products ?? 0,
+      learned_at: new Date().toISOString(),
+      author_email: user?.email ?? null,
+    },
+    { onConflict: 'category' }
+  );
+  return { flow, fromCache: false, saveWarning: saveErr ? saveErr.message : null };
+}
+
+// 화면의 "쿠팡 흐름 학습/다시 학습" 버튼
+export async function learnDetailFlowNow(
+  category: string,
+  force: boolean
+): Promise<{ error: string } | { success: true; flow: DetailFlowBrief; fromCache: boolean; warning: string | null }> {
+  if (!category.trim()) return { error: '카테고리(쿠팡 검색어)를 먼저 입력해주세요.' };
+  const supabase = createClient();
+  try {
+    const r = await getOrLearnDetailFlow(supabase, category, force);
+    return {
+      success: true,
+      flow: r.flow,
+      fromCache: r.fromCache,
+      warning: r.saveWarning
+        ? `분석은 했지만 저장하지 못했어요(${r.saveWarning}). supabase/thumbnail_style_learning.sql을 실행하면 재사용돼요.`
+        : null,
+    };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
+}
+
+export interface DetailPlanInput {
+  productName: string;
+  category: string;
+  colorsText: string; // 취급 색상 (쉼표로 구분)
+  sizesText: string; // 취급 사이즈 (쉼표로 구분)
+  sources: { url: string; colorLabel: string; analysis: SourceAnalysis | null }[];
+  // 화면이 구성 기획 전에 먼저 학습해서 넘겨주는 쿠팡 흐름 (학습은 오래 걸릴 수 있어 요청을 나눔).
+  // 학습에 실패했으면 flowError만 넘어오고, 둘 다 없으면 서버가 직접 학습/재사용한다.
+  flow?: DetailFlowBrief | null;
+  flowError?: string | null;
+}
+
+export interface PhotoReportItem {
+  index: number;
+  usable: boolean;
+  color: string | null;
+  reason: string | null;
+  role: string;
+}
+
+export async function planDetailPage(
+  projectId: string,
+  input: DetailPlanInput
+): Promise<
+  | { error: string }
+  | {
+      success: true;
+      sections: PlannedSection[];
+      notes: string[];
+      photoReport: PhotoReportItem[];
+      selling: SellingOptions;
+      forbiddenWords: string[];
+      flow: DetailFlowBrief;
+      flowKind: 'learned' | 'default';
+    }
+> {
+  if (!input.sources || input.sources.length === 0) return { error: '사진을 먼저 올려주세요.' };
+  const supabase = createClient();
+  const category = (input.category || '').trim();
+  const productName = (input.productName || '').trim() || category;
+
+  // 입력한 카테고리/상품명을 프로젝트에 저장 (다음에 열었을 때 그대로 보이게)
+  if (category) {
+    const { error: catErr } = await supabase
+      .from('detail_page_projects')
+      .update({ category })
+      .eq('id', projectId);
+    if (catErr) console.error('[detail-pages] 카테고리 저장 실패:', catErr.message);
+  }
+
+  // 취급 옵션: 입력한 색상 + 사진에 붙인 색상 라벨
+  const labels = input.sources.map((s) => (s.colorLabel || '').trim());
+  const selling = mergeSellingOptions(input.colorsText || '', input.sizesText || '', labels);
+  const analyses = input.sources.map((s) => s.analysis ?? null);
+  const verdicts = analyses.map((a, i) => evaluatePhoto(a, selling, labels[i] || null));
+
+  const notes: string[] = [];
+
+  // 쿠팡 인기상품 상세페이지 흐름 (학습/재사용, 실패하거나 카테고리가 없으면 일반 흐름 + 경고)
+  let flow: DetailFlowBrief = DEFAULT_DETAIL_FLOW;
+  let flowKind: 'learned' | 'default' = 'default';
+  const passed = input.flow && Array.isArray(input.flow.flow) && input.flow.flow.length >= 4 ? input.flow : null;
+  if (passed) {
+    flow = passed;
+    flowKind = 'learned';
+  } else if (input.flowError) {
+    notes.push(
+      `⚠ 쿠팡 인기상품을 참고하지 못했어요 - 흐름 학습에 실패해서 일반적인 구성으로 기획했어요: ${input.flowError}`
+    );
+  } else if (category) {
+    try {
+      const r = await getOrLearnDetailFlow(supabase, category);
+      flow = r.flow;
+      flowKind = 'learned';
+      if (r.saveWarning) {
+        notes.push(
+          `학습한 흐름을 저장하지 못했어요(${r.saveWarning}). supabase/thumbnail_style_learning.sql을 실행하면 다음부터 재사용돼요.`
+        );
+      }
+    } catch (e: any) {
+      notes.push(
+        `⚠ 쿠팡 인기상품을 참고하지 못했어요 - 흐름 학습에 실패해서 일반적인 구성으로 기획했어요: ${e?.message || String(e)}`
+      );
+    }
+  } else {
+    notes.push('⚠ 쿠팡 인기상품을 참고하지 않았어요 - 카테고리(쿠팡 검색어)가 비어 있어서 일반적인 구성으로 기획했어요. 카테고리를 입력하면 인기상품 상세페이지 흐름을 분석해서 만들어요.');
+  }
+  if (flowKind === 'learned' && flow.analysis && flow.analysis.detailImages === 0) {
+    notes.push('쿠팡 인기상품의 상세 설명 이미지는 읽지 못해서 대표 이미지와 상품 정보 기준으로 흐름을 추정했어요. 참고 수준이 낮을 수 있어요.');
+  }
+
+  if (selling.colors.length === 0) {
+    notes.push('취급 색상을 입력하지 않아서 상세페이지에 색상 정보는 넣지 않았어요 (색상이 보이는 사진도 쓰지 않았어요).');
+  }
+  if (selling.sizes.length === 0) {
+    notes.push('취급 사이즈를 입력하지 않아서 상세페이지에 사이즈 정보는 넣지 않았어요.');
+  }
+  analyses.forEach((a, i) => {
+    if (!a && !labels[i]) notes.push(`사진 ${i + 1}번은 분석에 실패해서 참고하지 못했어요.`);
+  });
+
+  // 구성안 (AI) -> 규칙 검사 (코드)
+  let raw: any[];
+  try {
+    raw = await planDetailSectionsRaw({
+      productName,
+      category,
+      flow,
+      selling,
+      photos: analyses.map((a, i) => ({
+        index: i,
+        role: a?.role ?? 'other',
+        description: a?.description ?? '',
+        koreanTexts: a?.koreanTexts ?? [],
+        facts: a?.facts ?? [],
+        colorLabel: labels[i] || null,
+        colorsShown: a?.colorsShown ?? [],
+        usable: verdicts[i].usable,
+        reason: verdicts[i].reason,
+        hasSizeChart: !!a?.sizeChart,
+      })),
+      templates: DETAIL_TEMPLATES.map((t) => ({ id: t.id, use: t.use, needsPhoto: t.needsPhoto })),
+      maxSections: MAX_PLANNED_SECTIONS - 1, // 마지막 한 칸은 사이즈표 사양 섹션용
+    });
+  } catch (e: any) {
+    return { error: `구성 기획에 실패했어요: ${e?.message || String(e)}` };
+  }
+
+  const finalized = finalizePlan(raw, { verdicts, analyses, selling });
+  verdicts.forEach((v, i) => {
+    if (!v.usable) notes.push(`사진 ${i + 1}번은 상품 사진으로 쓰지 않았어요: ${v.reason}`);
+  });
+  notes.push(...finalized.notes);
+
+  if (finalized.sections.length === 0) {
+    return { error: '만들 수 있는 장면이 없어요. 사진/취급 옵션을 확인하고 다시 시도해주세요.' };
+  }
+
+  const forbiddenWords = Array.from(
+    new Set(
+      analyses
+        .flatMap((a) => a?.colorsShown || [])
+        .filter((c) => !selling.colors.some((s) => s.trim().toLowerCase() === c.trim().toLowerCase()))
+    )
+  );
+
+  return {
+    success: true,
+    sections: finalized.sections,
+    notes: Array.from(new Set(notes)),
+    photoReport: verdicts.map((v, i) => ({
+      index: i,
+      usable: v.usable,
+      color: v.color,
+      reason: v.reason,
+      role: analyses[i]?.role ?? 'other',
+    })),
+    selling,
+    forbiddenWords,
+    flow,
+    flowKind,
+  };
+}
+
+// 구성안의 장면 하나를 실제 이미지로 만든다. 클라이언트가 보낸 값이라 마지막으로 한 번 더
+// 취급 옵션 검사를 한다 (구성안을 받은 뒤 값이 바뀌었더라도 규칙이 지켜지게).
+async function generatePlannedSectionOne(
+  projectId: string,
+  position: number,
+  planned: PlannedSection,
+  sourceUrl: string | null,
+  selling: SellingOptions,
+  forbiddenWords: string[]
+): Promise<{ error: string } | { success: true; url: string }> {
+  if (planned.kind === 'spec') {
+    const cleaned = sanitizeSpecRows(planned.specRows || [], selling, forbiddenWords || []);
+    if (cleaned.rows.length === 0) return { error: '사양표에 넣을 항목이 없어요.' };
+    return addSpecSection(projectId, position, { title: planned.specTitle || '제품 사양', rows: cleaned.rows });
+  }
+
+  const cleaned = sanitizePlannedFields(planned.fields as PlannedFields, selling, forbiddenWords || []);
+  const f = cleaned.fields;
+  const template = DETAIL_TEMPLATES.find((t) => t.id === planned.templateId) || DETAIL_TEMPLATES[0];
+  const fd = new FormData();
+  fd.set('keyword', f.keyword);
+  fd.set('mood', f.mood);
+  fd.set('description', f.description);
+  fd.set('eyebrow', f.eyebrow);
+  fd.set('accentTitle', f.accentTitle);
+  fd.set('accentSubtitle', f.accentSubtitle);
+  fd.set('stat', f.stat);
+  fd.set('statCaption', f.statCaption);
+  fd.set('badge', f.badge);
+  fd.set('bodyText', f.bodyText);
+  fd.set('listItems', f.listItems);
+  fd.set('colorPrompt', ''); // 색상 변경 지시는 쓰지 않는다 (취급하지 않는 색이 나올 수 있음)
+  fd.set('layoutStyle', template.layoutStyle);
+  fd.set('theme', template.theme);
+  if (template.needsPhoto && sourceUrl) fd.set('imageUrl', sourceUrl);
+  fd.set('skipReference', '1');
+  return addSection(projectId, position, fd);
+}
+
+// 한 번에 최대 3장면 (서버에서 동시에 생성). 결과는 받은 순서와 같은 순서로 돌려준다.
+export async function generatePlannedSections(
+  projectId: string,
+  items: { position: number; planned: PlannedSection; sourceUrl: string | null }[],
+  selling: SellingOptions,
+  forbiddenWords: string[]
+): Promise<({ error: string } | { success: true; url: string })[]> {
+  if (!Array.isArray(items) || items.length === 0) return [{ error: '만들 장면이 없어요.' }];
+  return mapLimit(items.slice(0, 3), 3, (it) =>
+    generatePlannedSectionOne(projectId, it.position, it.planned, it.sourceUrl, selling, forbiddenWords)
+  );
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= items.length) return;
+        results[i] = await fn(items[i], i);
+      }
+    })
+  );
+  return results;
 }

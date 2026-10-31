@@ -760,3 +760,103 @@ JSON 배열로만 응답하세요:
       badge: String(x.badge || ''),
     }));
 }
+
+
+// ---------------------------------------------------------------------------
+// 상세페이지 자동 구성: 사진 분석 + 쿠팡 인기상품 흐름 + 취급 옵션 -> 장면(섹션) 목록
+// ---------------------------------------------------------------------------
+// 결과(raw)는 그대로 쓰지 않고 lib/detailOptions.ts의 finalizePlan이 한 번 더
+// 검사한다 (취급하지 않는 색상/사이즈 표현, 못 쓰는 사진 지정 등을 코드로 거른다).
+export async function planDetailSectionsRaw(input: {
+  productName: string;
+  category: string;
+  flow: {
+    summary: string;
+    tone: string;
+    sellingPoints: string[];
+    flow: { title: string; purpose: string; note: string }[];
+  };
+  selling: { colors: string[]; sizes: string[] };
+  photos: {
+    index: number;
+    role: string;
+    description: string;
+    koreanTexts: string[];
+    facts: string[];
+    colorLabel: string | null;
+    colorsShown: string[];
+    usable: boolean;
+    reason: string | null;
+    hasSizeChart: boolean;
+  }[];
+  templates: { id: string; use: string; needsPhoto: boolean }[];
+  maxSections: number;
+}): Promise<any[]> {
+  const { selling } = input;
+  const colorLine = selling.colors.length
+    ? `${selling.colors.join(', ')} (${selling.colors.length}가지)`
+    : '입력 안 함 - 색상은 언급하지 마세요';
+  const sizeLine = selling.sizes.length
+    ? `${selling.sizes.join(', ')} (${selling.sizes.length}가지)`
+    : '입력 안 함 - 사이즈는 언급하지 마세요';
+
+  const photoLines = input.photos
+    .map((p) => {
+      const head = `사진 ${p.index + 1}번 [${p.usable ? '사용 가능' : '사용 불가: ' + p.reason}] 종류=${p.role}${
+        p.colorLabel ? ` / 색상=${p.colorLabel}` : ''
+      }${p.hasSizeChart ? ' / 사이즈표 있음' : ''}`;
+      const body = [
+        p.description && `  내용: ${p.description}`,
+        p.facts.length ? `  확인된 사실: ${p.facts.join(' | ')}` : '',
+        p.koreanTexts.length ? `  사진 속 문구(번역): ${p.koreanTexts.slice(0, 8).join(' | ')}` : '',
+        p.colorsShown.length ? `  사진에 보이는 색상: ${p.colorsShown.join(', ')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      return `${head}\n${body}`;
+    })
+    .join('\n');
+
+  const prompt = `당신은 쿠팡 상세페이지 기획자입니다. 중국 상품 사진을 분석한 내용과 쿠팡 인기상품 상세페이지의 흐름을 참고해서, 이 상품의 상세페이지를 "장면(섹션) 목록"으로 기획하세요.
+
+[상품] ${input.productName || input.category} (카테고리: ${input.category || '미입력'})
+
+[쿠팡 인기상품 상세페이지 흐름 - 이 순서와 역할을 최대한 따르세요]
+요약: ${input.flow.summary}
+어조: ${input.flow.tone || '(없음)'}
+인기상품이 공통으로 강조하는 키워드(참고용, 이 상품에 해당하는지는 사진으로 확인될 때만): ${input.flow.sellingPoints.join(', ') || '(없음)'}
+${input.flow.flow.map((s, i) => `${i + 1}. ${s.title} - ${s.purpose} (${s.note})`).join('\n')}
+
+[내가 실제로 판매하는 옵션]
+- 색상: ${colorLine}
+- 사이즈: ${sizeLine}
+
+⚠ 가장 중요한 규칙 (어기면 허위 표시가 됩니다):
+- 중국 사진에는 위보다 훨씬 많은 색상·사이즈가 나올 수 있지만, 나는 **위 옵션만** 판매합니다. 위에 없는 색상·사이즈는 문구·키워드·분위기·사양표 어디에도 절대 쓰지 마세요.
+- "N가지 색상", "N가지 사이즈"처럼 개수를 말할 때는 위에 적힌 개수와 정확히 같아야 합니다. 확신이 없으면 개수를 말하지 마세요.
+- 색상 이름을 문구에 쓸 때도 위 색상만 쓰세요. 색상을 바꾸는 지시(colorPrompt)는 쓰지 말고 빈 문자열로 두세요.
+- "사용 불가"로 표시된 사진은 sourceIndex로 지정하지 마세요. 그 사진에서도 소재·기능 같은 **사실 정보**는 참고해도 되지만 색상 정보는 쓰지 마세요.
+
+[사진 분석 결과 (번호는 1부터)]
+${photoLines || '(첨부된 사진 없음)'}
+
+[쓸 수 있는 템플릿 - templateId는 아래 중에서만]
+${input.templates.map((t) => `- ${t.id}: ${t.use}${t.needsPhoto ? ' [사진 필요 → sourceIndex 지정]' : ' [사진 없음]'}`).join('\n')}
+
+기획 규칙:
+- 장면은 최대 ${input.maxSections}개. 쿠팡 인기상품 흐름 순서를 따르되, 내 사진에서 확인되는 사실이 없는 장면은 만들지 마세요. 첫 장면은 관심을 끄는 훅, 마지막 근처에는 제품 사양표(kind "spec")를 넣으세요.
+- 사진이 필요한 템플릿은 sourceIndex에 **사진 번호에서 1을 뺀 0부터의 번호**를 넣으세요. 가능하면 장면마다 다른 사진을 쓰고, 특정 색상 장면은 그 색상 사진을 쓰세요. 사진 없는 템플릿은 sourceIndex를 null로.
+- keyword는 이미지 생성용 장면 키워드(배경·연출·확대 정도)이고 **상품의 모양·색을 바꾸는 내용이나 색상 이름은 쓰지 마세요**. mood는 분위기.
+- 문구는 한국어, 짧고 구체적으로 (description 헤드라인 18자 이내). **사진에서 확인되지 않는 소재·기능·수치·인증은 쓰지 마세요.** 사진 속 중국어 문구에서 확인된 사실을 근거로 하세요.
+- 최상급·과장·의학적 표현 금지: 최고, 1등, 1위, 최저가, 국내유일, 완벽, 100%, 무조건, 보장, 치료, 예방, 특허, 인증.
+- 장면마다 서로 다른 문구여야 합니다. 이미 확인된 수치가 없으면 stat-highlight 템플릿은 쓰지 마세요.
+- listItems는 문자열 배열(3~4개, 각 14자 이내).
+- spec 장면의 specRows는 사진에서 확인된 사실(소재, 원산지, 구성 등)만 label/value로. 색상/사이즈 행은 넣어도 되지만 값은 위 옵션만 쓰세요.
+
+JSON 배열로만 응답하세요. 각 원소는 다음 중 하나:
+{"kind":"section","templateId":"...","sourceIndex":0,"purpose":"장면의 역할","fields":{"keyword":"","mood":"","description":"","eyebrow":"","accentTitle":"","accentSubtitle":"","stat":"","statCaption":"","badge":"","bodyText":"","listItems":[],"colorPrompt":""}}
+{"kind":"spec","purpose":"제품 사양","specTitle":"제품 사양","specRows":[{"label":"소재","value":"..."}]}`;
+
+  const text = await callClaude(prompt);
+  return parseJsonArray(text);
+}
