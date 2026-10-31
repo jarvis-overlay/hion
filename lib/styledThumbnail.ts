@@ -48,6 +48,67 @@ export interface ShotCopyText {
 // 저장된 스타일은 이 기간이 지나면 다시 학습한다 (인기상품 구성은 서서히 바뀜)
 export const STYLE_BRIEF_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
+// 카테고리를 설정하지 않았거나 인기상품 학습에 실패했을 때 쓰는 범용 구성. 어떤
+// 상품에도 무리 없는 컷들이라, 이 경우에도 "메인 + 추가 이미지"가 항상 한 번에
+// 만들어지게 한다 (학습된 스타일보다 상품 맞춤도는 떨어짐).
+export const DEFAULT_STYLE_BRIEF: StyleBrief = {
+  summary: '카테고리별 인기상품 분석 없이 쓰는 기본 구성이에요.',
+  background: '깨끗한 밝은 단색 또는 은은한 톤의 스튜디오 배경',
+  props: '상품이 돋보이도록 소품은 최소한으로',
+  lighting: '부드러운 자연광과 은은한 그림자',
+  sellingPoints: [],
+  shots: [
+    {
+      id: 'd1',
+      title: '스튜디오 정면 컷',
+      scene: '밝고 깨끗한 단색 스튜디오 배경 위에 상품을 정면에서 크고 또렷하게, 바닥에 부드러운 그림자',
+      textPosition: 'bottom',
+    },
+    {
+      id: 'd2',
+      title: '디테일 확대 컷',
+      scene: '상품의 소재 질감과 마감이 잘 보이도록 가까이 확대한 컷, 배경은 단순하고 부드럽게 흐리게',
+      textPosition: 'bottom',
+    },
+    {
+      id: 'd3',
+      title: '라이프스타일 연출 컷',
+      scene: '따뜻한 톤의 실내 테이블이나 선반 위에 자연스럽게 놓인 상품, 소품은 한두 개만 곁들여 단정하게',
+      textPosition: 'top',
+    },
+    {
+      id: 'd4',
+      title: '위에서 내려다본 컷',
+      scene: '밝은 배경 위에 상품을 위에서 내려다본 구도로 깔끔하게 놓은 컷, 여백을 충분히',
+      textPosition: 'bottom',
+    },
+    {
+      id: 'd5',
+      title: '컬러 배경 컷',
+      scene: '상품 색과 어울리는 은은한 파스텔 그라데이션 배경 위에 상품을 중앙에 크게 배치',
+      textPosition: 'top',
+    },
+    {
+      id: 'd6',
+      title: '비스듬한 각도 컷',
+      scene: '상품을 약간 비스듬한 각도에서 입체감이 느껴지게 촬영한 컷, 은은한 반사광과 그림자',
+      textPosition: 'bottom',
+    },
+    {
+      id: 'd7',
+      title: '여백 강조 컷',
+      scene: '넓은 여백 속에 상품을 한쪽에 치우쳐 배치한 미니멀한 구도, 차분한 배경',
+      textPosition: 'top',
+    },
+    {
+      id: 'd8',
+      title: '그림자 강조 컷',
+      scene: '조명이 한쪽에서 비치는 따뜻한 스튜디오, 상품 옆으로 길게 드리운 부드러운 그림자',
+      textPosition: 'bottom',
+    },
+  ],
+};
+
 function requireEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} 환경변수가 설정 안 되어있어요.`);

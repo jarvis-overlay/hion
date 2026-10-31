@@ -18,6 +18,7 @@ import {
   learnStyleBrief,
   generateStyledAdditionalImage,
   STYLE_BRIEF_TTL_MS,
+  DEFAULT_STYLE_BRIEF,
   type StyleBrief,
   type StyleShot,
   type ShotCopyText,
@@ -130,21 +131,6 @@ export async function addThumbnailImage(
 
   return runGeneration(supabase, imageId, projectId, { buffer, mimeType }, productPosition, effectPrompt);
 }
-
-// URL(또는 파일) 하나만 넣으면 메인 썸네일 1장 + 추가 이미지 3~7장을
-// 한 번에 만들어달라는 요청 - 매번 "+ 행 추가"로 한 장씩 URL/효과를
-// 입력하지 않아도 되게, 같은 원본 사진을 위치/효과 프리셋을 돌려가며
-// 자동으로 여러 장 생성한다.
-const BATCH_EFFECT_PRESETS = [
-  '제품을 강조하는 깔끔한 그림자와 은은한 조명 효과를 추가해줘',
-  '배경에 입체감 있는 반사광과 하이라이트를 추가해줘',
-  '고급스러운 느낌의 은은한 그라데이션 포인트를 배경에 추가해줘',
-  '제품 주변에 부드러운 반사광을 추가해서 프리미엄 느낌을 줘',
-  '따뜻한 느낌의 조명과 약간의 입체 그림자를 추가해줘',
-  '시원한 느낌의 블루톤 포인트 조명을 배경에 추가해줘',
-  '제품이 돋보이도록 배경에 은은한 서클 조명 효과를 추가해줘',
-];
-const BATCH_POSITION_CYCLE: ThumbnailPosition[] = ['center', 'left', 'right', 'top', 'bottom'];
 
 // 메인/추가 이미지 하나를 업로드→DB 등록→생성까지 묶어서 처리 - 일괄
 // 생성에서 사진마다(합성 변형이든, 실제 서로 다른 사진이든) 반복되는
@@ -350,22 +336,41 @@ async function insertAndGenerateStyled(
   return runStyledGeneration(supabase, imageId, projectId, source, spec, appearanceSpec);
 }
 
-// 추가 이미지를 count장 만든다: 컷은 학습된 스타일의 컷 목록을 순서대로(모자라면
-// 반복), 원본 사진은 여러 장이면 돌려가며 쓴다. 이미지 생성 호출은 3개씩 동시에.
-async function generateStyledAdditionals(
-  supabase: ReturnType<typeof createClient>,
-  args: {
-    projectId: string;
-    productName: string;
-    category: string;
-    brief: StyleBrief;
-    sources: { buffer: Buffer; mimeType: string }[];
-    count: number;
-    colorLabel: string | null;
-    startIndex: number;
-  }
-): Promise<{ ok: number; total: number; copyMissing: boolean; firstError: string | null }> {
+// ---------------------------------------------------------------------------
+// 일괄 생성: 색상(묶음)마다 메인 1장 + 추가 이미지 N장
+// ---------------------------------------------------------------------------
+interface BatchSource {
+  buffer: Buffer;
+  mimeType: string;
+}
+
+interface StyledJob {
+  label: string | null;
+  position: number;
+  source: BatchSource;
+  appearanceSpec: string | null;
+  spec: StyledSpec;
+}
+
+const MAX_ADDITIONAL = 8;
+// 서버 실행 제한(280초) 안에 응답이 끝나도록, 이 시간이 지나면 아직 시작하지 않은 추가
+// 이미지는 건너뛴다. 건너뛴 만큼은 화면에 안내하고(행도 만들지 않음) 다시 시도하게 한다.
+const BATCH_DEADLINE_MS = 235_000;
+
+// 한 색상 묶음의 컷별 한국어 문구와 원본 사진별 외형 명세를 준비해서, 만들 이미지
+// 작업 목록을 돌려준다. 컷은 스타일의 컷 목록을 순서대로(모자라면 반복), 원본
+// 사진은 그 색상의 사진이 여러 장이면 돌려가며 쓴다.
+async function prepareStyledGroup(args: {
+  productName: string;
+  category: string;
+  brief: StyleBrief;
+  sources: BatchSource[];
+  count: number;
+  label: string | null;
+  startIndex: number;
+}): Promise<{ jobs: StyledJob[]; copyMissing: boolean }> {
   const { brief, sources, count } = args;
+  if (count <= 0) return { jobs: [], copyMissing: false };
   const shots: StyleShot[] = Array.from({ length: count }, (_, i) => brief.shots[i % brief.shots.length]);
 
   // 컷별 한국어 문구 (실패하면 문구 없이 이미지만 만든다)
@@ -389,32 +394,34 @@ async function generateStyledAdditionals(
   // 원본 사진마다 외형 명세를 한 번만 뽑아서 같은 사진으로 만드는 컷들이 공유한다
   const appearanceSpecs = await Promise.all(sources.map((s) => describeProductAppearance(s)));
 
-  const results = await mapLimit(shots, 3, async (shot, i) => {
-    const srcIdx = i % sources.length;
-    const spec: StyledSpec = {
+  const jobs: StyledJob[] = shots.map((shot, i) => ({
+    label: args.label,
+    position: args.startIndex + i,
+    source: sources[i % sources.length],
+    appearanceSpec: appearanceSpecs[i % sources.length],
+    spec: {
       shot,
       copy: copyByShot.get(shot.id) ?? null,
       brief: { background: brief.background, props: brief.props, lighting: brief.lighting },
-    };
-    return insertAndGenerateStyled(
-      supabase,
-      args.projectId,
-      args.startIndex + i,
-      sources[srcIdx],
-      spec,
-      args.colorLabel,
-      appearanceSpecs[srcIdx]
-    );
-  });
-
-  const failed = results.find((r): r is { error: string } => 'error' in r);
-  return {
-    ok: results.filter((r) => !('error' in r)).length,
-    total: count,
-    copyMissing: copyByShot.size === 0,
-    firstError: failed ? failed.error : null,
-  };
+    },
+  }));
+  return { jobs, copyMissing: copyByShot.size === 0 };
 }
+
+// 색상마다 작업을 하나씩 번갈아 세워서, 시간 예산이 모자라 일부를 건너뛰게 되더라도
+// 특정 색상만 통째로 빠지지 않게 한다.
+function interleave<T>(lists: T[][]): T[] {
+  const out: T[] = [];
+  const max = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; i < max; i++) for (const l of lists) if (i < l.length) out.push(l[i]);
+  return out;
+}
+
+const clampCount = (v: unknown, fallback: number) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(MAX_ADDITIONAL, Math.round(n)));
+};
 
 export async function generateThumbnailBatch(
   projectId: string,
@@ -428,13 +435,18 @@ export async function generateThumbnailBatch(
       additionalOk: number;
       additionalTotal: number;
       colorGroups: number;
-      // 인기상품 스타일을 적용했는지, 그리고 화면에 같이 알려줄 안내 문구들
-      styledApplied: boolean;
+      // 'learned' = 쿠팡 인기상품 분석 스타일, 'default' = 범용 기본 구성
+      styleKind: 'learned' | 'default';
       styleSourceCount: number;
       notes: string[];
     }
 > {
+  const startedAt = Date.now();
   const supabase = createClient();
+
+  // 1) 입력 -> 색상 묶음. 사진을 여러 장 올렸으면 색상 라벨이 같은 사진끼리 한 묶음(라벨
+  //    없는 사진은 "기본" 묶음), URL이면 묶음 하나. 묶음마다 첫 사진이 메인이 되고,
+  //    추가 이미지는 그 묶음의 사진들로 만든다.
   const rawFiles = formData.getAll('images');
   const rawLabels = formData.getAll('colorLabels');
   const filePairs = rawFiles
@@ -443,13 +455,38 @@ export async function generateThumbnailBatch(
   const imageUrl = String(formData.get('imageUrl') || '').trim();
   if (filePairs.length === 0 && !imageUrl) return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
 
-  let additionalCount = Number(formData.get('additionalCount') || 5);
-  if (!Number.isFinite(additionalCount)) additionalCount = 5;
-  additionalCount = Math.max(3, Math.min(7, Math.round(additionalCount)));
+  const groups = new Map<string | null, BatchSource[]>();
+  if (filePairs.length > 0) {
+    for (const p of filePairs) {
+      const src: BatchSource = {
+        buffer: Buffer.from(await p.file.arrayBuffer()),
+        mimeType: p.file.type || 'image/jpeg',
+      };
+      if (!groups.has(p.colorLabel)) groups.set(p.colorLabel, []);
+      groups.get(p.colorLabel)!.push(src);
+    }
+  } else {
+    try {
+      groups.set(null, [await fetchImageFromUrl(imageUrl)]);
+    } catch (e: any) {
+      return { error: e?.message || String(e) };
+    }
+  }
 
-  // 카테고리가 설정돼 있으면 쿠팡 인기상품 스타일을 학습(또는 저장된 것 재사용)해서
-  // 추가 이미지에 적용한다. 학습이 실패해도 기존 방식으로 계속 만들어서 일괄생성
-  // 자체가 막히지는 않게 하고, 왜 기본 방식이 됐는지 화면에 안내한다.
+  // 2) 색상별 추가 이미지 개수 (화면에서 색상마다 지정, 없으면 기본값)
+  const defaultCount = clampCount(formData.get('additionalCount'), 5);
+  let countsByLabel: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(String(formData.get('additionalCounts') || '{}'));
+    if (parsed && typeof parsed === 'object') countsByLabel = parsed;
+  } catch {
+    // 잘못된 값이면 전부 기본 개수를 쓴다
+  }
+  const countFor = (label: string | null) => clampCount(countsByLabel[label ?? ''], defaultCount);
+
+  // 3) 스타일: 카테고리가 있으면 쿠팡 인기상품 학습 스타일(저장된 것 재사용), 없거나
+  //    학습에 실패하면 범용 기본 구성. 어느 쪽이든 추가 이미지는 항상 만들고, 기본
+  //    구성이 된 이유는 화면에 안내한다.
   const { data: projectRow } = await supabase
     .from('thumbnail_projects')
     .select('title, category')
@@ -458,163 +495,103 @@ export async function generateThumbnailBatch(
   const category = (projectRow?.category || '').trim();
   const productName = (projectRow?.title || '').trim() || category;
   const notes: string[] = [];
-  let style: { brief: StyleBrief; sourceCount: number } | null = null;
+  let brief: StyleBrief = DEFAULT_STYLE_BRIEF;
+  let styleKind: 'learned' | 'default' = 'default';
+  let styleSourceCount = 0;
   if (category) {
     try {
       const learned = await getOrLearnBrief(supabase, category);
-      style = { brief: learned.brief, sourceCount: learned.sourceCount };
+      brief = learned.brief;
+      styleKind = 'learned';
+      styleSourceCount = learned.sourceCount;
       if (learned.saveWarning) {
         notes.push(
           `학습한 스타일을 저장하지 못했어요(${learned.saveWarning}). supabase/thumbnail_style_learning.sql을 실행하면 다음부터 재사용돼요.`
         );
       }
     } catch (e: any) {
-      notes.push(`인기상품 스타일 학습에 실패해서 기본 방식(누끼)으로 만들었어요: ${e?.message || String(e)}`);
+      notes.push(`인기상품 스타일 학습에 실패해서 기본 구성으로 만들었어요: ${e?.message || String(e)}`);
     }
   } else {
-    notes.push('카테고리를 설정하면 쿠팡 인기상품 스타일로 추가 이미지를 만들어요. 이번에는 기본 방식(누끼)으로 만들었어요.');
+    notes.push('카테고리를 설정하면 쿠팡 인기상품 스타일로 만들어요. 이번에는 기본 구성(스튜디오·디테일·연출 컷 등)으로 만들었어요.');
   }
 
+  // 4) 메인: 묶음(색상)마다 1장, 같은 색상의 기존 메인은 교체. 색상끼리는 2개씩 동시에.
+  const entries = Array.from(groups.entries());
+  const mainResults = await mapLimit(entries, 2, async ([label, sources]) => {
+    let del = supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
+    del = label ? del.eq('color_label', label) : del.is('color_label', null);
+    await del;
+    return insertAndGenerateImage(supabase, projectId, 'main', 0, sources[0], 'center', '', label);
+  });
+  const mainOk = mainResults.filter((r) => !('error' in r)).length;
+  const mainErr = mainResults.find((r): r is { error: string } => 'error' in r);
+  if (mainErr) notes.push(`메인 이미지 생성 실패: ${mainErr.error}`);
+
+  // 5) 추가 이미지: 색상마다 준비(문구·외형 명세)해서 한 줄로 세우고 3개씩 동시에 생성
   const { count: existingCount } = await supabase
     .from('thumbnail_images')
     .select('id', { count: 'exact', head: true })
     .eq('project_id', projectId)
     .eq('kind', 'additional');
-  let baseIndex = existingCount || 0;
+  let nextIndex = existingCount || 0;
+  const startIndexes = entries.map(([label]) => {
+    const start = nextIndex;
+    nextIndex += countFor(label);
+    return start;
+  });
+  const prepared = await Promise.all(
+    entries.map(([label, sources], i) =>
+      prepareStyledGroup({
+        productName,
+        category,
+        brief,
+        sources,
+        count: countFor(label),
+        label,
+        startIndex: startIndexes[i],
+      })
+    )
+  );
+  if (prepared.some((p) => p.copyMissing)) notes.push('문구 생성에 실패해서 일부 이미지는 문구 없이 만들었어요.');
 
-  // 1688 소싱 확장프로그램 등으로 실제 상품 사진을 여러 장 한 번에
-  // 받아온 경우 - 사진마다 이미 서로 다른 실제 컷이라 효과를 합성해
-  // "변형"을 만들 필요가 없다. 색상 라벨이 같은 사진끼리 그룹으로 묶어
-  // 그룹별로 "첫 장 = 그 색상의 메인, 나머지 = 그 색상의 추가 이미지"로
-  // 완전히 별도 세트를 만든다("색상마다 완전히 별도 세트로 생성해달라"는
-  // 요청). 라벨을 안 붙이면 전체가 하나의 그룹으로 묶여 기존과 동일하게
-  // 동작한다.
-  if (filePairs.length > 1) {
-    const sources = await Promise.all(
-      filePairs.map(async (p) => ({
-        buffer: Buffer.from(await p.file.arrayBuffer()),
-        mimeType: p.file.type || 'image/jpeg',
-        colorLabel: p.colorLabel,
-      }))
-    );
-
-    const groups = new Map<string | null, typeof sources>();
-    for (const s of sources) {
-      if (!groups.has(s.colorLabel)) groups.set(s.colorLabel, []);
-      groups.get(s.colorLabel)!.push(s);
-    }
-
-    let mainOk = 0;
-    let additionalOk = 0;
-    let additionalTotal = 0;
-    for (const [colorLabel, groupSources] of groups) {
-      // 이 색상의 기존 메인만 지우고 다른 색상의 메인은 그대로 둔다.
-      let delQuery = supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
-      delQuery = colorLabel ? delQuery.eq('color_label', colorLabel) : delQuery.is('color_label', null);
-      await delQuery;
-
-      const mainResult = await insertAndGenerateImage(
-        supabase, projectId, 'main', 0, groupSources[0], 'center', '', colorLabel
-      );
-      if (!('error' in mainResult)) mainOk++;
-
-      if (style) {
-        // 그 색상의 사진들을 돌려가며 학습된 컷 구성으로 추가 이미지를 새로 만든다
-        const styled = await generateStyledAdditionals(supabase, {
-          projectId,
-          productName,
-          category,
-          brief: style.brief,
-          sources: groupSources,
-          count: additionalCount,
-          colorLabel,
-          startIndex: baseIndex,
-        });
-        baseIndex += additionalCount;
-        additionalTotal += styled.total;
-        additionalOk += styled.ok;
-        if (styled.copyMissing) notes.push('문구 생성에 실패해서 일부 이미지는 문구 없이 만들었어요.');
-        if (styled.ok < styled.total && styled.firstError) notes.push(`일부 이미지 생성 실패: ${styled.firstError}`);
-      } else {
-        for (let i = 1; i < groupSources.length; i++) {
-          additionalTotal++;
-          const res = await insertAndGenerateImage(
-            supabase, projectId, 'additional', baseIndex++, groupSources[i], 'center', '', colorLabel
-          );
-          if (!('error' in res)) additionalOk++;
-        }
-      }
-    }
-    revalidatePath(PATH);
-    return {
-      success: true,
-      mainOk,
-      mainTotal: groups.size,
-      additionalOk,
-      additionalTotal,
-      colorGroups: groups.size,
-      styledApplied: !!style,
-      styleSourceCount: style?.sourceCount ?? 0,
-      notes: Array.from(new Set(notes)),
-    };
-  }
-
-  // 사진 1장 또는 URL 1개만 있는 경우 - 위치·효과 프리셋을 자동으로
-  // 돌려가며 하나의 원본으로 추가 이미지 3~7장을 합성해서 만든다.
-  await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main').is('color_label', null);
-
-  let buffer: Buffer;
-  let mimeType: string;
-  if (filePairs.length === 1) {
-    buffer = Buffer.from(await filePairs[0].file.arrayBuffer());
-    mimeType = filePairs[0].file.type || 'image/jpeg';
-  } else {
-    try {
-      const fetched = await fetchImageFromUrl(imageUrl);
-      buffer = fetched.buffer;
-      mimeType = fetched.mimeType;
-    } catch (e: any) {
-      return { error: e?.message || String(e) };
-    }
-  }
-
-  const mainResult = await insertAndGenerateImage(supabase, projectId, 'main', 0, { buffer, mimeType }, 'center', '');
-  const mainOk = !('error' in mainResult) ? 1 : 0;
-
-  let additionalOk = 0;
-  if (style) {
-    const styled = await generateStyledAdditionals(supabase, {
+  const jobs = interleave(prepared.map((p) => p.jobs));
+  const results = await mapLimit(jobs, 3, async (job) => {
+    if (Date.now() - startedAt > BATCH_DEADLINE_MS) return { skipped: true as const };
+    return insertAndGenerateStyled(
+      supabase,
       projectId,
-      productName,
-      category,
-      brief: style.brief,
-      sources: [{ buffer, mimeType }],
-      count: additionalCount,
-      colorLabel: null,
-      startIndex: baseIndex,
-    });
-    additionalOk = styled.ok;
-    if (styled.copyMissing) notes.push('문구 생성에 실패해서 일부 이미지는 문구 없이 만들었어요.');
-    if (styled.ok < styled.total && styled.firstError) notes.push(`일부 이미지 생성 실패: ${styled.firstError}`);
-  } else {
-    for (let i = 0; i < additionalCount; i++) {
-      const position = BATCH_POSITION_CYCLE[i % BATCH_POSITION_CYCLE.length];
-      const effectPrompt = BATCH_EFFECT_PRESETS[i % BATCH_EFFECT_PRESETS.length];
-      const res = await insertAndGenerateImage(supabase, projectId, 'additional', baseIndex + i, { buffer, mimeType }, position, effectPrompt);
-      if (!('error' in res)) additionalOk++;
-    }
+      job.position,
+      job.source,
+      job.spec,
+      job.label,
+      job.appearanceSpec
+    );
+  });
+  const skipped = results.filter((r) => 'skipped' in r).length;
+  const failed = results.filter((r): r is { error: string } => 'error' in r);
+  const additionalOk = results.filter((r) => 'success' in r).length;
+  if (skipped > 0) {
+    notes.push(
+      `시간 제한 때문에 추가 이미지 ${skipped}장은 만들지 못했어요. 개수를 줄이거나 색상을 나눠서 다시 생성해주세요.`
+    );
+  }
+  if (failed.length > 0) {
+    notes.push(
+      `추가 이미지 ${failed.length}장 생성 실패: ${failed[0].error} (실패한 카드의 '다시 생성'으로 다시 시도할 수 있어요)`
+    );
   }
 
   revalidatePath(PATH);
   return {
     success: true,
     mainOk,
-    mainTotal: 1,
+    mainTotal: entries.length,
     additionalOk,
-    additionalTotal: additionalCount,
-    colorGroups: 1,
-    styledApplied: !!style,
-    styleSourceCount: style?.sourceCount ?? 0,
+    additionalTotal: jobs.length,
+    colorGroups: entries.length,
+    styleKind,
+    styleSourceCount,
     notes: Array.from(new Set(notes)),
   };
 }

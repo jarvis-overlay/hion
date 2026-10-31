@@ -384,9 +384,29 @@ function ProjectEditor({
   // 메인이 된다. 비워두면(태그 없음) 기존처럼 전체가 한 세트로 묶인다.
   const [batchColorLabels, setBatchColorLabels] = useState<string[]>([]);
   const [batchUrl, setBatchUrl] = useState('');
-  const [batchCount, setBatchCount] = useState(5);
+  // 색상(묶음)마다 만들 추가 이미지 개수. 키는 색상 라벨('' = 색상 미지정/URL 입력).
+  // 아직 안 건드린 색상은 기본 5장.
+  const [batchCounts, setBatchCounts] = useState<Record<string, number>>({});
   const [batchResult, setBatchResult] = useState<string | null>(null);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
+
+  const DEFAULT_ADDITIONAL = 5;
+  const MAX_ADDITIONAL = 8;
+  // 올린 사진들이 어떤 색상 묶음으로 나뉘는지 (서버가 묶는 규칙과 같다: 라벨 같은
+  // 사진끼리, 라벨 없는 사진은 한 묶음). URL 입력이면 묶음 하나.
+  const batchColorKeys: string[] =
+    batchFiles.length > 0
+      ? Array.from(new Set(batchFiles.map((_, i) => (batchColorLabels[i] || '').trim())))
+      : [''];
+  const batchPhotoCount = (key: string) =>
+    batchFiles.filter((_, i) => (batchColorLabels[i] || '').trim() === key).length;
+  const batchCountOf = (key: string) => Math.min(MAX_ADDITIONAL, Math.max(0, batchCounts[key] ?? DEFAULT_ADDITIONAL));
+  const batchAdditionalTotal = batchColorKeys.reduce((sum, k) => sum + batchCountOf(k), 0);
+  const setBatchCountFor = (key: string, value: number) =>
+    setBatchCounts((prev) => ({
+      ...prev,
+      [key]: Math.min(MAX_ADDITIONAL, Math.max(0, Number.isFinite(value) ? Math.round(value) : DEFAULT_ADDITIONAL)),
+    }));
 
   const images: any[] = project.thumbnail_images || [];
   const mainImages = images.filter((i) => i.kind === 'main');
@@ -453,7 +473,11 @@ function ProjectEditor({
     } else {
       fd.set('imageUrl', batchUrl.trim());
     }
-    fd.set('additionalCount', String(batchCount));
+    fd.set('additionalCount', String(DEFAULT_ADDITIONAL));
+    fd.set(
+      'additionalCounts',
+      JSON.stringify(Object.fromEntries(batchColorKeys.map((k) => [k, batchCountOf(k)])))
+    );
     setBusyId('batch');
     startTransition(async () => {
       const res = await generateThumbnailBatch(project.id, fd);
@@ -466,12 +490,15 @@ function ProjectEditor({
         `메인 썸네일 ${res.mainOk}/${res.mainTotal}장` +
           (res.colorGroups > 1 ? ` (색상 ${res.colorGroups}개)` : '') +
           ` · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료` +
-          (res.styledApplied ? ` (쿠팡 인기상품 ${res.styleSourceCount}개 분석 스타일 적용)` : '') +
+          (res.styleKind === 'learned'
+            ? ` (쿠팡 인기상품 ${res.styleSourceCount}개 분석 스타일 적용)`
+            : ' (기본 구성)') +
           (res.notes.length ? `\n${res.notes.join('\n')}` : '')
       );
       setBatchFiles([]);
       setBatchPreviews([]);
       setBatchColorLabels([]);
+      setBatchCounts({});
       setBatchUrl('');
     });
   }
@@ -592,10 +619,11 @@ function ProjectEditor({
           <h3 className="text-sm font-semibold">한 번에 만들기</h3>
           <p className="text-[11px] text-inkSoft">
             상품 사진(여러 장 가능)이나 URL을 넣으면 <strong>메인 썸네일은 쿠팡 규정대로 흰 배경</strong>으로,
-            <strong> 추가 이미지는 쿠팡 인기상품을 분석해 학습한 스타일</strong>(배경·소품·컷 구성 + 한국어 강조
-            문구)로 새로 만들어요. 위에서 <strong>카테고리를 설정</strong>해야 적용되고, 안 하면 예전처럼 누끼
-            방식으로 만들어요. 사진마다 <strong>색상을 태그</strong>해두면 같은 색상끼리 묶여 색상별로 완전히 별도
-            세트(메인+추가)가 만들어져요 - 같은 색상 중 먼저 선택한 사진이 그 색상의 메인이 돼요. 문구는 AI가 만든
+            <strong> 추가 이미지는 한국어 강조 문구가 들어간 연출 컷</strong>으로 한 번에 만들어요. 위에서
+            <strong>카테고리를 설정</strong>하면 쿠팡 인기상품을 분석해 학습한 스타일로, 안 하면 범용 기본
+            구성(스튜디오·디테일·연출 컷 등)으로 만들어요. 사진마다 <strong>색상을 태그</strong>하면 같은 색상끼리
+            묶여서, <strong>색상마다 메인 1장 + 추가 이미지</strong>가 따로 만들어져요(같은 색상 중 먼저 선택한
+            사진이 그 색상의 메인). 추가 이미지 개수는 아래에서 색상별로 정할 수 있어요. 문구는 AI가 만든
             초안이니 사실과 다른 내용이 없는지 확인하세요.
           </p>
         </div>
@@ -682,19 +710,56 @@ function ProjectEditor({
             className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full disabled:opacity-50"
           />
           {batchFiles.length <= 1 && <UrlWarning url={batchUrl} />}
-          {(batchFiles.length <= 1 || project.category) && (
-            <label className="text-[11px] text-inkSoft">
-              {project.category ? '추가 이미지 개수' : '사진 1장으로 만들 때 추가 이미지 개수'} ({batchCount}장
-              {project.category && batchFiles.length > 1 ? ', 색상마다' : ''})
-              <input
-                type="range"
-                min={3}
-                max={7}
-                value={batchCount}
-                onChange={(e) => setBatchCount(Number(e.target.value))}
-                className="w-full"
-              />
-            </label>
+          {(batchFiles.length > 0 || batchUrl.trim()) && (
+            <div className="grid gap-1.5 bg-paper rounded p-2.5">
+              <p className="text-[11px] font-semibold text-inkSoft">
+                색상별 추가 이미지 개수 (메인은 색상마다 1장, 추가는 0~{MAX_ADDITIONAL}장)
+              </p>
+              {batchColorKeys.map((key) => (
+                <div key={key || '__none__'} className="flex items-center gap-2 text-xs">
+                  <span className="flex-1 min-w-0 truncate">
+                    {key || (batchColorKeys.length > 1 ? '색상 미지정' : '추가 이미지')}
+                    {batchFiles.length > 0 && (
+                      <span className="text-inkSoft"> · 사진 {batchPhotoCount(key)}장</span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBatchCountFor(key, batchCountOf(key) - 1)}
+                    disabled={batchCountOf(key) <= 0}
+                    className="w-6 h-6 rounded border border-paperLine bg-white disabled:opacity-40"
+                    aria-label="개수 줄이기"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    max={MAX_ADDITIONAL}
+                    value={batchCountOf(key)}
+                    onChange={(e) => setBatchCountFor(key, Number(e.target.value))}
+                    className="w-12 border border-paperLine bg-white px-1 py-0.5 text-center font-mono"
+                    aria-label={`${key || '추가 이미지'} 추가 이미지 개수`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setBatchCountFor(key, batchCountOf(key) + 1)}
+                    disabled={batchCountOf(key) >= MAX_ADDITIONAL}
+                    className="w-6 h-6 rounded border border-paperLine bg-white disabled:opacity-40"
+                    aria-label="개수 늘리기"
+                  >
+                    +
+                  </button>
+                  <span className="text-inkSoft">장</span>
+                </div>
+              ))}
+              {batchAdditionalTotal + batchColorKeys.length > 12 && (
+                <p className="text-[11px] text-warn">
+                  한 번에 12장을 넘으면 시간이 오래 걸려 일부가 만들어지지 않을 수 있어요. 색상을 나눠서 생성하는 걸
+                  권장해요.
+                </p>
+              )}
+            </div>
           )}
           <button
             onClick={handleBatchGenerate}
@@ -703,9 +768,7 @@ function ProjectEditor({
           >
             {isPending && busyId === 'batch'
               ? '생성 중... (시간이 좀 걸려요)'
-              : batchFiles.length > 1
-                ? `선택한 사진 ${batchFiles.length}장으로 한 번에 생성`
-                : `메인 + 추가 ${batchCount}장 한 번에 생성`}
+              : `메인 ${batchColorKeys.length}장 + 추가 ${batchAdditionalTotal}장 한 번에 생성`}
           </button>
           {batchResult && <p className="text-[11px] text-accent whitespace-pre-line">{batchResult}</p>}
         </div>
