@@ -27,6 +27,7 @@ interface SourceItem {
   status: 'ready' | 'uploading' | 'done' | 'error';
   error?: string;
   analysisFailed?: boolean;
+  overlaysRemoved?: number;
 }
 
 type Stage = 'idle' | 'upload' | 'flow' | 'plan' | 'generate' | 'done';
@@ -150,7 +151,7 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
         if (!r || 'error' in r) {
           patchSource(it.id, { status: 'error', error: r?.error ?? '업로드 실패' });
         } else {
-          patchSource(it.id, { status: 'done', analysisFailed: !r.analysis });
+          patchSource(it.id, { status: 'done', analysisFailed: !r.analysis, overlaysRemoved: r.overlaysRemoved });
           uploaded.push({ item: it, url: r.url, analysis: r.analysis });
         }
       });
@@ -403,7 +404,11 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
                 />
                 <span className="text-[11px] shrink-0">
                   {s.status === 'uploading' && <span className="text-inkSoft">분석 중...</span>}
-                  {s.status === 'done' && !s.analysisFailed && <span className="text-profit">분석 완료</span>}
+                  {s.status === 'done' && !s.analysisFailed && (
+                    <span className="text-profit">
+                      분석 완료{s.overlaysRemoved ? ` · 글자/아이콘 ${s.overlaysRemoved}곳 제거` : ''}
+                    </span>
+                  )}
                   {s.status === 'done' && s.analysisFailed && <span className="text-warn">분석 실패</span>}
                   {s.status === 'error' && <span className="text-warn">{s.error}</span>}
                 </span>

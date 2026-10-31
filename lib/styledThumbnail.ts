@@ -13,6 +13,7 @@
 //      폰트로 서버에서 합성한다 (상세페이지 제작과 같은 방식). 문구 배치는 컷마다
 //      캡션/포인트 목록/배지 중 학습한 방식을 쓴다.
 import sharp from 'sharp';
+import { removeOverlays } from '@/lib/overlayCleanup';
 import { createCanvas } from 'canvas';
 import { fetchCoupangBestsellers, fetchCoupangGalleryImageUrls } from '@/lib/brightdata';
 import {
@@ -569,10 +570,12 @@ ${FIDELITY_RULE}${
   if (!imagePart) {
     throw new Error('이미지 생성 결과를 받지 못했어요. 다시 시도해주세요.');
   }
-  const base = await sharp(Buffer.from(imagePart.inlineData.data, 'base64'))
+  let base = await sharp(Buffer.from(imagePart.inlineData.data, 'base64'))
     .resize({ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE, fit: 'cover' })
     .jpeg({ quality: 92 })
     .toBuffer();
+  // AI가 원본 사진의 글자/아이콘을 다시 그려 넣는 경우를 검사해서 코드로 지운다 (문구는 이후에 우리가 합성)
+  base = (await removeOverlays(base, 'image/jpeg')).buffer;
 
   if (!input.copy || !input.copy.headline) return base;
   return overlayThumbnailCopy(base, input.copy, input.shot.textPosition, layout);

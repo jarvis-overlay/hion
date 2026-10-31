@@ -132,6 +132,11 @@ export function evaluatePhoto(
   selling: SellingOptions,
   colorLabel: string | null
 ): PhotoVerdict {
+  // 사이즈표 사진은 표(글자)가 대부분이라 상품 사진 배경으로 쓰면 표 모양이 다시 그려진다.
+  // 표의 내용은 사양표에 반영되므로 사진으로는 쓰지 않는다.
+  if (analysis?.role === 'size_chart') {
+    return { usable: false, color: null, reason: '사이즈표 사진이라 상품 사진으로는 쓰지 않아요 (표 내용은 사양표에 반영돼요)' };
+  }
   const label = (colorLabel || '').trim();
   const shown = (analysis?.colorsShown || []).map((c) => c.trim()).filter(Boolean);
   // 표기만 다른 같은 색은 한 번만 센다

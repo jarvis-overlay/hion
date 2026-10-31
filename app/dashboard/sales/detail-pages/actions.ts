@@ -16,6 +16,7 @@ import {
   type SpecRow,
 } from '@/lib/imageProcessing';
 import { recommendDetailSectionCopy, planDetailSectionsRaw, type DetailCopyRecommendation } from '@/lib/ai';
+import { removeOverlays } from '@/lib/overlayCleanup';
 import {
   analyzeSourceImage,
   learnDetailFlow,
@@ -332,6 +333,9 @@ async function runGeneration(
       const referenceImages =
         project?.category && !options.skipReference ? await fetchTopSellerReferenceImages(project.category) : [];
       background = await generateDetailBackground(input, productImage, referenceImages);
+      // AI가 원본 사진 속 글자/아이콘(특히 중국어)을 다시 그려 넣는 일이 잦아서, 생성 결과를
+      // 검사해 남은 글자/아이콘은 코드로 지운다. 실패해도 생성은 계속한다(원본 그대로 사용).
+      background = (await removeOverlays(background, 'image/jpeg')).buffer;
       // 배경 보관은 편의 기능이라 실패해도 생성 자체는 계속한다
       // (못 남기면 나중에 수정할 때 배경을 새로 만들게 될 뿐).
       const { error: bgErr } = await supabase.storage
@@ -640,7 +644,13 @@ export async function deleteSection(id: string) {
 
 export type UploadedSource =
   | { error: string }
-  | { success: true; url: string; analysis: SourceAnalysis | null; analysisError: string | null };
+  | {
+      success: true;
+      url: string; // 글자/아이콘을 지운 사진 주소 (지울 게 없었으면 원본)
+      analysis: SourceAnalysis | null;
+      analysisError: string | null;
+      overlaysRemoved: number; // 지운 글자/아이콘 영역 수
+    };
 
 async function uploadAndAnalyze(
   supabase: ReturnType<typeof createClient>,
@@ -656,17 +666,35 @@ async function uploadAndAnalyze(
     upsert: true,
   });
   if (upErr) return { error: upErr.message };
-  const url = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  const originalUrl = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 
-  // 분석에 실패해도 사진 자체는 올라간 것으로 처리한다 (색상 라벨을 붙였다면 그걸 믿고 쓸 수 있음)
+  // 분석(원본으로 해야 중국어를 읽는다)과 글자/아이콘 지우기를 동시에 한다. 상세페이지 생성에는
+  // 글자를 지운 사진을 쓴다 - AI에게 "글자를 지워라"라고 말로만 시키면 사진의 일부로 보고
+  // 그대로 다시 그려 넣는 일이 잦아서, 생성에 넣기 전에 코드로 먼저 지워둔다.
+  // 분석이나 지우기가 실패해도 사진 자체는 올라간 것으로 처리한다 (색상 라벨을 붙였다면 그걸 믿고 쓸 수 있음).
+  const [analysisRes, cleanRes] = await Promise.allSettled([
+    analyzeSourceImage({ buffer, mimeType }),
+    removeOverlays(buffer, mimeType),
+  ]);
   let analysis: SourceAnalysis | null = null;
   let analysisError: string | null = null;
-  try {
-    analysis = await analyzeSourceImage({ buffer, mimeType });
-  } catch (e: any) {
-    analysisError = e?.message || String(e);
+  if (analysisRes.status === 'fulfilled') analysis = analysisRes.value;
+  else analysisError = (analysisRes.reason as any)?.message || String(analysisRes.reason);
+
+  let url = originalUrl;
+  let overlaysRemoved = 0;
+  if (cleanRes.status === 'fulfilled' && cleanRes.value.removed > 0) {
+    const cleanPath = `detail-pages/${projectId}/src-clean-${randomUUID()}.jpg`;
+    const { error: cleanUpErr } = await supabase.storage.from(BUCKET).upload(cleanPath, cleanRes.value.buffer, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (!cleanUpErr) {
+      url = supabase.storage.from(BUCKET).getPublicUrl(cleanPath).data.publicUrl;
+      overlaysRemoved = cleanRes.value.removed;
+    }
   }
-  return { success: true, url, analysis, analysisError };
+  return { success: true, url, analysis, analysisError, overlaysRemoved };
 }
 
 // 한 번에 최대 3장 (서버에서 동시에 올리고 분석). 결과는 받은 순서와 같은 순서로 돌려준다.
