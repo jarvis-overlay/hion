@@ -110,6 +110,10 @@ URL도 같이 바꿔줘야 합니다.
   (개별 마이그레이션이 필요하면 `supabase/` 밑에 새 파일로 추가하고, 최종
   반영된 구조는 `schema.sql`에도 합쳐두는 걸 권장 - 과거처럼 마이그레이션
   파일만 쌓이고 schema.sql이 안 갱신되면 나중에 새 환경 세팅할 때 애먹음)
+- 새 마이그레이션을 추가하면 `supabase/PENDING_MIGRATIONS.md`에도 체크리스트로
+  기록한다 - 이 파일은 git에 커밋되므로 다른 PC에서 `git pull`만 받아도 "아직
+  Supabase에서 안 돌린 SQL이 뭔지" 바로 확인 가능 (사용자가 실행 확인해주면
+  체크 표시하고 schema.sql에 합침)
 - 로컬에서 `npm run dev`로 먼저 확인 → `git push` 하면 자동 반영
 
 ---
@@ -154,5 +158,6 @@ lib/
 components/                    # 재사용 UI 컴포넌트
 supabase/
   schema.sql                   # 통합 스키마 (새 환경 세팅 시 이 파일만 실행하면 됨)
+  PENDING_MIGRATIONS.md        # Supabase에서 아직 실행 확인 안 된 SQL 체크리스트
   *.sql                          # 개별 변경 이력 (참고용 - schema.sql에 이미 반영됨)
 ```
