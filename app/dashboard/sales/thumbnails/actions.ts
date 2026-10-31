@@ -10,8 +10,18 @@ import {
   duplicateImageStrip,
   fetchImageFromUrl,
   fetchTopSellerReferenceImages,
+  describeProductAppearance,
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
+import { generateThumbnailCopies, sanitizeThumbnailCopy } from '@/lib/ai';
+import {
+  learnStyleBrief,
+  generateStyledAdditionalImage,
+  STYLE_BRIEF_TTL_MS,
+  type StyleBrief,
+  type StyleShot,
+  type ShotCopyText,
+} from '@/lib/styledThumbnail';
 
 // 상세페이지 제작과 같은 storage 버킷(detail-images)을 재사용한다 -
 // 새 버킷을 새로 만들 필요 없음.
@@ -173,6 +183,239 @@ async function insertAndGenerateImage(
   return runGeneration(supabase, imageId, projectId, source, productPosition, effectPrompt);
 }
 
+// ---------------------------------------------------------------------------
+// 인기상품 스타일 학습 기반 추가 이미지
+// ---------------------------------------------------------------------------
+// 카테고리의 쿠팡 인기상품을 분석한 "스타일"을 카테고리별로 저장해두고(14일
+// 재사용) 추가 이미지를 만들 때 쓴다. 저장 테이블이 아직 없어도 학습/생성은
+// 그대로 되고(저장만 못 함), 저장 실패 사유는 호출한 쪽에 알려준다.
+interface StyledSpec {
+  shot: StyleShot;
+  copy: ShotCopyText | null;
+  brief: Pick<StyleBrief, 'background' | 'props' | 'lighting'>;
+}
+
+async function getOrLearnBrief(
+  supabase: ReturnType<typeof createClient>,
+  category: string,
+  force = false
+): Promise<{ brief: StyleBrief; sourceCount: number; fromCache: boolean; saveWarning: string | null }> {
+  const key = category.trim();
+  if (!force) {
+    const { data, error } = await supabase
+      .from('category_style_briefs')
+      .select('brief, source_count, learned_at')
+      .eq('category', key)
+      .maybeSingle();
+    if (!error && data?.brief && Date.now() - new Date(data.learned_at).getTime() < STYLE_BRIEF_TTL_MS) {
+      return { brief: data.brief as StyleBrief, sourceCount: data.source_count || 0, fromCache: true, saveWarning: null };
+    }
+  }
+
+  const learned = await learnStyleBrief(key);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { error: saveErr } = await supabase.from('category_style_briefs').upsert(
+    {
+      category: key,
+      brief: learned.brief,
+      source_count: learned.sourceCount,
+      learned_at: new Date().toISOString(),
+      author_email: user?.email ?? null,
+    },
+    { onConflict: 'category' }
+  );
+  return { ...learned, fromCache: false, saveWarning: saveErr ? saveErr.message : null };
+}
+
+// 화면의 "스타일 다시 학습" 버튼 - 저장된 걸 무시하고 지금 인기상품으로 새로 학습한다.
+export async function relearnStyle(
+  projectId: string
+): Promise<{ error: string } | { success: true; sourceCount: number; warning: string | null }> {
+  const supabase = createClient();
+  const { data: project } = await supabase
+    .from('thumbnail_projects')
+    .select('category')
+    .eq('id', projectId)
+    .maybeSingle();
+  if (!project?.category) return { error: '카테고리를 먼저 설정해주세요.' };
+  try {
+    const r = await getOrLearnBrief(supabase, project.category, true);
+    revalidatePath(PATH);
+    return {
+      success: true,
+      sourceCount: r.sourceCount,
+      warning: r.saveWarning
+        ? `스타일은 분석했지만 저장하지 못했어요(${r.saveWarning}). supabase/thumbnail_style_learning.sql을 실행해주세요.`
+        : null,
+    };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= items.length) return;
+        results[i] = await fn(items[i], i);
+      }
+    })
+  );
+  return results;
+}
+
+async function runStyledGeneration(
+  supabase: ReturnType<typeof createClient>,
+  imageId: string,
+  projectId: string,
+  productImage: { buffer: Buffer; mimeType: string },
+  spec: StyledSpec,
+  appearanceSpec?: string | null
+): Promise<{ error: string } | { success: true; url: string }> {
+  try {
+    const generated = await generateStyledAdditionalImage({
+      productImage,
+      brief: spec.brief,
+      shot: spec.shot,
+      copy: spec.copy,
+      appearanceSpec,
+    });
+    const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (upErr) throw new Error(upErr.message);
+    const outputUrl = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl;
+
+    const { error: updateErr } = await supabase
+      .from('thumbnail_images')
+      .update({ output_image_url: outputUrl, error: null })
+      .eq('id', imageId);
+    if (updateErr) return { error: updateErr.message };
+    revalidatePath(PATH);
+    return { success: true, url: outputUrl };
+  } catch (e: any) {
+    const message = e?.message || String(e);
+    await supabase.from('thumbnail_images').update({ error: message }).eq('id', imageId);
+    revalidatePath(PATH);
+    return { error: message };
+  }
+}
+
+async function insertAndGenerateStyled(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  position: number,
+  source: { buffer: Buffer; mimeType: string },
+  spec: StyledSpec,
+  colorLabel: string | null,
+  appearanceSpec: string | null
+): Promise<{ error: string } | { success: true; url: string }> {
+  const imageId = randomUUID();
+  const inputPath = `thumbnails/${projectId}/${imageId}-input.${extFromContentType(source.mimeType)}`;
+  const { error: upErr } = await supabase.storage.from(BUCKET).upload(inputPath, source.buffer, {
+    contentType: source.mimeType,
+    upsert: true,
+  });
+  if (upErr) return { error: upErr.message };
+  const inputImageUrl = supabase.storage.from(BUCKET).getPublicUrl(inputPath).data.publicUrl;
+
+  const row = {
+    id: imageId,
+    project_id: projectId,
+    kind: 'additional',
+    position,
+    input_image_url: inputImageUrl,
+    product_position: 'center',
+    effect_prompt: null,
+    color_label: colorLabel,
+    style_spec: spec,
+  };
+  let { error: insertErr } = await supabase.from('thumbnail_images').insert(row);
+  if (insertErr && /style_spec|schema cache|column/i.test(insertErr.message)) {
+    // style_spec 컬럼 마이그레이션 전이면 그 컬럼만 빼고 저장한다 (이미지는 생성되지만
+    // 실패했을 때 같은 컷으로 "다시 생성"은 못 함)
+    const { style_spec: _omit, ...legacyRow } = row;
+    ({ error: insertErr } = await supabase.from('thumbnail_images').insert(legacyRow));
+  }
+  if (insertErr) return { error: insertErr.message };
+
+  return runStyledGeneration(supabase, imageId, projectId, source, spec, appearanceSpec);
+}
+
+// 추가 이미지를 count장 만든다: 컷은 학습된 스타일의 컷 목록을 순서대로(모자라면
+// 반복), 원본 사진은 여러 장이면 돌려가며 쓴다. 이미지 생성 호출은 3개씩 동시에.
+async function generateStyledAdditionals(
+  supabase: ReturnType<typeof createClient>,
+  args: {
+    projectId: string;
+    productName: string;
+    category: string;
+    brief: StyleBrief;
+    sources: { buffer: Buffer; mimeType: string }[];
+    count: number;
+    colorLabel: string | null;
+    startIndex: number;
+  }
+): Promise<{ ok: number; total: number; copyMissing: boolean; firstError: string | null }> {
+  const { brief, sources, count } = args;
+  const shots: StyleShot[] = Array.from({ length: count }, (_, i) => brief.shots[i % brief.shots.length]);
+
+  // 컷별 한국어 문구 (실패하면 문구 없이 이미지만 만든다)
+  const copyByShot = new Map<string, ShotCopyText>();
+  const uniqueShots = brief.shots.slice(0, Math.min(count, brief.shots.length));
+  try {
+    const copies = await generateThumbnailCopies({
+      productName: args.productName,
+      category: args.category,
+      sellingPoints: brief.sellingPoints,
+      shots: uniqueShots.map((s) => ({ id: s.id, title: s.title })),
+    });
+    for (const c of copies) {
+      const shot = uniqueShots.find((s) => s.id === c.shotId);
+      if (shot) copyByShot.set(shot.id, sanitizeThumbnailCopy(c, shot.title));
+    }
+  } catch (e) {
+    console.error('[thumbnails] 컷 문구 생성 실패:', e);
+  }
+
+  // 원본 사진마다 외형 명세를 한 번만 뽑아서 같은 사진으로 만드는 컷들이 공유한다
+  const appearanceSpecs = await Promise.all(sources.map((s) => describeProductAppearance(s)));
+
+  const results = await mapLimit(shots, 3, async (shot, i) => {
+    const srcIdx = i % sources.length;
+    const spec: StyledSpec = {
+      shot,
+      copy: copyByShot.get(shot.id) ?? null,
+      brief: { background: brief.background, props: brief.props, lighting: brief.lighting },
+    };
+    return insertAndGenerateStyled(
+      supabase,
+      args.projectId,
+      args.startIndex + i,
+      sources[srcIdx],
+      spec,
+      args.colorLabel,
+      appearanceSpecs[srcIdx]
+    );
+  });
+
+  const failed = results.find((r): r is { error: string } => 'error' in r);
+  return {
+    ok: results.filter((r) => !('error' in r)).length,
+    total: count,
+    copyMissing: copyByShot.size === 0,
+    firstError: failed ? failed.error : null,
+  };
+}
+
 export async function generateThumbnailBatch(
   projectId: string,
   formData: FormData
@@ -185,6 +428,10 @@ export async function generateThumbnailBatch(
       additionalOk: number;
       additionalTotal: number;
       colorGroups: number;
+      // 인기상품 스타일을 적용했는지, 그리고 화면에 같이 알려줄 안내 문구들
+      styledApplied: boolean;
+      styleSourceCount: number;
+      notes: string[];
     }
 > {
   const supabase = createClient();
@@ -195,6 +442,38 @@ export async function generateThumbnailBatch(
     .filter((p): p is { file: File; colorLabel: string | null } => p.file instanceof File && p.file.size > 0);
   const imageUrl = String(formData.get('imageUrl') || '').trim();
   if (filePairs.length === 0 && !imageUrl) return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
+
+  let additionalCount = Number(formData.get('additionalCount') || 5);
+  if (!Number.isFinite(additionalCount)) additionalCount = 5;
+  additionalCount = Math.max(3, Math.min(7, Math.round(additionalCount)));
+
+  // 카테고리가 설정돼 있으면 쿠팡 인기상품 스타일을 학습(또는 저장된 것 재사용)해서
+  // 추가 이미지에 적용한다. 학습이 실패해도 기존 방식으로 계속 만들어서 일괄생성
+  // 자체가 막히지는 않게 하고, 왜 기본 방식이 됐는지 화면에 안내한다.
+  const { data: projectRow } = await supabase
+    .from('thumbnail_projects')
+    .select('title, category')
+    .eq('id', projectId)
+    .maybeSingle();
+  const category = (projectRow?.category || '').trim();
+  const productName = (projectRow?.title || '').trim() || category;
+  const notes: string[] = [];
+  let style: { brief: StyleBrief; sourceCount: number } | null = null;
+  if (category) {
+    try {
+      const learned = await getOrLearnBrief(supabase, category);
+      style = { brief: learned.brief, sourceCount: learned.sourceCount };
+      if (learned.saveWarning) {
+        notes.push(
+          `학습한 스타일을 저장하지 못했어요(${learned.saveWarning}). supabase/thumbnail_style_learning.sql을 실행하면 다음부터 재사용돼요.`
+        );
+      }
+    } catch (e: any) {
+      notes.push(`인기상품 스타일 학습에 실패해서 기본 방식(누끼)으로 만들었어요: ${e?.message || String(e)}`);
+    }
+  } else {
+    notes.push('카테고리를 설정하면 쿠팡 인기상품 스타일로 추가 이미지를 만들어요. 이번에는 기본 방식(누끼)으로 만들었어요.');
+  }
 
   const { count: existingCount } = await supabase
     .from('thumbnail_images')
@@ -239,25 +518,50 @@ export async function generateThumbnailBatch(
       );
       if (!('error' in mainResult)) mainOk++;
 
-      for (let i = 1; i < groupSources.length; i++) {
-        additionalTotal++;
-        const res = await insertAndGenerateImage(
-          supabase, projectId, 'additional', baseIndex++, groupSources[i], 'center', '', colorLabel
-        );
-        if (!('error' in res)) additionalOk++;
+      if (style) {
+        // 그 색상의 사진들을 돌려가며 학습된 컷 구성으로 추가 이미지를 새로 만든다
+        const styled = await generateStyledAdditionals(supabase, {
+          projectId,
+          productName,
+          category,
+          brief: style.brief,
+          sources: groupSources,
+          count: additionalCount,
+          colorLabel,
+          startIndex: baseIndex,
+        });
+        baseIndex += additionalCount;
+        additionalTotal += styled.total;
+        additionalOk += styled.ok;
+        if (styled.copyMissing) notes.push('문구 생성에 실패해서 일부 이미지는 문구 없이 만들었어요.');
+        if (styled.ok < styled.total && styled.firstError) notes.push(`일부 이미지 생성 실패: ${styled.firstError}`);
+      } else {
+        for (let i = 1; i < groupSources.length; i++) {
+          additionalTotal++;
+          const res = await insertAndGenerateImage(
+            supabase, projectId, 'additional', baseIndex++, groupSources[i], 'center', '', colorLabel
+          );
+          if (!('error' in res)) additionalOk++;
+        }
       }
     }
     revalidatePath(PATH);
-    return { success: true, mainOk, mainTotal: groups.size, additionalOk, additionalTotal, colorGroups: groups.size };
+    return {
+      success: true,
+      mainOk,
+      mainTotal: groups.size,
+      additionalOk,
+      additionalTotal,
+      colorGroups: groups.size,
+      styledApplied: !!style,
+      styleSourceCount: style?.sourceCount ?? 0,
+      notes: Array.from(new Set(notes)),
+    };
   }
 
   // 사진 1장 또는 URL 1개만 있는 경우 - 위치·효과 프리셋을 자동으로
   // 돌려가며 하나의 원본으로 추가 이미지 3~7장을 합성해서 만든다.
   await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main').is('color_label', null);
-
-  let additionalCount = Number(formData.get('additionalCount') || 5);
-  if (!Number.isFinite(additionalCount)) additionalCount = 5;
-  additionalCount = Math.max(3, Math.min(7, Math.round(additionalCount)));
 
   let buffer: Buffer;
   let mimeType: string;
@@ -278,15 +582,41 @@ export async function generateThumbnailBatch(
   const mainOk = !('error' in mainResult) ? 1 : 0;
 
   let additionalOk = 0;
-  for (let i = 0; i < additionalCount; i++) {
-    const position = BATCH_POSITION_CYCLE[i % BATCH_POSITION_CYCLE.length];
-    const effectPrompt = BATCH_EFFECT_PRESETS[i % BATCH_EFFECT_PRESETS.length];
-    const res = await insertAndGenerateImage(supabase, projectId, 'additional', baseIndex + i, { buffer, mimeType }, position, effectPrompt);
-    if (!('error' in res)) additionalOk++;
+  if (style) {
+    const styled = await generateStyledAdditionals(supabase, {
+      projectId,
+      productName,
+      category,
+      brief: style.brief,
+      sources: [{ buffer, mimeType }],
+      count: additionalCount,
+      colorLabel: null,
+      startIndex: baseIndex,
+    });
+    additionalOk = styled.ok;
+    if (styled.copyMissing) notes.push('문구 생성에 실패해서 일부 이미지는 문구 없이 만들었어요.');
+    if (styled.ok < styled.total && styled.firstError) notes.push(`일부 이미지 생성 실패: ${styled.firstError}`);
+  } else {
+    for (let i = 0; i < additionalCount; i++) {
+      const position = BATCH_POSITION_CYCLE[i % BATCH_POSITION_CYCLE.length];
+      const effectPrompt = BATCH_EFFECT_PRESETS[i % BATCH_EFFECT_PRESETS.length];
+      const res = await insertAndGenerateImage(supabase, projectId, 'additional', baseIndex + i, { buffer, mimeType }, position, effectPrompt);
+      if (!('error' in res)) additionalOk++;
+    }
   }
 
   revalidatePath(PATH);
-  return { success: true, mainOk, mainTotal: 1, additionalOk, additionalTotal: additionalCount, colorGroups: 1 };
+  return {
+    success: true,
+    mainOk,
+    mainTotal: 1,
+    additionalOk,
+    additionalTotal: additionalCount,
+    colorGroups: 1,
+    styledApplied: !!style,
+    styleSourceCount: style?.sourceCount ?? 0,
+    notes: Array.from(new Set(notes)),
+  };
 }
 
 export async function retryThumbnailImage(
@@ -300,6 +630,18 @@ export async function retryThumbnailImage(
   if (!res.ok) return { error: `원본 이미지를 다시 불러오지 못했어요 (HTTP ${res.status})` };
   const buffer = Buffer.from(await res.arrayBuffer());
   const mimeType = res.headers.get('content-type') || 'image/jpeg';
+
+  // 스타일 적용으로 만들었던 이미지는 같은 컷/문구로 다시 만든다 (누끼 방식으로
+  // 돌아가면 결과가 완전히 달라져 버리므로)
+  if (img.style_spec?.shot) {
+    return runStyledGeneration(
+      supabase,
+      imageId,
+      img.project_id,
+      { buffer, mimeType },
+      img.style_spec as StyledSpec
+    );
+  }
 
   return runGeneration(
     supabase,

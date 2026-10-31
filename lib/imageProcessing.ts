@@ -78,10 +78,10 @@ export async function fetchTopSellerReferenceImages(
 // 된다 - 그래서 텍스트가 들어가는 합성은 전부 canvas로 처리한다.
 // 웹 화면(app/globals.css)과 동일하게 Pretendard를 쓴다 - 정적(비가변)
 // weight별 파일이라 canvas/Cairo에서 굵기가 확실하게 반영된다.
-const FONT_BOLD = 'PretendardBold';
-const FONT_EXTRABOLD = 'PretendardExtraBold';
+export const FONT_BOLD = 'PretendardBold';
+export const FONT_EXTRABOLD = 'PretendardExtraBold';
 let fontRegistered = false;
-function ensureKoreanFontRegistered() {
+export function ensureKoreanFontRegistered() {
   if (fontRegistered) return;
   registerFont(path.join(process.cwd(), 'assets/fonts/Pretendard-Bold.otf'), { family: FONT_BOLD });
   registerFont(path.join(process.cwd(), 'assets/fonts/Pretendard-ExtraBold.otf'), { family: FONT_EXTRABOLD });
@@ -119,7 +119,7 @@ export interface TranslatedRegion {
 // 실제 키로 테스트해보니 gemini-2.5-flash는 신규 키에 막혀있고
 // gemini-3.6-flash를 쓰라고 안내함 - 모델명이 또 바뀔 수 있어서 환경
 // 변수로 오버라이드 가능하게 함.
-const VISION_MODEL = process.env.GEMINI_VISION_MODEL || 'gemini-3.6-flash';
+export const VISION_MODEL = process.env.GEMINI_VISION_MODEL || 'gemini-3.6-flash';
 
 // Gemini 비전 모델에게 이미지 속 텍스트 위치+원문+번역문을 한 번에
 // 요청한다. 정확한 픽셀 좌표 대신 0~1 비율로 받아서(해상도 독립적),
@@ -283,7 +283,7 @@ async function removeWhiteBackground(imageBuffer: Buffer): Promise<Buffer> {
 //   2) "설명"에 적은 문구는 AI가 그리게 하지 않고, sharp로 실제 폰트를
 //      써서 우리가 직접 정확하게 합성한다 (번역 기능과 동일한 방식 -
 //      글자가 깨질 수가 없음).
-const IMAGE_GEN_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+export const IMAGE_GEN_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
 
 // 'white': 기존 방식 - 흰 문구 섹션 + 그 아래 사진 (사진에는 글자 없음).
 // 'overlay': 사진 위에 그라데이션 스크림을 깔고 그 위에 문구를 얹는다.
@@ -317,7 +317,7 @@ export interface DetailSectionInput {
 // 사라짐). 그래서 생성 전에 비전 모델이 상품 사진의 구조를 먼저 글로
 // 정확히 명세하게 하고, 그 명세를 생성 지시에 박아 넣는다. 실패해도
 // 생성 자체는 막지 않도록 null을 돌려준다.
-async function describeProductAppearance(productImage: {
+export async function describeProductAppearance(productImage: {
   buffer: Buffer;
   mimeType: string;
 }): Promise<string | null> {

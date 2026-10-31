@@ -669,3 +669,64 @@ ${chineseText}
   const parsed = parseJsonObject(cleaned) as { translation?: string };
   return parsed.translation || '';
 }
+
+
+// ---------------------------------------------------------------------------
+// 썸네일 추가 이미지용 한국어 문구 (헤드라인 + 보조문구)
+// ---------------------------------------------------------------------------
+// 이미지 속 글자는 AI가 그리면 깨지므로, 여기서는 문구만 만들고 실제 글자는
+// 서버에서 폰트로 합성한다 (lib/styledThumbnail.ts). 쿠팡 광고/표시 심의에
+// 걸리기 쉬운 최상급·의학적 표현과, 상품명에 근거 없는 소재/수치 단정은
+// 막는다 - AI가 사실과 다른 스펙을 지어내는 게 가장 위험하기 때문이다.
+export interface ThumbnailCopy {
+  shotId: string;
+  headline: string;
+  sub: string;
+}
+
+const BANNED_COPY = /(최고|1\s*등|1\s*위|최저가|국내\s*유일|세계\s*최초|완벽|100\s*%|무조건|보장|치료|예방|의학|특허|인증)/;
+
+export function sanitizeThumbnailCopy(c: Partial<ThumbnailCopy>, fallbackHeadline: string): { headline: string; sub: string } {
+  let headline = String(c.headline || '').replace(/\s+/g, ' ').trim().slice(0, 18);
+  let sub = String(c.sub || '').replace(/\s+/g, ' ').trim().slice(0, 30);
+  if (!headline || BANNED_COPY.test(headline)) headline = fallbackHeadline;
+  if (BANNED_COPY.test(sub)) sub = '';
+  return { headline, sub };
+}
+
+export async function generateThumbnailCopies(input: {
+  productName: string;
+  category: string;
+  sellingPoints: string[];
+  shots: { id: string; title: string }[];
+}): Promise<ThumbnailCopy[]> {
+  if (input.shots.length === 0) return [];
+  const prompt = `쿠팡에 올릴 상품의 "추가 이미지" 위에 얹을 한국어 문구를 컷마다 만들어주세요.
+
+상품명: ${input.productName || input.category}
+카테고리: ${input.category}
+이 카테고리 인기상품이 공통으로 강조하는 키워드(참고용, 이 상품에 해당하는지는 확인 안 됨): ${input.sellingPoints.join(', ') || '(없음)'}
+
+컷 목록:
+${input.shots.map((s) => `- ${s.id}: ${s.title}`).join('\n')}
+
+규칙:
+- headline은 12자 이내의 짧은 한국어, sub는 22자 이내의 보조 문구(없어도 됨, 빈 문자열 가능).
+- 컷의 성격에 맞는 문구를 쓰세요 (예: 디테일 컷이면 마감/촉감, 정리 컷이면 보관/사용 편의).
+- **상품명에 근거가 없는 소재·기능·수치·인증은 절대 쓰지 마세요.** (예: 상품명에 "면"이 없는데 "순면", "냉감"이 없는데 "냉감", 임의의 %, 인증 문구 금지) 참고용 키워드도 상품명이나 컷 성격에서 확실히 뒷받침될 때만 쓰세요. 애매하면 "편안한 착용감", "깔끔한 마감"처럼 누구에게나 맞는 일반적인 표현을 쓰세요.
+- 최상급·과장·의학적 표현 금지: 최고, 1등, 1위, 최저가, 국내유일, 완벽, 100%, 무조건, 보장, 치료, 예방, 특허, 인증.
+- 컷마다 서로 다른 문구여야 합니다.
+
+JSON 배열로만 응답하세요:
+[{"shotId":"컷 id 그대로","headline":"...","sub":"..."}]`;
+
+  const text = await callClaude(prompt);
+  const arr = parseJsonArray(text);
+  return arr
+    .filter((x) => x && typeof x.shotId === 'string')
+    .map((x) => ({
+      shotId: String(x.shotId),
+      headline: String(x.headline || ''),
+      sub: String(x.sub || ''),
+    }));
+}

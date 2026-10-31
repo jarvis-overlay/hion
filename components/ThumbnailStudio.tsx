@@ -8,6 +8,7 @@ import {
   deleteProject,
   addThumbnailImage,
   generateThumbnailBatch,
+  relearnStyle,
   retryThumbnailImage,
   editThumbnailImage,
   duplicateThumbnailStrip,
@@ -246,7 +247,14 @@ function ImageCard({
         <div className={`${size} rounded bg-paper flex items-center justify-center text-xs text-inkSoft`}>생성 중...</div>
       )}
       {img.error && <p className="text-[10px] text-warn text-center px-1 max-w-[16rem]">{img.error}</p>}
-      <p className="text-[11px] text-inkSoft">{POSITION_LABEL[img.product_position as ThumbnailPosition] || '정중앙'}</p>
+      {img.style_spec?.shot ? (
+        <p className="text-[11px] text-inkSoft text-center px-1 max-w-[16rem]">
+          컷: {img.style_spec.shot.title}
+          {img.style_spec.copy?.headline ? ` · "${img.style_spec.copy.headline}"` : ''}
+        </p>
+      ) : (
+        <p className="text-[11px] text-inkSoft">{POSITION_LABEL[img.product_position as ThumbnailPosition] || '정중앙'}</p>
+      )}
       {img.effect_prompt && <p className="text-[10px] text-inkSoft text-center px-1">효과: {img.effect_prompt}</p>}
       <div className="flex gap-2">
         {img.output_image_url && (
@@ -346,10 +354,19 @@ function ImageCard({
   );
 }
 
-function ProjectEditor({ project, onClose }: { project: any; onClose: () => void }) {
+function ProjectEditor({
+  project,
+  styleBrief,
+  onClose,
+}: {
+  project: any;
+  styleBrief?: any; // category_style_briefs 행 (이 프로젝트 카테고리에 학습된 스타일)
+  onClose: () => void;
+}) {
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [styleMsg, setStyleMsg] = useState<string | null>(null);
   const [mainDraft, setMainDraft] = useState<ImageDraft>(newImageDraft());
   const [additionalDrafts, setAdditionalDrafts] = useState<ImageDraft[]>([newImageDraft()]);
   const [editingCategory, setEditingCategory] = useState(false);
@@ -448,12 +465,31 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
       setBatchResult(
         `메인 썸네일 ${res.mainOk}/${res.mainTotal}장` +
           (res.colorGroups > 1 ? ` (색상 ${res.colorGroups}개)` : '') +
-          ` · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료`
+          ` · 추가 이미지 ${res.additionalOk}/${res.additionalTotal}장 생성 완료` +
+          (res.styledApplied ? ` (쿠팡 인기상품 ${res.styleSourceCount}개 분석 스타일 적용)` : '') +
+          (res.notes.length ? `\n${res.notes.join('\n')}` : '')
       );
       setBatchFiles([]);
       setBatchPreviews([]);
       setBatchColorLabels([]);
       setBatchUrl('');
+    });
+  }
+
+  function handleRelearn() {
+    setError(null);
+    setStyleMsg(null);
+    setBusyId('relearn');
+    startTransition(async () => {
+      const res = await relearnStyle(project.id);
+      setBusyId(null);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+        return;
+      }
+      setStyleMsg(
+        `쿠팡 인기상품 ${res.sourceCount}개를 분석해서 스타일을 새로 학습했어요.` + (res.warning ? ` ${res.warning}` : '')
+      );
     });
   }
 
@@ -503,20 +539,64 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
           </div>
         ) : (
           <button onClick={() => setEditingCategory(true)} className="hover:text-ink">
-            {project.category ? `카테고리: ${project.category}` : '+ 카테고리 설정 (요즘 잘 팔리는 상품 참고용)'}
+            {project.category ? `카테고리: ${project.category}` : '+ 카테고리 설정 (쿠팡 인기상품 스타일로 추가 이미지 만들기)'}
           </button>
         )}
       </div>
+
+      {project.category && (
+        <div className="text-xs bg-paper rounded-lg p-3 grid gap-2 max-w-3xl">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="font-semibold">
+              인기상품 스타일 학습
+              {styleBrief
+                ? ` · ${styleBrief.source_count}개 분석 · ${new Date(styleBrief.learned_at).toLocaleDateString('ko-KR', {
+                    timeZone: 'Asia/Seoul',
+                  })}`
+                : ' · 아직 학습 전'}
+            </span>
+            <button
+              onClick={handleRelearn}
+              disabled={isPending && busyId === 'relearn'}
+              className="text-accent font-semibold disabled:opacity-50"
+            >
+              {isPending && busyId === 'relearn'
+                ? '학습 중... (1~2분 걸려요)'
+                : styleBrief
+                  ? '스타일 다시 학습'
+                  : '지금 학습하기'}
+            </button>
+          </div>
+          {styleBrief?.brief ? (
+            <>
+              <p className="text-inkSoft leading-relaxed">{styleBrief.brief.summary}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {(styleBrief.brief.shots || []).map((s: any) => (
+                  <span key={s.id} className="px-2 py-0.5 rounded-full bg-white border border-paperLine text-[11px]">
+                    {s.title}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-inkSoft">
+              일괄 생성을 누르면 자동으로 학습해서 적용해요. 미리 학습해서 어떤 구성이 나오는지 먼저 볼 수도 있어요.
+            </p>
+          )}
+          {styleMsg && <p className="text-profit">{styleMsg}</p>}
+        </div>
+      )}
 
       <section className="card p-4 grid gap-3 border-2 border-accent/30">
         <div>
           <h3 className="text-sm font-semibold">한 번에 만들기</h3>
           <p className="text-[11px] text-inkSoft">
-            1688 소싱 확장프로그램 등으로 받은 상품 사진을 <strong>여러 장 한 번에 선택</strong>하면 그대로
-            추가 이미지로 만들어줘요(실제 컷이라 효과 합성 없이 흰 배경만 적용). 사진마다 <strong>색상을
-            태그</strong>해두면 같은 색상끼리 묶여서 색상별로 완전히 별도 세트(메인+추가)가 만들어져요 -
-            태그 안 한 사진은 전부 한 세트로 묶이고, 같은 색상 중 먼저 선택한 사진이 그 색상의 메인이 돼요.
-            사진이 1장이거나 URL 하나만 있을 때는 위치·효과를 자동으로 바꿔가며 여러 장을 합성해요.
+            상품 사진(여러 장 가능)이나 URL을 넣으면 <strong>메인 썸네일은 쿠팡 규정대로 흰 배경</strong>으로,
+            <strong> 추가 이미지는 쿠팡 인기상품을 분석해 학습한 스타일</strong>(배경·소품·컷 구성 + 한국어 강조
+            문구)로 새로 만들어요. 위에서 <strong>카테고리를 설정</strong>해야 적용되고, 안 하면 예전처럼 누끼
+            방식으로 만들어요. 사진마다 <strong>색상을 태그</strong>해두면 같은 색상끼리 묶여 색상별로 완전히 별도
+            세트(메인+추가)가 만들어져요 - 같은 색상 중 먼저 선택한 사진이 그 색상의 메인이 돼요. 문구는 AI가 만든
+            초안이니 사실과 다른 내용이 없는지 확인하세요.
           </p>
         </div>
 
@@ -602,9 +682,10 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
             className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full disabled:opacity-50"
           />
           {batchFiles.length <= 1 && <UrlWarning url={batchUrl} />}
-          {batchFiles.length <= 1 && (
+          {(batchFiles.length <= 1 || project.category) && (
             <label className="text-[11px] text-inkSoft">
-              사진 1장으로 만들 때 추가 이미지 개수 ({batchCount}장)
+              {project.category ? '추가 이미지 개수' : '사진 1장으로 만들 때 추가 이미지 개수'} ({batchCount}장
+              {project.category && batchFiles.length > 1 ? ', 색상마다' : ''})
               <input
                 type="range"
                 min={3}
@@ -626,7 +707,7 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 ? `선택한 사진 ${batchFiles.length}장으로 한 번에 생성`
                 : `메인 + 추가 ${batchCount}장 한 번에 생성`}
           </button>
-          {batchResult && <p className="text-[11px] text-accent">{batchResult}</p>}
+          {batchResult && <p className="text-[11px] text-accent whitespace-pre-line">{batchResult}</p>}
         </div>
       </section>
 
@@ -765,7 +846,13 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   );
 }
 
-export default function ThumbnailStudio({ projects }: { projects: any[] }) {
+export default function ThumbnailStudio({
+  projects,
+  styleBriefs = {},
+}: {
+  projects: any[];
+  styleBriefs?: Record<string, any>; // 카테고리 -> category_style_briefs 행
+}) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -776,7 +863,13 @@ export default function ThumbnailStudio({ projects }: { projects: any[] }) {
   const active = projects.find((p) => p.id === activeId);
 
   if (active) {
-    return <ProjectEditor project={active} onClose={() => setActiveId(null)} />;
+    return (
+      <ProjectEditor
+        project={active}
+        styleBrief={styleBriefs[(active.category || '').trim()]}
+        onClose={() => setActiveId(null)}
+      />
+    );
   }
 
   function handleCreate() {
