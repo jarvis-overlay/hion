@@ -9,6 +9,7 @@
 // AI가 글자를 다시 그리더라도 이 단계에서 걸러지게 하는 게 목적이다.
 import sharp from 'sharp';
 import { VISION_MODEL } from '@/lib/imageProcessing';
+import { isMostlyBlank } from '@/lib/imageQuality';
 
 export interface OverlayRegion {
   // 이미지 전체 대비 0~1 비율 좌표
@@ -278,6 +279,10 @@ export async function removeOverlays(
       current = await inpaintRects(current, rects);
       currentMime = 'image/jpeg';
       removed += regions.length;
+    }
+    // 지우고 났더니 흰 바탕에 선만 남았다면 글자·그림 위주 이미지다: 지운 결과를 버리고 알린다
+    if (removed > 0 && (await isMostlyBlank(current)) && !(await isMostlyBlank(buffer))) {
+      return { buffer, mimeType, removed: 0, error: null, coverage: Math.max(coverage, TEXT_HEAVY_COVERAGE), textHeavy: true };
     }
     return { buffer: current, mimeType: currentMime, removed, error: null, coverage, textHeavy: false };
   } catch (e: any) {

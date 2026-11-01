@@ -20,6 +20,7 @@ import {
 } from '@/lib/imageProcessing';
 import { recommendDetailSectionCopy, planDetailSectionsRaw, type DetailCopyRecommendation } from '@/lib/ai';
 import { removeOverlays } from '@/lib/overlayCleanup';
+import { isMostlyBlank } from '@/lib/imageQuality';
 import { generateWithVerification, verifyProductMatch } from '@/lib/outputVerifier';
 import {
   analyzeSourceImage,
@@ -373,6 +374,9 @@ async function runGeneration(
       // 다시 크롤링하지 않는다 (섹션 수만큼 반복되면 느리고 크롤링 한도에 걸림).
       const referenceImages =
         project?.category && !options.skipReference ? await fetchTopSellerReferenceImages(project.category) : [];
+      if (productImage && (await isMostlyBlank(productImage.buffer))) {
+        throw new Error('상품 사진에 보여줄 내용이 거의 없어요 (글자·선만 있는 사진). 다른 사진으로 바꿔주세요.');
+      }
       if (productImage) {
         // 상품 사진을 쓰는 장면: 만든 결과가 원본과 같은 상품인지 검사하고, 다르면 틀린 점을 알려
         // 한 번 더 만들고, 그래도 다르면 원본 사진(글자만 지운 것)을 그대로 쓴다.
@@ -391,8 +395,10 @@ async function runGeneration(
             // 검사해 남은 글자/아이콘은 코드로 지운다. 실패해도 생성은 계속한다(원본 그대로 사용).
             return (await removeOverlays(raw, 'image/jpeg')).buffer;
           },
-          verify: (generated) =>
-            verifyProductMatch(productImage, generated, { productHint, allowColorChange: !!input.colorPrompt?.trim() }),
+          verify: async (generated) =>
+            (await isMostlyBlank(generated))
+              ? { ok: false, issues: ['결과가 거의 빈 이미지예요 (상품이 보이지 않음)'], skipped: false }
+              : verifyProductMatch(productImage, generated, { productHint, allowColorChange: !!input.colorPrompt?.trim() }),
           fallback: async () => {
             const clean = await removeOverlays(productImage.buffer, productImage.mimeType);
             return sharp(clean.buffer).jpeg({ quality: 92 }).toBuffer();
@@ -855,7 +861,8 @@ async function uploadAndAnalyze(
   else analysisError = (analysisRes.reason as any)?.message || String(analysisRes.reason);
 
   // 글자·그래픽이 대부분인 이미지는 사진으로 못 쓴다 (분석이 실패했어도 표시해서 넘긴다)
-  if (cleanRes.status === 'fulfilled' && cleanRes.value.textHeavy) {
+  const blankOriginal = await isMostlyBlank(buffer);
+  if (blankOriginal || (cleanRes.status === 'fulfilled' && cleanRes.value.textHeavy)) {
     analysis = {
       ...(analysis ?? { role: 'other', description: '', koreanTexts: [], facts: [], colorsShown: [], sizeChart: null, sizesMentioned: [] }),
       textHeavy: true,

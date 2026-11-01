@@ -10,6 +10,7 @@ import sharp from 'sharp';
 import { fetchCoupangBestsellers, fetchCoupangDetailImageUrls } from '@/lib/brightdata';
 import { fetchImageFromUrl, VISION_MODEL, IMAGE_GEN_MODEL } from '@/lib/imageProcessing';
 import { removeOverlays } from '@/lib/overlayCleanup';
+import { isMostlyBlank } from '@/lib/imageQuality';
 import { normalizeSourceAnalysis, colorHint, type SourceAnalysis } from '@/lib/detailOptions';
 
 function requireEnv(name: string): string {
@@ -322,6 +323,10 @@ export async function recolorWithVerification(
       const raw = await recolorOnce(img, from, to);
       let buf: Buffer = await sharp(raw).jpeg({ quality: 92 }).toBuffer();
       buf = (await removeOverlays(buf, 'image/jpeg')).buffer;
+      if (await isMostlyBlank(buf)) {
+        lastReason = '변환 결과가 거의 빈 이미지예요';
+        continue;
+      }
       const check = await verifyRecolor(img, buf, to);
       if (check.ok) return { success: true, buffer: buf };
       lastReason = check.reason;
