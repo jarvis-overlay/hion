@@ -255,7 +255,7 @@ async function recolorOnce(img: { buffer: Buffer; mimeType: string }, from: stri
   const prompt = `첨부된 사진은 판매 상품 사진입니다. **상품의 색상만** "${to}"${hint ? ` (${hint})` : ''}(으)로 바꿔주세요.${from ? ` 지금 상품 색상은 "${from}"입니다.` : ''}
 
 규칙(모두 필수):
-1. 상품의 모양, 비율, 소재 질감(주름·짜임·광택), 솔기, 부품, 그림자, 조명, 구도, 배경은 원본과 똑같이 유지하세요. 색만 바뀌어야 합니다.
+1. 상품의 모양, 비율, 소재 질감(주름·짜임·광택), 솔기, 부품, 그림자, 조명, 구도, 배경은 원본과 똑같이 유지하세요. 색만 바뀌어야 합니다. 원본에 없는 봉제선·솔기·트임·주머니를 새로 그려 넣지 마세요.
 2. 상품이 아닌 것(사람 피부, 배경, 소품)의 색은 바꾸지 마세요.
 3. 결과 속 상품 전체가 "${to}" 한 가지 색이어야 합니다. 원본에 없는 다른 색의 무늬·로고·장식을 새로 만들지 마세요.
 4. 사진 속에 글자·아이콘이 있으면 모두 지우고 자연스러운 재질로 채우세요. 새 글자는 절대 그리지 마세요.
@@ -291,7 +291,7 @@ export async function verifyRecolor(
   const prompt = `두 장의 상품 사진을 비교하세요. 첫 번째는 원본, 두 번째는 상품 색상을 "${to}"(으)로 바꾸게 해서 만든 결과입니다. JSON 객체로만 답하세요.
 - productColor: 두 번째 사진에서 상품 본체의 색상을 한국어 색상명으로
 - matchesTarget: 두 번째 사진의 상품 본체가 "${to}" 한 가지 색으로 보이는가 (true/false). 다른 색의 무늬·줄·로고가 눈에 띄면 false
-- shapeUnchanged: 상품의 모양·비율·부품 개수·질감이 원본과 같은가 (true/false). 부품이 사라지거나 생기거나 모양이 달라졌으면 false
+- shapeUnchanged: 상품의 모양·비율·부품 개수·질감이 원본과 같은가 (true/false). 부품이 사라지거나 생기거나 모양이 달라졌으면 false. 원본에 없는 봉제선·솔기·트임이 새로 생겼어도 false
 - hasText: 두 번째 사진에 글자·숫자·로고가 보이는가 (true/false)
 - note: 문제가 있으면 한 줄로
 {"productColor":"","matchesTarget":true,"shapeUnchanged":true,"hasText":false,"note":""}`;
