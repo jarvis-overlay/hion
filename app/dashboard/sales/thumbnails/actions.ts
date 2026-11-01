@@ -18,7 +18,7 @@ import {
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
 import { parsePackages, packageLabel, sameColor } from '@/lib/thumbnailPackage';
-import { applyCountBadge } from '@/lib/packageHero';
+import { applyCountBadge } from '@/lib/packageCompose';
 import { generateThumbnailCopies, sanitizeThumbnailCopy } from '@/lib/ai';
 import {
   learnStyleBrief,
@@ -584,7 +584,7 @@ export async function generateThumbnailBatch(
   const packageResults = await mapLimit(packages, 2, async (p) => {
     // 색상 이름은 올린 사진의 라벨 표기로 통일한다 (공백/대소문자만 다른 입력도 같은 색으로 봄)
     const resolved = p.items.map((it) => ({ color: allGroups.find(([l]) => l && sameColor(l, it.color))?.[0] ?? it.color, qty: it.qty }));
-    const label = packageLabel({ items: resolved, additional: p.additional, layout: p.layout, badge: p.badge });
+    const label = packageLabel({ items: resolved, additional: p.additional, template: p.template, flip: p.flip, badge: p.badge });
     const items: { productImage: BatchSource; quantity: number }[] = [];
     for (const it of p.items) {
       const g = allGroups.find(([l]) => l && sameColor(l, it.color));
@@ -592,13 +592,13 @@ export async function generateThumbnailBatch(
       items.push({ productImage: g[1][0], quantity: it.qty });
     }
     try {
-      const composite = await generatePackageThumbnail(items, { layout: p.layout });
+      const composite = await generatePackageThumbnail(items, { template: p.template, flip: p.flip, badge: p.badge });
       // 수량 배지는 메인에만 붙인다 (추가 이미지의 상품 사진으로 쓰는 composite에 배지가 섞이면 상품으로 오인됨).
       // 배지 합성이 실패해도 메인은 배지 없이 만든다.
       let shown = composite;
       if (p.badge) {
         try {
-          shown = await applyCountBadge(composite, items.reduce((s, it) => s + it.quantity, 0));
+          shown = await applyCountBadge(composite, items.reduce((s, it) => s + it.quantity, 0), { shape: p.badgeShape, color: p.badgeColor }, !!p.flip);
         } catch (e: any) {
           notes.push(`"${label}" 수량 배지를 붙이지 못했어요: ${e?.message || e}`);
         }

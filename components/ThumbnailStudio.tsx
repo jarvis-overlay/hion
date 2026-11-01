@@ -18,6 +18,16 @@ import {
   deleteThumbnailImages,
 } from '@/app/dashboard/sales/thumbnails/actions';
 import { useSavedForm, FormHistoryPicker } from '@/components/useSavedForm';
+import {
+  PACKAGE_TEMPLATES,
+  BADGE_SHAPES,
+  BADGE_COLORS,
+  getTemplate,
+  templateFits,
+  type TemplateChoice,
+  type BadgeShape,
+  type BadgeColor,
+} from '@/lib/packageTemplates';
 
 // 썸네일은 상세페이지 섹션과 달리 그 자체가 결과물이라 "좀 크게 보여야
 // 한다"는 요청으로 큼직하게(288px) 보여준다.
@@ -455,7 +465,7 @@ function ProjectEditor({
   // 아직 안 건드린 색상은 기본 5장.
   const [batchCounts, setBatchCounts] = useState<Record<string, number>>({});
   // 패키지(세트) 구성: 예) 검정 1 + 회색 1을 한 패키지로 파는 상품. 구성 그대로 한 장에 담은 메인 + 추가 이미지를 만든다.
-  const [packages, setPackages] = useState<{ id: string; items: { color: string; qty: number }[]; additional: number; layout?: 'grid' | 'hero'; badge?: boolean }[]>([]);
+  const [packages, setPackages] = useState<{ id: string; items: { color: string; qty: number }[]; additional: number; template?: TemplateChoice; flip?: boolean; badge?: boolean; badgeShape?: BadgeShape; badgeColor?: BadgeColor }[]>([]);
   const [packageOnly, setPackageOnly] = useState(false);
   const [productNote, setProductNote] = useState('');
   const [batchResult, setBatchResult] = useState<string | null>(null);
@@ -466,7 +476,11 @@ function ProjectEditor({
     (v) => {
       if (typeof v.batchUrl === 'string') setBatchUrl(v.batchUrl);
       if (v.batchCounts && typeof v.batchCounts === 'object') setBatchCounts(v.batchCounts as Record<string, number>);
-      if (Array.isArray(v.packages)) setPackages(v.packages as typeof packages);
+      if (Array.isArray(v.packages)) {
+        setPackages(
+          (v.packages as any[]).map((p) => ({ ...p, template: p.template ?? (p.layout === 'hero' ? 'hero-side' : 'grid') })) as typeof packages
+        );
+      }
       if (typeof v.packageOnly === 'boolean') setPackageOnly(v.packageOnly);
       if (typeof v.productNote === 'string') setProductNote(v.productNote);
     }
@@ -597,7 +611,7 @@ function ProjectEditor({
     }
     fd.set('category', batchCategory.trim());
     fd.set('productNote', productNote.trim());
-    fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional, layout: p.layout, badge: p.badge }))));
+    fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional, template: p.template, flip: p.flip, badge: p.badge, badgeShape: p.badgeShape, badgeColor: p.badgeColor }))));
     if (usePackageOnly) fd.set('packageOnly', '1');
     fd.set('additionalCount', String(DEFAULT_ADDITIONAL));
     fd.set(
@@ -1069,15 +1083,31 @@ function ProjectEditor({
                           + 색상 추가
                         </button>
                         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <label className="flex items-center gap-1" title="대표 상품 1개를 크게, 나머지는 오른쪽에 세로로 작게 놓아요 (상품 3~6개일 때)">
+                          <label className="flex items-center gap-1">
+                            <span className="text-inkSoft">배치</span>
+                            <select
+                              value={p.template || 'grid'}
+                              onChange={(e) => patchPackage(p.id, (x) => ({ ...x, template: e.target.value as TemplateChoice }))}
+                              className="border border-paperLine rounded px-1 py-0.5 bg-white"
+                            >
+                              <option value="grid">나열형 (같은 크기로 나란히)</option>
+                              <option value="auto">자동 추천 (수량·형태에 맞춰)</option>
+                              {PACKAGE_TEMPLATES.filter((t) => t.id !== 'grid').map((t) => (
+                                <option key={t.id} value={t.id} disabled={!templateFits(t.id, packageUnitCount(p))}>
+                                  {t.name} ({t.min}~{t.max}개)
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex items-center gap-1" title="상품 위치를 좌우로 뒤집어요 (상품 사진 자체는 뒤집지 않아요)">
                             <input
                               type="checkbox"
-                              checked={p.layout === 'hero'}
-                              onChange={(e) => patchPackage(p.id, (x) => ({ ...x, layout: e.target.checked ? 'hero' : 'grid' }))}
+                              checked={!!p.flip}
+                              onChange={(e) => patchPackage(p.id, (x) => ({ ...x, flip: e.target.checked }))}
                             />
-                            <span>대표 1개 크게 + 나머지 세로로</span>
+                            <span>좌우 반전</span>
                           </label>
-                          <label className="flex items-center gap-1" title="오른쪽 위에 빨간 수량 배지(예: 5P)를 붙여요 (메인 이미지만)">
+                          <label className="flex items-center gap-1" title="맨 위 모서리에 수량 배지(예: 5P)를 붙여요. 메인 이미지에만 붙어요">
                             <input
                               type="checkbox"
                               checked={!!p.badge}
@@ -1085,8 +1115,44 @@ function ProjectEditor({
                             />
                             <span>수량 배지({packageUnitCount(p)}P)</span>
                           </label>
-                          {p.layout === 'hero' && (packageUnitCount(p) < 3 || packageUnitCount(p) > 6) && (
-                            <span className="text-[11px] text-amber-700">상품이 3~6개일 때만 적용돼요 (지금은 나열형)</span>
+                          {p.badge && (
+                            <>
+                              <select
+                                value={p.badgeShape || 'circle'}
+                                onChange={(e) => patchPackage(p.id, (x) => ({ ...x, badgeShape: e.target.value as BadgeShape }))}
+                                className="border border-paperLine rounded px-1 py-0.5 bg-white"
+                                aria-label="배지 모양"
+                              >
+                                {BADGE_SHAPES.map((b) => (
+                                  <option key={b.id} value={b.id}>
+                                    {b.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={p.badgeColor || 'navy'}
+                                onChange={(e) => patchPackage(p.id, (x) => ({ ...x, badgeColor: e.target.value as BadgeColor }))}
+                                className="border border-paperLine rounded px-1 py-0.5 bg-white"
+                                aria-label="배지 색"
+                              >
+                                {BADGE_COLORS.map((b) => (
+                                  <option key={b.id} value={b.id}>
+                                    {b.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </>
+                          )}
+                          {p.template && p.template !== 'grid' && p.template !== 'auto' && !templateFits(p.template, packageUnitCount(p)) && (
+                            <span className="text-[11px] text-amber-700">이 배치는 상품 수가 안 맞아 나열형으로 만들어져요</span>
+                          )}
+                          {p.template === 'auto' && (
+                            <span className="text-[11px] text-inkSoft">
+                              {packageUnitCount(p) < 3 ? '2개 이하는 나열형으로 만들어요' : '상품이 가로로 넓은지 세로로 긴지 보고 골라요'}
+                            </span>
+                          )}
+                          {p.template && p.template !== 'grid' && p.template !== 'auto' && getTemplate(p.template) && (
+                            <span className="text-[11px] text-inkSoft">잘 맞는 상품: {getTemplate(p.template)!.best}</span>
                           )}
                         </span>
                         <span className="flex items-center gap-1.5">

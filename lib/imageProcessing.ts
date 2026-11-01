@@ -23,8 +23,9 @@ import {
   type DetailSectionInput,
 } from './detailRender';
 import { DETAIL_IMAGE_WIDTH, THUMBNAIL_IMAGE_SIZE } from './imageSpecs';
-import { packageGrid, canUseHero } from './thumbnailPackage';
-import { composeHeroPackage } from './packageHero';
+import { packageGrid } from './thumbnailPackage';
+import { composeTemplate } from './packageCompose';
+import { resolveTemplate, BADGE_STRIP, type TemplateChoice } from './packageTemplates';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -940,14 +941,16 @@ export async function generateMainSubjectThumbnail(input: {
 // AI에게 "두 개를 같이 그려줘"라고 시키면 개수·색상이 어긋나는 일이 있어서, 색상별 사진을 각각 누끼로
 // 따고(상품 위치 크롭 -> 글자 정리 -> 흰 배경 제거) 코드로 정확한 개수만큼 배치한다. 메인 썸네일과 같은
 // 규격(1000x1000 순백 배경, 상품이 86% 이내)이다.
-export async function composePackageCutouts(units: Buffer[]): Promise<Buffer> {
+export async function composePackageCutouts(units: Buffer[], opts: { badge?: boolean } = {}): Promise<Buffer> {
   if (units.length === 0) throw new Error('패키지에 담을 상품이 없어요.');
   const SIZE = THUMBNAIL_SIZE;
   const maxDim = Math.round(SIZE * 0.86);
   const pad = Math.round((SIZE - maxDim) / 2);
   const { cols, rows } = packageGrid(units.length);
   const cellW = maxDim / cols;
-  const cellH = maxDim / rows;
+  // 수량 배지를 달면 맨 위를 비워두고 그 아래에 배치한다
+  const reserve = opts.badge ? BADGE_STRIP : 0;
+  const cellH = (maxDim - reserve) / rows;
 
   const placed: { input: Buffer; left: number; top: number }[] = [];
   for (let i = 0; i < units.length; i++) {
@@ -966,7 +969,7 @@ export async function composePackageCutouts(units: Buffer[]): Promise<Buffer> {
     placed.push({
       input: fitted,
       left: Math.round(pad + rowOffset + c * cellW + cellW / 2 - w / 2),
-      top: Math.round(pad + r * cellH + cellH / 2 - h / 2),
+      top: Math.round(pad + reserve + r * cellH + cellH / 2 - h / 2),
     });
   }
   return sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: '#ffffff' } })
@@ -977,7 +980,7 @@ export async function composePackageCutouts(units: Buffer[]): Promise<Buffer> {
 
 export async function generatePackageThumbnail(
   items: { productImage: { buffer: Buffer; mimeType: string }; quantity: number }[],
-  opts: { layout?: 'grid' | 'hero' } = {}
+  opts: { template?: TemplateChoice; flip?: boolean; badge?: boolean } = {}
 ): Promise<Buffer> {
   const cutouts = await Promise.all(
     items.map(async (it) => {
@@ -990,8 +993,18 @@ export async function generatePackageThumbnail(
   items.forEach((it, i) => {
     for (let q = 0; q < it.quantity; q++) units.push(cutouts[i]);
   });
-  if (opts.layout === 'hero' && canUseHero(units.length)) return composeHeroPackage(units);
-  return composePackageCutouts(units);
+  // 자동 추천은 상품 형태(가로/세로 비율 평균)를 보고 고른다
+  let aspect = 1;
+  try {
+    const ms = await Promise.all(units.map(async (u) => sharp(await sharp(u).trim().toBuffer()).metadata()));
+    const ratios = ms.map((m) => (m.width || 1) / (m.height || 1));
+    aspect = ratios.reduce((s, r) => s + r, 0) / ratios.length;
+  } catch {
+    // 형태를 못 재면 보통 비율로 본다
+  }
+  const tpl = resolveTemplate(opts.template, units.length, aspect);
+  if (tpl === 'grid') return composePackageCutouts(units, { badge: opts.badge }); // 가운데 정렬이라 반전은 배지 위치만 바뀐다
+  return composeTemplate(tpl, units, { badge: opts.badge, flip: opts.flip });
 }
 
 // 상품 사진에서 상품만 따낸 투명 배경 PNG. ready=true면 이미 흰 배경에 상품만 있는 이미지(패키지 합성 등)라

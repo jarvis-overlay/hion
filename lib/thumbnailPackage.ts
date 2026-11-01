@@ -1,6 +1,8 @@
 // 썸네일 "패키지(세트) 구성" - 예: 검정 1 + 회색 1을 한 패키지로 파는 상품.
 // 색상별 사진을 개별로 만드는 대신, 패키지에 들어가는 색상/수량 그대로 한 장에 담은 이미지를 만든다.
 // 수량 1 = 그 색상 사진에 찍힌 상품 한 묶음(사진에 보이는 그대로)을 1개로 센다.
+import { TEMPLATE_IDS, getTemplate, normBadgeColor, normBadgeShape, templateFits, templateName, type BadgeColor, type BadgeShape, type TemplateChoice } from './packageTemplates';
+
 export interface PackageItem {
   color: string; // 올린 사진의 색상 라벨과 같은 이름
   qty: number; // 1 ~ MAX_QTY
@@ -8,8 +10,11 @@ export interface PackageItem {
 export interface PackageSpec {
   items: PackageItem[];
   additional: number; // 이 패키지로 만들 추가 이미지 개수 (0 ~ MAX_PACKAGE_ADDITIONAL)
-  layout?: 'grid' | 'hero'; // grid: 같은 크기로 나열 / hero: 대표 1개를 크게 + 나머지를 오른쪽 세로 줄에 작게
-  badge?: boolean; // 오른쪽 위에 수량 배지("5P")를 붙인다
+  template?: TemplateChoice; // 배치 템플릿 (기본 grid = 나열형, auto = 수량·형태로 추천)
+  flip?: boolean; // 좌우 반전
+  badge?: boolean; // 맨 위 모서리에 수량 배지("5P")를 붙인다
+  badgeShape?: BadgeShape;
+  badgeColor?: BadgeColor;
 }
 
 export const MAX_QTY = 6;
@@ -20,16 +25,13 @@ export const MAX_PACKAGE_ADDITIONAL = 8;
 const norm = (s: string) => s.replace(/\s+/g, '').toLowerCase();
 export const sameColor = (a: string, b: string) => !!norm(a) && norm(a) === norm(b);
 
-// 대표형은 상품이 3~6개일 때만 쓴다 (2개는 격자가 더 자연스럽고, 7개 이상은 작은 줄이 너무 작아짐)
-export const HERO_MIN_UNITS = 3;
-export const HERO_MAX_UNITS = 6;
-export const canUseHero = (units: number) => units >= HERO_MIN_UNITS && units <= HERO_MAX_UNITS;
 export const unitCount = (items: PackageItem[]) => items.reduce((s, i) => s + i.qty, 0);
 
 export function packageLabel(p: PackageSpec): string {
   const base = `패키지 ${p.items.map((i) => `${i.color} ${i.qty}`).join(' + ')}`;
   // 같은 구성이라도 배치/배지가 다르면 서로 다른 메인으로 구분한다 (다시 만들 때 덮어쓰기 기준)
-  return `${base}${p.layout === 'hero' ? ' 대표형' : ''}${p.badge ? ' 배지' : ''}`;
+  const tpl = p.template && p.template !== 'grid' ? ` ${templateName(p.template)}` : '';
+  return `${base}${tpl}${p.flip ? ' 반전' : ''}${p.badge ? ' 배지' : ''}`;
 }
 
 // 화면에서 보낸 JSON을 검증/정리. 잘못된 항목은 버린다 (색상 없음, 수량 이상, 같은 색상 중복은 합침).
@@ -67,16 +69,22 @@ export function parsePackages(raw: unknown): { packages: PackageSpec[]; warnings
     }
     const add = Math.round(Number((p as any)?.additional));
     const kept = items.filter((i) => i.qty > 0);
-    let layout: 'grid' | 'hero' = (p as any)?.layout === 'hero' ? 'hero' : 'grid';
-    if (layout === 'hero' && !canUseHero(unitCount(kept))) {
-      warnings.push(`대표형 배치는 상품이 ${HERO_MIN_UNITS}~${HERO_MAX_UNITS}개일 때만 돼서 "${packageLabel({ items: kept, additional: 0 })}"는 나열형으로 만들었어요.`);
-      layout = 'grid';
+    // 예전 값(layout: 'hero')도 받아준다
+    const rawTpl = (p as any)?.template ?? ((p as any)?.layout === 'hero' ? 'hero-side' : 'grid');
+    let template: TemplateChoice = rawTpl === 'auto' || (TEMPLATE_IDS as string[]).includes(rawTpl) ? rawTpl : 'grid';
+    if (template !== 'auto' && !templateFits(template, unitCount(kept))) {
+      const t = getTemplate(template)!;
+      warnings.push(`"${t.name}" 배치는 상품이 ${t.min}~${t.max}개일 때만 돼서 "${packageLabel({ items: kept, additional: 0 })}"는 나열형으로 만들었어요.`);
+      template = 'grid';
     }
     packages.push({
       items: kept,
       additional: Number.isFinite(add) ? Math.max(0, Math.min(MAX_PACKAGE_ADDITIONAL, add)) : 3,
-      layout,
+      template,
+      flip: (p as any)?.flip === true,
       badge: (p as any)?.badge === true,
+      badgeShape: normBadgeShape((p as any)?.badgeShape),
+      badgeColor: normBadgeColor((p as any)?.badgeColor),
     });
   }
   return { packages, warnings };
