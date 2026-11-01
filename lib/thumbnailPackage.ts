@@ -8,6 +8,8 @@ export interface PackageItem {
 export interface PackageSpec {
   items: PackageItem[];
   additional: number; // 이 패키지로 만들 추가 이미지 개수 (0 ~ MAX_PACKAGE_ADDITIONAL)
+  layout?: 'grid' | 'hero'; // grid: 같은 크기로 나열 / hero: 대표 1개를 크게 + 나머지를 오른쪽 세로 줄에 작게
+  badge?: boolean; // 오른쪽 위에 수량 배지("5P")를 붙인다
 }
 
 export const MAX_QTY = 6;
@@ -18,8 +20,16 @@ export const MAX_PACKAGE_ADDITIONAL = 8;
 const norm = (s: string) => s.replace(/\s+/g, '').toLowerCase();
 export const sameColor = (a: string, b: string) => !!norm(a) && norm(a) === norm(b);
 
+// 대표형은 상품이 3~6개일 때만 쓴다 (2개는 격자가 더 자연스럽고, 7개 이상은 작은 줄이 너무 작아짐)
+export const HERO_MIN_UNITS = 3;
+export const HERO_MAX_UNITS = 6;
+export const canUseHero = (units: number) => units >= HERO_MIN_UNITS && units <= HERO_MAX_UNITS;
+export const unitCount = (items: PackageItem[]) => items.reduce((s, i) => s + i.qty, 0);
+
 export function packageLabel(p: PackageSpec): string {
-  return `패키지 ${p.items.map((i) => `${i.color} ${i.qty}`).join(' + ')}`;
+  const base = `패키지 ${p.items.map((i) => `${i.color} ${i.qty}`).join(' + ')}`;
+  // 같은 구성이라도 배치/배지가 다르면 서로 다른 메인으로 구분한다 (다시 만들 때 덮어쓰기 기준)
+  return `${base}${p.layout === 'hero' ? ' 대표형' : ''}${p.badge ? ' 배지' : ''}`;
 }
 
 // 화면에서 보낸 JSON을 검증/정리. 잘못된 항목은 버린다 (색상 없음, 수량 이상, 같은 색상 중복은 합침).
@@ -56,9 +66,17 @@ export function parsePackages(raw: unknown): { packages: PackageSpec[]; warnings
       }
     }
     const add = Math.round(Number((p as any)?.additional));
+    const kept = items.filter((i) => i.qty > 0);
+    let layout: 'grid' | 'hero' = (p as any)?.layout === 'hero' ? 'hero' : 'grid';
+    if (layout === 'hero' && !canUseHero(unitCount(kept))) {
+      warnings.push(`대표형 배치는 상품이 ${HERO_MIN_UNITS}~${HERO_MAX_UNITS}개일 때만 돼서 "${packageLabel({ items: kept, additional: 0 })}"는 나열형으로 만들었어요.`);
+      layout = 'grid';
+    }
     packages.push({
-      items: items.filter((i) => i.qty > 0),
+      items: kept,
       additional: Number.isFinite(add) ? Math.max(0, Math.min(MAX_PACKAGE_ADDITIONAL, add)) : 3,
+      layout,
+      badge: (p as any)?.badge === true,
     });
   }
   return { packages, warnings };

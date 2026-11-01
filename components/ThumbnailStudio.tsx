@@ -455,7 +455,7 @@ function ProjectEditor({
   // 아직 안 건드린 색상은 기본 5장.
   const [batchCounts, setBatchCounts] = useState<Record<string, number>>({});
   // 패키지(세트) 구성: 예) 검정 1 + 회색 1을 한 패키지로 파는 상품. 구성 그대로 한 장에 담은 메인 + 추가 이미지를 만든다.
-  const [packages, setPackages] = useState<{ id: string; items: { color: string; qty: number }[]; additional: number }[]>([]);
+  const [packages, setPackages] = useState<{ id: string; items: { color: string; qty: number }[]; additional: number; layout?: 'grid' | 'hero'; badge?: boolean }[]>([]);
   const [packageOnly, setPackageOnly] = useState(false);
   const [productNote, setProductNote] = useState('');
   const [batchResult, setBatchResult] = useState<string | null>(null);
@@ -597,7 +597,7 @@ function ProjectEditor({
     }
     fd.set('category', batchCategory.trim());
     fd.set('productNote', productNote.trim());
-    fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional }))));
+    fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional, layout: p.layout, badge: p.badge }))));
     if (usePackageOnly) fd.set('packageOnly', '1');
     fd.set('additionalCount', String(DEFAULT_ADDITIONAL));
     fd.set(
@@ -1057,7 +1057,7 @@ function ProjectEditor({
                           </button>
                         </div>
                       ))}
-                      <div className="flex items-center justify-between gap-2 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                         <button
                           type="button"
                           onClick={() =>
@@ -1068,6 +1068,27 @@ function ProjectEditor({
                         >
                           + 색상 추가
                         </button>
+                        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <label className="flex items-center gap-1" title="대표 상품 1개를 크게, 나머지는 오른쪽에 세로로 작게 놓아요 (상품 3~6개일 때)">
+                            <input
+                              type="checkbox"
+                              checked={p.layout === 'hero'}
+                              onChange={(e) => patchPackage(p.id, (x) => ({ ...x, layout: e.target.checked ? 'hero' : 'grid' }))}
+                            />
+                            <span>대표 1개 크게 + 나머지 세로로</span>
+                          </label>
+                          <label className="flex items-center gap-1" title="오른쪽 위에 빨간 수량 배지(예: 5P)를 붙여요 (메인 이미지만)">
+                            <input
+                              type="checkbox"
+                              checked={!!p.badge}
+                              onChange={(e) => patchPackage(p.id, (x) => ({ ...x, badge: e.target.checked }))}
+                            />
+                            <span>수량 배지({packageUnitCount(p)}P)</span>
+                          </label>
+                          {p.layout === 'hero' && (packageUnitCount(p) < 3 || packageUnitCount(p) > 6) && (
+                            <span className="text-[11px] text-amber-700">상품이 3~6개일 때만 적용돼요 (지금은 나열형)</span>
+                          )}
+                        </span>
                         <span className="flex items-center gap-1.5">
                           <span className="text-inkSoft">추가 이미지</span>
                           <button

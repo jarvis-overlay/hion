@@ -18,6 +18,7 @@ import {
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
 import { parsePackages, packageLabel, sameColor } from '@/lib/thumbnailPackage';
+import { applyCountBadge } from '@/lib/packageHero';
 import { generateThumbnailCopies, sanitizeThumbnailCopy } from '@/lib/ai';
 import {
   learnStyleBrief,
@@ -583,7 +584,7 @@ export async function generateThumbnailBatch(
   const packageResults = await mapLimit(packages, 2, async (p) => {
     // 색상 이름은 올린 사진의 라벨 표기로 통일한다 (공백/대소문자만 다른 입력도 같은 색으로 봄)
     const resolved = p.items.map((it) => ({ color: allGroups.find(([l]) => l && sameColor(l, it.color))?.[0] ?? it.color, qty: it.qty }));
-    const label = packageLabel({ items: resolved, additional: p.additional });
+    const label = packageLabel({ items: resolved, additional: p.additional, layout: p.layout, badge: p.badge });
     const items: { productImage: BatchSource; quantity: number }[] = [];
     for (const it of p.items) {
       const g = allGroups.find(([l]) => l && sameColor(l, it.color));
@@ -591,8 +592,18 @@ export async function generateThumbnailBatch(
       items.push({ productImage: g[1][0], quantity: it.qty });
     }
     try {
-      const composite = await generatePackageThumbnail(items);
-      const saved = await savePackageMain(supabase, projectId, label, composite);
+      const composite = await generatePackageThumbnail(items, { layout: p.layout });
+      // 수량 배지는 메인에만 붙인다 (추가 이미지의 상품 사진으로 쓰는 composite에 배지가 섞이면 상품으로 오인됨).
+      // 배지 합성이 실패해도 메인은 배지 없이 만든다.
+      let shown = composite;
+      if (p.badge) {
+        try {
+          shown = await applyCountBadge(composite, items.reduce((s, it) => s + it.quantity, 0));
+        } catch (e: any) {
+          notes.push(`"${label}" 수량 배지를 붙이지 못했어요: ${e?.message || e}`);
+        }
+      }
+      const saved = await savePackageMain(supabase, projectId, label, composite, shown);
       if ('error' in saved) return { label, p, error: saved.error };
       return { label, p, composite };
     } catch (e: any) {
@@ -705,22 +716,32 @@ async function savePackageMain(
   supabase: ReturnType<typeof createClient>,
   projectId: string,
   label: string,
-  composite: Buffer
+  composite: Buffer,
+  shown: Buffer = composite // 화면에 보이는 메인 (배지가 붙은 것). composite는 배지 없는 합성본
 ): Promise<{ error: string } | { success: true; url: string }> {
   await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main').eq('color_label', label);
   const imageId = randomUUID();
-  const body = await enforceThumbnailSize(composite);
+  const body = await enforceThumbnailSize(shown);
   const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
   await archiveOutput(supabase, BUCKET, outPath);
   const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, body, { contentType: 'image/jpeg', upsert: true });
   if (upErr) return { error: upErr.message };
   const url = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl;
+  // 입력 사진(다시 만들기·추가 컷의 원본)은 배지 없는 합성본으로 따로 저장한다
+  let inputUrl = url;
+  if (shown !== composite) {
+    const inPath = `thumbnails/${projectId}/${imageId}-input.jpg`;
+    const { error: inErr } = await supabase.storage
+      .from(BUCKET)
+      .upload(inPath, await enforceThumbnailSize(composite), { contentType: 'image/jpeg', upsert: true });
+    if (!inErr) inputUrl = supabase.storage.from(BUCKET).getPublicUrl(inPath).data.publicUrl;
+  }
   const { error: insertErr } = await supabase.from('thumbnail_images').insert({
     id: imageId,
     project_id: projectId,
     kind: 'main',
     position: 0,
-    input_image_url: url,
+    input_image_url: inputUrl,
     output_image_url: url,
     product_position: 'center',
     effect_prompt: null,

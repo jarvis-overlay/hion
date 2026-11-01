@@ -23,7 +23,8 @@ import {
   type DetailSectionInput,
 } from './detailRender';
 import { DETAIL_IMAGE_WIDTH, THUMBNAIL_IMAGE_SIZE } from './imageSpecs';
-import { packageGrid } from './thumbnailPackage';
+import { packageGrid, canUseHero } from './thumbnailPackage';
+import { composeHeroPackage } from './packageHero';
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -975,7 +976,8 @@ export async function composePackageCutouts(units: Buffer[]): Promise<Buffer> {
 }
 
 export async function generatePackageThumbnail(
-  items: { productImage: { buffer: Buffer; mimeType: string }; quantity: number }[]
+  items: { productImage: { buffer: Buffer; mimeType: string }; quantity: number }[],
+  opts: { layout?: 'grid' | 'hero' } = {}
 ): Promise<Buffer> {
   const cutouts = await Promise.all(
     items.map(async (it) => {
@@ -988,6 +990,7 @@ export async function generatePackageThumbnail(
   items.forEach((it, i) => {
     for (let q = 0; q < it.quantity; q++) units.push(cutouts[i]);
   });
+  if (opts.layout === 'hero' && canUseHero(units.length)) return composeHeroPackage(units);
   return composePackageCutouts(units);
 }
 
