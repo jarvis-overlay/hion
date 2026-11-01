@@ -4,6 +4,8 @@ import { Fragment, useState, useTransition } from 'react';
 import { shrinkImageForUpload } from '@/lib/clientImage';
 import DetailAutoComposer from '@/components/DetailAutoComposer';
 import DetailExportPanel from '@/components/DetailExportPanel';
+import ImageLightbox from '@/components/ImageLightbox';
+import { downloadImage, downloadImagesZip, safeFileName } from '@/lib/clientDownload';
 import {
   createProject,
   updateProjectCategory,
@@ -443,6 +445,58 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
       return next;
     });
   }
+  // 다운로드: 화면 순서대로 번호를 붙이고, 새 창 없이 바로 저장한다
+  const downloadables = sections
+    .filter((x) => x.output_image_url)
+    .map((x, idx) => ({
+      id: x.id as string,
+      url: x.output_image_url as string,
+      name: `${safeFileName(`상세페이지_${String(idx + 1).padStart(2, '0')}_${x.prompt_text?.split('/')[0]?.replace(/^키워드:\s*/, '') || '장면'}`)}.jpg`,
+      title: `장면 ${x.position + 1}${x.prompt_text ? ` · ${String(x.prompt_text).split('/')[0].replace(/^키워드:\s*/, '').slice(0, 30)}` : ''}`,
+    }));
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const previewIndex = previewId ? downloadables.findIndex((d) => d.id === previewId) : -1;
+  const [dlBusy, setDlBusy] = useState<string | null>(null);
+  const [dlMsg, setDlMsg] = useState<string | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+
+  async function handleDownloadOne(id: string) {
+    const d = downloadables.find((x) => x.id === id);
+    if (!d) return;
+    setDlBusy(id);
+    setDlError(null);
+    try {
+      await downloadImage(d.url, d.name);
+    } catch (e: any) {
+      setDlError(e?.message || '다운로드에 실패했어요. 다시 시도해주세요.');
+    } finally {
+      setDlBusy(null);
+    }
+  }
+
+  async function handleDownloadZip(ids: string[] | null) {
+    const list = downloadables.filter((d) => !ids || ids.includes(d.id));
+    if (list.length === 0) {
+      setDlError('내려받을 이미지가 없어요. 생성이 끝난 장면만 받을 수 있어요.');
+      return;
+    }
+    setDlBusy('zip');
+    setDlError(null);
+    setDlMsg(`0/${list.length}장 받는 중...`);
+    try {
+      const zipName = `${safeFileName(`상세페이지_${project.title || '장면'}_${list.length}장`)}.zip`;
+      const r = await downloadImagesZip(list, zipName, (done, total) => setDlMsg(`${done}/${total}장 받는 중...`));
+      const failedNote =
+        r.failed.length > 0 ? ` (${r.failed.length}장은 받지 못했어요: ${r.failed.slice(0, 3).join(', ')}${r.failed.length > 3 ? ' 외' : ''})` : '';
+      setDlMsg(`${r.ok}장을 ZIP으로 받았어요.${failedNote}`);
+    } catch (e: any) {
+      setDlMsg(null);
+      setDlError(e?.message || 'ZIP 다운로드에 실패했어요. 다시 시도해주세요.');
+    } finally {
+      setDlBusy(null);
+    }
+  }
+
   function handleDeleteSelected() {
     if (selectedList.length === 0) return;
     if (!window.confirm(`선택한 장면 ${selectedList.length}개를 삭제할까요? 되돌릴 수 없어요.`)) return;
@@ -804,7 +858,20 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
             이미지
           </label>
           <div className="px-2 py-2">키워드 / 분위기 / 설명</div>
-          <div className="px-2 py-2">결과</div>
+          <div className="px-2 py-2 flex items-center gap-2">
+            결과
+            {downloadables.length > 0 && (
+              <button
+                type="button"
+                onClick={() => handleDownloadZip(null)}
+                disabled={dlBusy === 'zip'}
+                className="text-accent font-semibold disabled:opacity-50"
+                title="결과 이미지를 ZIP 한 파일로 받아요"
+              >
+                {dlBusy === 'zip' ? dlMsg || '묶는 중...' : `전체 다운로드 (${downloadables.length}장)`}
+              </button>
+            )}
+          </div>
           <div className="px-2 py-2" />
         </div>
 
@@ -848,17 +915,24 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                     <img
                       src={s.output_image_url}
                       alt="생성 결과"
-                      className={`${THUMB} object-cover rounded bg-paper`}
+                      onClick={() => setPreviewId(s.id)}
+                      title="눌러서 크게 보기"
+                      className={`${THUMB} object-cover rounded bg-paper cursor-zoom-in`}
                     />
-                    <a
-                      href={s.output_image_url}
-                      download
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block text-center text-[11px] text-accent underline mt-1"
-                    >
-                      다운로드
-                    </a>
+                    <div className="flex justify-center gap-3 mt-1">
+                      <button type="button" onClick={() => setPreviewId(s.id)} className="text-[11px] text-accent font-semibold">
+                        확대
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadOne(s.id)}
+                        disabled={dlBusy === s.id}
+                        title="새 창 없이 바로 저장해요"
+                        className="text-[11px] text-accent underline disabled:opacity-50"
+                      >
+                        {dlBusy === s.id ? '받는 중...' : '다운로드'}
+                      </button>
+                    </div>
                   </div>
                 ) : s.error ? (
                   <button
@@ -1306,11 +1380,21 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
 
       {notice && <p className="text-xs text-profit bg-profitBg rounded-md px-3 py-2">{notice}</p>}
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{error}</p>}
+      {dlMsg && <p className="text-xs text-profit bg-profitBg rounded-md px-3 py-2">{dlMsg}</p>}
+      {dlError && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{dlError}</p>}
 
       {/* 선택한 장면이 있으면 화면 아래에 떠서 어디서든 한 번에 삭제할 수 있게 한다 */}
       {selectedList.length > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full bg-ink text-white px-5 py-2.5 shadow-xl text-xs">
           <span className="font-semibold">{selectedList.length}개 선택됨</span>
+          <button
+            type="button"
+            onClick={() => handleDownloadZip(selectedList)}
+            disabled={dlBusy === 'zip'}
+            className="rounded-full bg-white/20 px-3 py-1 font-semibold hover:bg-white/30 disabled:opacity-50"
+          >
+            {dlBusy === 'zip' ? dlMsg || '받는 중...' : '선택 다운로드'}
+          </button>
           <button
             type="button"
             onClick={handleDeleteSelected}
@@ -1323,6 +1407,15 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
             해제
           </button>
         </div>
+      )}
+
+      {previewId && previewIndex >= 0 && (
+        <ImageLightbox
+          items={downloadables.map((d) => ({ url: d.url, title: d.title, fileName: d.name }))}
+          index={previewIndex}
+          onIndex={(i) => setPreviewId(downloadables[i]?.id ?? null)}
+          onClose={() => setPreviewId(null)}
+        />
       )}
     </div>
   );
