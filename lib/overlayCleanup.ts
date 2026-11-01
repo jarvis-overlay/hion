@@ -18,7 +18,7 @@ export interface OverlayRegion {
   yMax: number;
 }
 
-export type DetectRegions = (buffer: Buffer, mimeType: string) => Promise<OverlayRegion[]>;
+export type DetectRegions = (buffer: Buffer, mimeType: string, single?: DetectRegions) => Promise<OverlayRegion[]>;
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -33,10 +33,12 @@ export function normalizeRegions(raw: unknown): OverlayRegion[] {
   const out: OverlayRegion[] = [];
   for (const r of arr as any[]) {
     const clamp = (v: unknown) => Math.min(1, Math.max(0, Number(v)));
-    const xMin = clamp(r?.xMin);
-    const yMin = clamp(r?.yMin);
-    const xMax = clamp(r?.xMax);
-    const yMax = clamp(r?.yMax);
+    // Gemini가 가장 정확하게 내놓는 형식은 box_2d = [yMin, xMin, yMax, xMax] (0~1000)
+    const box = Array.isArray(r?.box_2d) && r.box_2d.length === 4 ? r.box_2d.map((v: unknown) => Number(v) / 1000) : null;
+    const xMin = clamp(box ? box[1] : r?.xMin);
+    const yMin = clamp(box ? box[0] : r?.yMin);
+    const xMax = clamp(box ? box[3] : r?.xMax);
+    const yMax = clamp(box ? box[2] : r?.yMax);
     if (![xMin, yMin, xMax, yMax].every(Number.isFinite)) continue;
     const w = xMax - xMin;
     const h = yMax - yMin;
@@ -55,11 +57,13 @@ export const detectOverlayRegions: DetectRegions = async (buffer, mimeType) => {
 - 로고, 워터마크, QR코드, 상품에 인쇄/부착된 알아볼 수 있는 글자 라벨
 
 규칙:
-- 각 항목(한 줄의 글자, 또는 아이콘+그 아래 글자 묶음)마다 그것을 **빠짐없이 덮는** 사각형을 이미지 전체 대비 0~1 비율 좌표로 알려주세요. 여백을 조금 넉넉하게 잡으세요.
+- 각 항목(한 줄의 글자, 또는 아이콘+그 아래 글자 묶음)마다 그것을 **빠짐없이 덮는** 사각형을 알려주세요. 여백을 조금 넉넉하게 잡으세요.
+- 이미지의 가장자리(특히 아래쪽)에 걸쳐 있거나 작고 흐린 글자·아이콘도 빠뜨리지 마세요.
+- 좌표는 box_2d = [yMin, xMin, yMax, xMax], 이미지 전체를 0~1000으로 본 값입니다.
 - 상품 자체의 무늬·질감·주름·그림자는 대상이 아닙니다. 글자나 그래픽 요소가 하나도 없으면 빈 배열 [].
 
 JSON 배열로만 응답하세요:
-[{"xMin":0.0,"yMin":0.0,"xMax":0.0,"yMax":0.0}]`;
+[{"box_2d":[0,0,0,0]}]`;
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${VISION_MODEL}:generateContent?key=${apiKey}`,
@@ -83,6 +87,44 @@ JSON 배열로만 응답하세요:
   } catch {
     return [];
   }
+};
+
+// 작은 글자·아이콘은 이미지 전체를 한 번에 볼 때 놓치기 쉬워서, 위쪽 60% / 아래쪽 60% 구간을
+// 잘라 따로 한 번씩 더 찾고(전체 검사와 동시에) 결과를 합친다. 구간 검사가 실패해도 전체 검사
+// 결과만으로 계속하고, 전체 검사가 실패하면 기존처럼 오류로 알려서 원본을 그대로 쓴다.
+export function bandRanges(W: number, H: number): { y0: number; y1: number }[] {
+  if (H < 480 || H < W * 0.6) return [];
+  const h = Math.round(H * 0.6);
+  return [
+    { y0: 0, y1: h },
+    { y0: H - h, y1: H },
+  ];
+}
+
+export const detectOverlayRegionsTiled: DetectRegions = async (buffer, mimeType, single = detectOverlayRegions) => {
+  const meta = await sharp(buffer).metadata();
+  const W = meta.width || 0;
+  const H = meta.height || 0;
+  const bands = bandRanges(W, H);
+  const bandWork = Promise.all(
+    bands.map(async ({ y0, y1 }) => {
+      try {
+        const crop = await sharp(buffer).extract({ left: 0, top: y0, width: W, height: y1 - y0 }).jpeg({ quality: 92 }).toBuffer();
+        const found = await single(crop, 'image/jpeg');
+        return found.map((r) => ({
+          xMin: r.xMin,
+          xMax: r.xMax,
+          yMin: (y0 + r.yMin * (y1 - y0)) / H,
+          yMax: (y0 + r.yMax * (y1 - y0)) / H,
+        }));
+      } catch (e: any) {
+        console.error('[overlayCleanup] 구간 검사 실패 - 건너뜀:', e?.message || e);
+        return [] as OverlayRegion[];
+      }
+    })
+  );
+  const [full, parts] = await Promise.all([single(buffer, mimeType), bandWork]);
+  return [...full, ...parts.flat()].slice(0, 40);
 };
 
 interface PxRect {
@@ -190,18 +232,18 @@ export async function inpaintRects(buffer: Buffer, rects: PxRect[]): Promise<Buf
   return sharp(current).jpeg({ quality: 92 }).toBuffer();
 }
 
-// 글자/아이콘을 찾아서 지운다. 결과를 다시 검사해서 남은 게 있으면 한 번 더(최대 2번)
+// 글자/아이콘을 찾아서 지운다. 결과를 다시 검사해서 남은 게 있으면 한 번 더(최대 3번)
 // 지운다. 검사/지우기가 실패해도 이미지 생성 전체를 막지 않고 원본을 그대로 돌려준다.
 export async function removeOverlays(
   buffer: Buffer,
   mimeType: string,
-  detect: DetectRegions = detectOverlayRegions
+  detect: DetectRegions = detectOverlayRegionsTiled
 ): Promise<{ buffer: Buffer; mimeType: string; removed: number; error: string | null }> {
   let current = buffer;
   let currentMime = mimeType;
   let removed = 0;
   try {
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = 0; pass < 3; pass++) {
       const regions = await detect(current, currentMime);
       if (regions.length === 0) break;
       const meta = await sharp(current).metadata();
