@@ -37,6 +37,7 @@ export interface SourceAnalysis {
   colorsShown: string[]; // 사진에 보이는 "상품" 색상 (한국어 색상명)
   sizeChart: SizeChart | null; // 사이즈표가 있으면
   sizesMentioned: string[]; // 사진에 언급된 사이즈
+  textHeavy?: boolean; // 글자/그래픽이 이미지 대부분을 차지하는 정보 이미지 (상품 사진 배경으로 못 씀)
 }
 
 export interface PhotoVerdict {
@@ -140,6 +141,15 @@ export function evaluatePhoto(
       usable: false,
       color: null,
       reason: '중국 사이즈표 사진이라 쓰지 않아요 (사이즈표는 직접 입력한 표로 만들어요)',
+    };
+  }
+  // 글자·그래픽이 대부분인 정보 이미지는 글자를 지우면 빈 종이에 줄만 남아서, 그걸 배경으로 쓰면
+  // 아무 의미 없는 그림이 나온다(실측). 사진으로는 쓰지 않고 거기서 읽은 내용만 참고한다.
+  if (analysis?.textHeavy) {
+    return {
+      usable: false,
+      color: null,
+      reason: '글자·그래픽이 대부분인 이미지라 사진으로 쓰지 않아요 (거기서 읽은 내용만 참고해요)',
     };
   }
   const label = (colorLabel || '').trim();

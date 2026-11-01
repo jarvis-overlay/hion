@@ -25,6 +25,9 @@ export function judgeMatch(r: any, opts: { allowColorChange?: boolean } = {}): M
   if (r.sameSilhouette === false) issues.push('상품 모양(실루엣·길이·폭)이 원본과 달라요');
   if (r.sameColor === false && !opts.allowColorChange) issues.push('상품 색상이 원본과 달라요');
   if (r.sameParts === false) issues.push('상품의 부품·디테일(밴드·솔기·주머니·개수 등)이 원본과 달라요');
+  if (r.looksNatural === false) {
+    issues.push('결과 그림에 어색하게 뭉개지거나 의미 없는 물체·도형이 있어요 (특히 위쪽·가장자리)');
+  }
   if (issues.length > 0 && typeof r.note === 'string' && r.note.trim()) issues.push(r.note.trim().slice(0, 120));
   return { ok: issues.length === 0, issues, skipped: false, originalType: o || undefined, resultType: t || undefined };
 }
@@ -52,11 +55,12 @@ export async function verifyProductMatch(
 - 실루엣: 길이·폭·다리/소매 부분의 모양이 같은가
 - 색상: 상품 본체와 밴드/포인트 색이 같은가${ctx.allowColorChange ? ' (이번엔 색 변경을 요청했으므로 항상 true)' : ''}
 - 부품·디테일: 밴드, 솔기, 주머니, 지퍼, 로고 자리, 개수가 같은가
+- 자연스러움(looksNatural): 두 번째 사진이 그대로 상세페이지에 써도 될 만큼 자연스러운가. 위·아래·가장자리에 정체불명의 상자·도형·떠 있는 물체, 뭉개지거나 녹은 부분, 어색하게 잘리거나 겹친 부분, 흐림 덩어리, 의미 없는 줄·선만 있는 장면이면 false
 문제 삼지 않을 것: 촬영 각도, 배경, 조명, 손·모델·연기·반짝임 같은 연출, 사진 속 글자, 크기.
-애매하면 true로 판단하되, 종류나 실루엣이 다르면 반드시 false입니다.
+애매하면 true로 판단하되, 종류나 실루엣이 다르거나 부자연스러우면 반드시 false입니다.
 
 JSON 객체로만 답하세요:
-{"originalType":"원본 상품 종류를 한국어로 짧게","resultType":"결과 속 상품 종류","sameType":true,"sameSilhouette":true,"sameColor":true,"sameParts":true,"note":"다르면 무엇이 어떻게 다른지 한 줄"}`;
+{"originalType":"원본 상품 종류를 한국어로 짧게","resultType":"결과 속 상품 종류","sameType":true,"sameSilhouette":true,"sameColor":true,"sameParts":true,"looksNatural":true,"note":"다르면 무엇이 어떻게 다른지 한 줄"}`;
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${VISION_MODEL}:generateContent?key=${apiKey}`,
       {

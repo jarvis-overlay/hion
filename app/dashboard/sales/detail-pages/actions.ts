@@ -854,6 +854,14 @@ async function uploadAndAnalyze(
   if (analysisRes.status === 'fulfilled') analysis = analysisRes.value;
   else analysisError = (analysisRes.reason as any)?.message || String(analysisRes.reason);
 
+  // 글자·그래픽이 대부분인 이미지는 사진으로 못 쓴다 (분석이 실패했어도 표시해서 넘긴다)
+  if (cleanRes.status === 'fulfilled' && cleanRes.value.textHeavy) {
+    analysis = {
+      ...(analysis ?? { role: 'other', description: '', koreanTexts: [], facts: [], colorsShown: [], sizeChart: null, sizesMentioned: [] }),
+      textHeavy: true,
+    };
+  }
+
   let url = originalUrl;
   let overlaysRemoved = 0;
   if (cleanRes.status === 'fulfilled' && cleanRes.value.removed > 0) {

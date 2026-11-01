@@ -127,6 +127,12 @@ export const detectOverlayRegionsTiled: DetectRegions = async (buffer, mimeType,
   return [...full, ...parts.flat()].slice(0, 40);
 };
 
+// 지울 영역을 주변 조각으로 못 덮을 때 흐림으로 채우는 한계 (이미지 면적 대비)
+const BLUR_MAX_AREA = 0.08;
+// 글자/그래픽이 이미지의 이만큼 이상을 차지하면 "사진"이 아니라 글자 위주 이미지(정보 이미지)로 본다.
+// 이런 이미지를 지우면 빈 종이에 줄만 남아서(실측) 상품 사진으로 쓸 수 없다.
+export const TEXT_HEAVY_COVERAGE = 0.3;
+
 interface PxRect {
   x: number;
   y: number;
@@ -208,6 +214,10 @@ export async function inpaintRects(buffer: Buffer, rects: PxRect[]): Promise<Buf
     if (scored.length > 0 && scored[0].bad < t.w * t.h * 0.2) {
       const c = scored[0].c;
       patch = await sharp(current).extract({ left: c.x, top: c.y, width: c.w, height: c.h }).png().toBuffer();
+    } else if (t.w * t.h > W * H * BLUR_MAX_AREA) {
+      // 큰 영역을 흐림으로 채우면 상품 위에 흐린 덩어리가 생겨 사진이 망가진다 (실측).
+      // 글자가 조금 남는 게 낫다 - 이후 생성 단계와 결과 검사에서 한 번 더 지운다.
+      continue;
     } else {
       // 조각을 못 구하면 영역 주변을 크게 흐려서 채운다 (글자는 없어지고 질감은 뭉개짐)
       patch = await sharp(current)
@@ -238,10 +248,11 @@ export async function removeOverlays(
   buffer: Buffer,
   mimeType: string,
   detect: DetectRegions = detectOverlayRegionsTiled
-): Promise<{ buffer: Buffer; mimeType: string; removed: number; error: string | null }> {
+): Promise<{ buffer: Buffer; mimeType: string; removed: number; error: string | null; coverage: number; textHeavy: boolean }> {
   let current = buffer;
   let currentMime = mimeType;
   let removed = 0;
+  let coverage = 0;
   try {
     for (let pass = 0; pass < 3; pass++) {
       const regions = await detect(current, currentMime);
@@ -256,13 +267,21 @@ export async function removeOverlays(
         w: (r.xMax - r.xMin) * W,
         h: (r.yMax - r.yMin) * H,
       }));
+      if (pass === 0) {
+        // 첫 검사에서 찾은 글자/그래픽이 차지하는 비율 (겹치는 영역은 한 번만 센다)
+        coverage = Math.min(1, mergeRects(rects, 0).reduce((s, r) => s + r.w * r.h, 0) / (W * H));
+        if (coverage > TEXT_HEAVY_COVERAGE) {
+          // 글자 위주 이미지: 지우면 내용이 사라지므로 손대지 않고 호출한 쪽이 판단하게 한다
+          return { buffer, mimeType, removed: 0, error: null, coverage, textHeavy: true };
+        }
+      }
       current = await inpaintRects(current, rects);
       currentMime = 'image/jpeg';
       removed += regions.length;
     }
-    return { buffer: current, mimeType: currentMime, removed, error: null };
+    return { buffer: current, mimeType: currentMime, removed, error: null, coverage, textHeavy: false };
   } catch (e: any) {
     console.error('[overlayCleanup] 글자/아이콘 제거 실패 - 원본 그대로 사용:', e?.message || e);
-    return { buffer, mimeType, removed: 0, error: e?.message || String(e) };
+    return { buffer, mimeType, removed: 0, error: e?.message || String(e), coverage: 0, textHeavy: false };
   }
 }
