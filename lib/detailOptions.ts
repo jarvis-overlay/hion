@@ -53,7 +53,7 @@ const COLOR_GROUPS: string[][] = [
   ['블랙', '검정', '검정색', '검은색', '까만색', '흑색', 'black', '黑', '黑色'],
   ['화이트', '흰색', '하얀색', '하양', '백색', '아이보리', 'white', 'ivory', '白', '白色'],
   ['그레이', '회색', '쥐색', '멜란지', '멜란지그레이', 'gray', 'grey', '灰', '灰色'],
-  ['차콜', '다크그레이', '진회색', 'charcoal', '炭灰'],
+  ['차콜', '다크그레이', '진회색', 'charcoal', '炭灰', '짙은회색', '진한회색', '어두운회색', '딥그레이', '차콜그레이', '다크그레이색', '짙은그레이', 'darkgray', 'darkgrey'],
   ['네이비', '남색', '곤색', '감색', '진남색', 'navy', '藏青', '深蓝'],
   ['블루', '파랑', '파란색', '푸른색', 'blue', '蓝', '蓝色'],
   ['스카이블루', '하늘색', '연하늘', 'skyblue', '天蓝'],
@@ -818,8 +818,10 @@ export function planRecolorJobs(
     const color = resolvePhotoColor(p.analysis, p.label);
     const role = p.analysis?.role ?? 'other';
     const distinct = new Set((p.analysis?.colorsShown || []).map((c) => canonicalColor(c)));
-    const convertible = RECOLOR_ROLES.includes(role) && (distinct.size <= 1 || !!(p.label || '').trim()) && !!p.analysis;
-    return { i, color, role, convertible };
+    // 여러 색 상품이 한 장에 나오는 컷(예: 회색+검정 두 개)도 한 가지 취급 색으로 바꿔서 쓴다. 색상 라인업 컷은 제외.
+    const convertible = RECOLOR_ROLES.includes(role) && !!p.analysis;
+    const multi = distinct.size > 1 && !(p.label || '').trim();
+    return { i, color, role, convertible, multi };
   });
 
   const jobs: RecolorJob[] = [];
@@ -831,7 +833,7 @@ export function planRecolorJobs(
       .filter((x) => x.convertible && !(x.color && colorsMatch(x.color, target)))
       .map((x) => ({
         ...x,
-        rank: x.color && !isSellingColor(x.color, selling) ? 0 : x.color ? 1 : 2,
+        rank: x.multi ? 3 : x.color && !isSellingColor(x.color, selling) ? 0 : x.color ? 1 : 2,
         roleRank: x.role === 'hero' ? 0 : x.role === 'usage' ? 1 : x.role === 'detail' ? 2 : 3,
       }))
       .sort((a, b) => a.rank - b.rank || (timesUsed.get(a.i) || 0) - (timesUsed.get(b.i) || 0) || a.roleRank - b.roleRank || a.i - b.i);
