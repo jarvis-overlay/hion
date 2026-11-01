@@ -31,6 +31,21 @@ function requireEnv(name: string): string {
   return v;
 }
 
+// Gemini가 돌려주는 영어 오류를 사용자가 바로 이해하고 조치할 수 있는 한국어로 바꾼다 (결제 한도·크레딧 소진이 가장 흔함)
+export function geminiErrorMessage(raw: unknown, status: number, fallback: string): string {
+  const msg = typeof raw === 'string' ? raw : '';
+  if (/prepayment|credits? (are|is)? ?depleted|billing|insufficient/i.test(msg)) {
+    return 'Gemini API 선불 크레딧이 소진됐어요. Google AI Studio(aistudio.google.com)에서 결제·크레딧을 충전한 뒤 다시 생성해주세요.';
+  }
+  if (status === 429 || /quota|RESOURCE_EXHAUSTED|rate limit/i.test(msg)) {
+    return 'Gemini API 사용 한도를 넘었어요. 잠시 후 다시 시도하거나 AI Studio에서 한도·결제를 확인해주세요.';
+  }
+  if (status === 403 || /API key|permission/i.test(msg)) {
+    return 'Gemini API 키 또는 권한에 문제가 있어요. AI Studio에서 키 상태를 확인해주세요.';
+  }
+  return msg || fallback;
+}
+
 // 1688 상품 페이지는 로그인 없인 못 열지만, 거기 박힌 사진 CDN 링크
 // 자체(img.alicdn.com 등)는 로그인 없이도 공개 접근되는 걸 실측으로
 // 확인함 - 파일 업로드 대신 "이미지 URL 붙여넣기"로 바로 가져올 수
@@ -136,7 +151,7 @@ export async function detectAndTranslateText(imageBuffer: Buffer, mimeType: stri
   );
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(json?.error?.message || `Gemini API 오류 (HTTP ${res.status})`);
+    throw new Error(geminiErrorMessage(json?.error?.message, res.status, `Gemini API 오류 (HTTP ${res.status})`));
   }
 
   const text: string = (json.candidates?.[0]?.content?.parts || [])
@@ -400,7 +415,7 @@ ${fidelityRule}${
   );
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(json?.error?.message || `Gemini 이미지 생성 오류 (HTTP ${res.status})`);
+    throw new Error(geminiErrorMessage(json?.error?.message, res.status, `Gemini 이미지 생성 오류 (HTTP ${res.status})`));
   }
 
   const imagePart = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
@@ -585,7 +600,7 @@ export async function applyThumbnailEffect(
   );
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(json?.error?.message || `Gemini 이미지 생성 오류 (HTTP ${res.status})`);
+    throw new Error(geminiErrorMessage(json?.error?.message, res.status, `Gemini 이미지 생성 오류 (HTTP ${res.status})`));
   }
 
   const imagePart = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
@@ -781,7 +796,7 @@ async function cleanProductPhotoForCutout(
   );
   const json = await res.json();
   if (!res.ok) {
-    throw new Error(json?.error?.message || `Gemini 이미지 생성 오류 (HTTP ${res.status})`);
+    throw new Error(geminiErrorMessage(json?.error?.message, res.status, `Gemini 이미지 생성 오류 (HTTP ${res.status})`));
   }
   const imagePart = (json.candidates?.[0]?.content?.parts || []).find((p: any) => p.inlineData?.data);
   if (!imagePart) {
