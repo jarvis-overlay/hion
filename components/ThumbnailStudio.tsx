@@ -18,6 +18,8 @@ import {
   deleteThumbnailImages,
 } from '@/app/dashboard/sales/thumbnails/actions';
 import { useSavedForm, FormHistoryPicker } from '@/components/useSavedForm';
+import ImageLightbox from '@/components/ImageLightbox';
+import { downloadImage, downloadImagesZip, safeFileName } from '@/lib/clientDownload';
 import {
   PACKAGE_TEMPLATES,
   BADGE_SHAPES,
@@ -172,6 +174,9 @@ function ImageCard({
   busy,
   selected = false,
   onToggleSelect,
+  onPreview,
+  onDownload,
+  downloading = false,
 }: {
   img: any;
   size: string;
@@ -181,6 +186,9 @@ function ImageCard({
   // 여러 장을 골라 한 번에 지우기 위한 선택 상태 (안 넘기면 체크박스 없음)
   selected?: boolean;
   onToggleSelect?: () => void;
+  onPreview?: () => void; // 이미지를 눌러 크게 보기
+  onDownload?: () => void; // 새 창 없이 바로 내려받기
+  downloading?: boolean;
 }) {
   // 이미 나온 결과를 처음부터 다시 만들지 않고, 프롬프트로 부분 수정만
   // 하고 싶다는 요청으로 추가함 - 수정도 같은 이미지에 덮어써서 생성/
@@ -272,7 +280,11 @@ function ImageCard({
         </label>
       )}
       {img.output_image_url ? (
-        <div className={`${size} relative`}>
+        <div
+          className={`${size} relative ${onPreview && !duplicating ? 'cursor-zoom-in' : ''}`}
+          onClick={onPreview && !duplicating ? onPreview : undefined}
+          title={onPreview && !duplicating ? '눌러서 크게 보기' : undefined}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={img.output_image_url}
@@ -316,9 +328,25 @@ function ImageCard({
       <div className="flex gap-2">
         {img.output_image_url && (
           <>
-            <a href={img.output_image_url} download target="_blank" rel="noreferrer" className="text-[11px] text-accent underline">
-              다운로드
-            </a>
+            {onPreview && (
+              <button onClick={onPreview} className="text-[11px] text-accent font-semibold" title="크게 보기">
+                확대
+              </button>
+            )}
+            {onDownload ? (
+              <button
+                onClick={onDownload}
+                disabled={downloading}
+                className="text-[11px] text-accent underline disabled:opacity-50"
+                title="새 창 없이 바로 저장해요"
+              >
+                {downloading ? '받는 중...' : '다운로드'}
+              </button>
+            ) : (
+              <a href={img.output_image_url} download target="_blank" rel="noreferrer" className="text-[11px] text-accent underline">
+                다운로드
+              </a>
+            )}
             <button
               onClick={() => {
                 setEditing((v) => !v);
@@ -674,6 +702,69 @@ function ProjectEditor({
   // 존재하지 않게 된 이미지는 선택에서 빼서 개수가 어긋나지 않게 한다
   const existingIds = new Set<string>((project.thumbnail_images || []).map((i: any) => i.id));
   const selectedList = Array.from(selectedIds).filter((id) => existingIds.has(id));
+
+  // 다운로드 순서/이름: 메인 -> 추가 이미지 (화면에 보이는 순서와 같게 번호를 붙인다)
+  const downloadables = [...mainImages, ...additionalImages]
+    .filter((i) => i.output_image_url)
+    .map((i, idx) => {
+      const isMain = i.kind === 'main';
+      const color = i.color_label ? `_${i.color_label}` : '';
+      const base = isMain ? `메인${color}` : `추가${String(i.position + 1).padStart(2, '0')}${color}`;
+      const title = isMain
+        ? `메인 썸네일${i.color_label ? ` · ${i.color_label}` : ''}`
+        : i.style_spec?.shot?.title
+          ? `컷: ${i.style_spec.shot.title}`
+          : `추가 이미지 ${i.position + 1}`;
+      return {
+        id: i.id as string,
+        url: i.output_image_url as string,
+        name: `${safeFileName(`썸네일_${String(idx + 1).padStart(2, '0')}_${base}`)}.jpg`,
+        title,
+      };
+    });
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const previewIndex = previewId ? downloadables.findIndex((d) => d.id === previewId) : -1;
+  const openPreview = (id: string) => setPreviewId(id);
+  const [dlBusy, setDlBusy] = useState<string | null>(null);
+  const [dlMsg, setDlMsg] = useState<string | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+
+  async function handleDownloadOne(img: any) {
+    const d = downloadables.find((x) => x.id === img.id);
+    if (!d) return;
+    setDlBusy(d.id);
+    setDlError(null);
+    try {
+      await downloadImage(d.url, d.name);
+    } catch (e: any) {
+      setDlError(e?.message || '다운로드에 실패했어요. 다시 시도해주세요.');
+    } finally {
+      setDlBusy(null);
+    }
+  }
+
+  async function handleDownloadZip(ids: string[] | null) {
+    const list = downloadables.filter((d) => !ids || ids.includes(d.id));
+    if (list.length === 0) {
+      setDlError('내려받을 이미지가 없어요. 생성이 끝난 이미지만 받을 수 있어요.');
+      return;
+    }
+    setDlBusy('zip');
+    setDlError(null);
+    setDlMsg(`0/${list.length}장 받는 중...`);
+    try {
+      const zipName = `${safeFileName(`썸네일_${project.title || '이미지'}_${list.length}장`)}.zip`;
+      const r = await downloadImagesZip(list, zipName, (done, total) => setDlMsg(`${done}/${total}장 받는 중...`));
+      const failedNote =
+        r.failed.length > 0 ? ` (${r.failed.length}장은 받지 못했어요: ${r.failed.slice(0, 3).join(', ')}${r.failed.length > 3 ? ' 외' : ''})` : '';
+      setDlMsg(`${r.ok}장을 ZIP으로 받았어요.${failedNote}`);
+    } catch (e: any) {
+      setDlMsg(null);
+      setDlError(e?.message || 'ZIP 다운로드에 실패했어요. 다시 시도해주세요.');
+    } finally {
+      setDlBusy(null);
+    }
+  }
 
   function handleDeleteSelected() {
     if (selectedList.length === 0) return;
@@ -1240,6 +1331,28 @@ function ProjectEditor({
         </div>
       </section>
 
+      {downloadables.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs bg-paper rounded-md px-3 py-2">
+          <span className="font-semibold">전체 {downloadables.length}장</span>
+          <button
+            type="button"
+            onClick={() => selectMany(downloadables.map((d) => d.id), !downloadables.every((d) => selectedIds.has(d.id)))}
+            className="text-accent font-semibold"
+          >
+            {downloadables.every((d) => selectedIds.has(d.id)) ? '전체 선택 해제' : '전체 선택'}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDownloadZip(null)}
+            disabled={dlBusy === 'zip'}
+            className="text-accent font-semibold disabled:opacity-50"
+          >
+            {dlBusy === 'zip' ? dlMsg || '묶는 중...' : '전체 다운로드 (ZIP)'}
+          </button>
+          <span className="text-inkSoft">이미지를 누르면 크게 볼 수 있어요</span>
+        </div>
+      )}
+
       <section className="grid gap-3">
         <div>
           <h3 className="text-sm font-semibold">메인 썸네일</h3>
@@ -1259,6 +1372,9 @@ function ProjectEditor({
                 busy={isPending && busyId === mainImages[0].id}
                 selected={selectedIds.has(mainImages[0].id)}
                 onToggleSelect={() => toggleSelect(mainImages[0].id)}
+                onPreview={() => openPreview(mainImages[0].id)}
+                onDownload={() => handleDownloadOne(mainImages[0])}
+                downloading={dlBusy === mainImages[0].id}
               />
               <div className="text-xs text-inkSoft self-center">
                 새 사진을 올리면 지금 메인 썸네일을 교체해요.
@@ -1298,6 +1414,9 @@ function ProjectEditor({
                       busy={isPending && busyId === groupMain.id}
                       selected={selectedIds.has(groupMain.id)}
                       onToggleSelect={() => toggleSelect(groupMain.id)}
+                      onPreview={() => openPreview(groupMain.id)}
+                      onDownload={() => handleDownloadOne(groupMain)}
+                      downloading={dlBusy === groupMain.id}
                     />
                   ) : (
                     <p className="text-xs text-inkSoft">이 색상의 메인이 아직 없어요.</p>
@@ -1349,6 +1468,9 @@ function ProjectEditor({
                     busy={isPending && busyId === img.id}
                     selected={selectedIds.has(img.id)}
                     onToggleSelect={() => toggleSelect(img.id)}
+                    onPreview={() => openPreview(img.id)}
+                    onDownload={() => handleDownloadOne(img)}
+                    downloading={dlBusy === img.id}
                   />
                 ))}
               </div>
@@ -1382,6 +1504,9 @@ function ProjectEditor({
                         busy={isPending && busyId === img.id}
                         selected={selectedIds.has(img.id)}
                         onToggleSelect={() => toggleSelect(img.id)}
+                        onPreview={() => openPreview(img.id)}
+                        onDownload={() => handleDownloadOne(img)}
+                        downloading={dlBusy === img.id}
                       />
                     ))}
                   </div>
@@ -1412,12 +1537,22 @@ function ProjectEditor({
       </section>
 
       {deleteMsg && <p className="text-xs text-profit bg-profitBg rounded-md px-3 py-2">{deleteMsg}</p>}
+      {dlMsg && <p className="text-xs text-profit bg-profitBg rounded-md px-3 py-2">{dlMsg}</p>}
+      {dlError && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{dlError}</p>}
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{error}</p>}
 
       {/* 선택한 이미지가 있으면 화면 아래에 떠서 어디서든 한 번에 삭제할 수 있게 한다 */}
       {selectedList.length > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full bg-ink text-white px-5 py-2.5 shadow-xl text-xs">
           <span className="font-semibold">{selectedList.length}장 선택됨</span>
+          <button
+            type="button"
+            onClick={() => handleDownloadZip(selectedList)}
+            disabled={dlBusy === 'zip'}
+            className="rounded-full bg-white/20 px-3 py-1 font-semibold hover:bg-white/30 disabled:opacity-50"
+          >
+            {dlBusy === 'zip' ? dlMsg || '받는 중...' : '선택 다운로드'}
+          </button>
           <button
             type="button"
             onClick={handleDeleteSelected}
@@ -1434,6 +1569,15 @@ function ProjectEditor({
             해제
           </button>
         </div>
+      )}
+
+      {previewId && previewIndex >= 0 && (
+        <ImageLightbox
+          items={downloadables.map((d) => ({ url: d.url, title: d.title, fileName: d.name }))}
+          index={previewIndex}
+          onIndex={(i) => setPreviewId(downloadables[i]?.id ?? null)}
+          onClose={() => setPreviewId(null)}
+        />
       )}
     </div>
   );
