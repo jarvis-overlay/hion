@@ -9,6 +9,7 @@ Next.js 14 App Router + Supabase + Vercel(GitHub `main` 푸시 시 자동 배포
 - `.env*`와 비밀키는 읽어서 출력·커밋하지 않는다. GitHub 로그인/자격 증명 변경은 사용자가 직접 한다.
 - 커밋 메시지 끝: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`
 - 배포는 작업 완료 후 푸시. 사용자에게 Vercel Ready 확인과 강력 새로고침을 안내한다.
+- AI가 만든 결과는 원본과 대조 검증한다(`lib/outputVerifier.ts`: 종류·실루엣·색·부품 비교 → 다르면 틀린 점을 알려 재생성 → 그래도 다르면 원본 사진 사용 + 화면에 경고). 새 AI 생성 기능엔 같은 검증을 붙인다.
 - AI가 상품을 "다시 그리면" 색·길이·부품이 틀어진다. 상품 픽셀은 원본 사진 그대로 쓰고, 한글 문구는 AI가 아닌 코드(node-canvas)로 합성한다.
 
 ## 검증 규칙 (Vercel 빌드는 전체 TypeScript 검사를 한다)

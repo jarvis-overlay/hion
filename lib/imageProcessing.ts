@@ -279,6 +279,7 @@ export async function describeProductAppearance(productImage: {
     const apiKey = requireEnv('GEMINI_API_KEY');
     const prompt = `이 사진 속 판매 상품의 외형을 다른 사람이 사진 없이도 똑같이 그릴 수 있도록 한국어 글머리표로 정확히 명세해주세요. 사진 속 글자·로고·배경은 언급하지 마세요.
 반드시 포함할 항목:
+- 상품 종류와 실루엣을 가장 먼저, 정확한 이름으로 (옷이면 사각 드로즈/삼각팬티/반팔/긴팔 등 정확한 종류와 길이·밴드 형태. 비슷한 다른 종류와 헷갈리지 않게 "~이지 ~가 아님"까지)
 - 전체 형태와 대략적인 비율 (예: 원형 트레이, 높이 대비 지름)
 - 주 재질/색상과 표면 질감 (주름·골·광택 등)
 - 바닥의 발받침대·고무발·다리·받침: 있으면 개수, 색, 모양, 위치, 바닥에서 얼마나 띄우는지
@@ -317,7 +318,8 @@ async function generateBackgroundImage(
   mood: string,
   productImage: { buffer: Buffer; mimeType: string } | null,
   colorPrompt?: string,
-  referenceImages: { buffer: Buffer; mimeType: string }[] = []
+  referenceImages: { buffer: Buffer; mimeType: string }[] = [],
+  verify: { productHint?: string | null; fixNote?: string | null } = {}
 ): Promise<Buffer> {
   const apiKey = requireEnv('GEMINI_API_KEY');
   const appearanceSpec = productImage ? await describeProductAppearance(productImage) : null;
@@ -352,6 +354,10 @@ async function generateBackgroundImage(
     ? `${noTextRule}
 
 ${fidelityRule}${
+        verify.productHint
+          ? `\n\n[상품 종류 고정] ${verify.productHint} 사진 속 상품의 종류와 실루엣(예: 사각 드로즈인지 삼각팬티인지, 상의·하의 길이, 소매 형태)을 그대로 유지하고 비슷한 다른 종류로 바꾸지 마세요.`
+          : ''
+      }${verify.fixNote ? `\n\n${verify.fixNote}` : ''}${
         appearanceSpec
           ? `\n\n[상품 외형 명세 - 결과물 속 모든 상품이 반드시 이 명세와 일치해야 합니다. 특히 바닥 부품은 상품과 바닥면 사이에 눈에 보이게 그려주세요]\n${appearanceSpec}`
           : ''
@@ -411,9 +417,10 @@ ${fidelityRule}${
 export async function generateDetailBackground(
   input: DetailSectionInput,
   productImage: { buffer: Buffer; mimeType: string } | null,
-  referenceImages: { buffer: Buffer; mimeType: string }[] = []
+  referenceImages: { buffer: Buffer; mimeType: string }[] = [],
+  verify: { productHint?: string | null; fixNote?: string | null } = {}
 ): Promise<Buffer> {
-  const raw = await generateBackgroundImage(input.keyword, input.mood, productImage, input.colorPrompt, referenceImages);
+  const raw = await generateBackgroundImage(input.keyword, input.mood, productImage, input.colorPrompt, referenceImages, verify);
   return sharp(raw).jpeg({ quality: 92 }).toBuffer();
 }
 

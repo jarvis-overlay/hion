@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
+import sharp from 'sharp';
 import { archiveOutput, swapWithPrevious } from '@/lib/imageHistory';
 import { createClient } from '@/lib/supabase/server';
 import {
@@ -19,6 +20,7 @@ import {
 } from '@/lib/imageProcessing';
 import { recommendDetailSectionCopy, planDetailSectionsRaw, type DetailCopyRecommendation } from '@/lib/ai';
 import { removeOverlays } from '@/lib/overlayCleanup';
+import { generateWithVerification, verifyProductMatch } from '@/lib/outputVerifier';
 import {
   analyzeSourceImage,
   recolorWithVerification,
@@ -358,22 +360,52 @@ async function runGeneration(
 ): Promise<{ error: string } | { success: true; url: string }> {
   try {
     let background = reuseBackground;
+    let verifyNote: string | null = null;
     if ((input.layoutStyle || 'white') !== 'typography' && !background) {
       // "요즘 잘 팔리는 상품" 참고 - 프로젝트에 카테고리를 입력해둔
       // 경우에만 쿠팡 경쟁 상품 사진을 같이 넣어서 스타일 참고를 시킨다.
       const { data: project } = await supabase
         .from('detail_page_projects')
-        .select('category')
+        .select('title, category')
         .eq('id', projectId)
         .maybeSingle();
       // 한 번에 만들기는 구성을 짤 때 쿠팡 인기상품을 이미 분석했으므로, 섹션마다 쿠팡을
       // 다시 크롤링하지 않는다 (섹션 수만큼 반복되면 느리고 크롤링 한도에 걸림).
       const referenceImages =
         project?.category && !options.skipReference ? await fetchTopSellerReferenceImages(project.category) : [];
-      background = await generateDetailBackground(input, productImage, referenceImages);
-      // AI가 원본 사진 속 글자/아이콘(특히 중국어)을 다시 그려 넣는 일이 잦아서, 생성 결과를
-      // 검사해 남은 글자/아이콘은 코드로 지운다. 실패해도 생성은 계속한다(원본 그대로 사용).
-      background = (await removeOverlays(background, 'image/jpeg')).buffer;
+      if (productImage) {
+        // 상품 사진을 쓰는 장면: 만든 결과가 원본과 같은 상품인지 검사하고, 다르면 틀린 점을 알려
+        // 한 번 더 만들고, 그래도 다르면 원본 사진(글자만 지운 것)을 그대로 쓴다.
+        const title = (project?.title || '').trim();
+        const productHint = [title && `상품명: "${title}".`, project?.category && `카테고리: ${project.category}.`]
+          .filter(Boolean)
+          .join(' ');
+        const verified = await generateWithVerification({
+          generate: async (fixNote, attempt) => {
+            // 인기상품 참고 사진이 다른 종류(예: 삼각팬티)를 섞어 넣는 일이 있어 다시 만들 땐 참고 사진을 뺀다
+            const raw = await generateDetailBackground(input, productImage, attempt === 1 ? referenceImages : [], {
+              productHint,
+              fixNote,
+            });
+            // AI가 원본 사진 속 글자/아이콘(특히 중국어)을 다시 그려 넣는 일이 잦아서, 생성 결과를
+            // 검사해 남은 글자/아이콘은 코드로 지운다. 실패해도 생성은 계속한다(원본 그대로 사용).
+            return (await removeOverlays(raw, 'image/jpeg')).buffer;
+          },
+          verify: (generated) =>
+            verifyProductMatch(productImage, generated, { productHint, allowColorChange: !!input.colorPrompt?.trim() }),
+          fallback: async () => {
+            const clean = await removeOverlays(productImage.buffer, productImage.mimeType);
+            return sharp(clean.buffer).jpeg({ quality: 92 }).toBuffer();
+          },
+        });
+        background = verified.buffer;
+        if (verified.result === 'fallback') {
+          verifyNote = `⚠ AI가 상품을 원본과 다르게 그려서 (${verified.issues.join(' / ') || '모양 불일치'}) 원본 사진을 그대로 썼어요.`;
+        }
+      } else {
+        background = await generateDetailBackground(input, productImage, referenceImages);
+        background = (await removeOverlays(background, 'image/jpeg')).buffer;
+      }
       // 배경 보관은 편의 기능이라 실패해도 생성 자체는 계속한다
       // (못 남기면 나중에 수정할 때 배경을 새로 만들게 될 뿐).
       const { error: bgErr } = await supabase.storage
@@ -393,7 +425,7 @@ async function runGeneration(
 
     const { error: updateErr } = await supabase
       .from('detail_page_sections')
-      .update({ output_image_url: outputUrl, error: null })
+      .update({ output_image_url: outputUrl, error: verifyNote })
       .eq('id', sectionId);
     if (updateErr) return { error: updateErr.message };
 
