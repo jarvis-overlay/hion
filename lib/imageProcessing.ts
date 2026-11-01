@@ -847,18 +847,26 @@ export async function keepMainSubject(cutout: Buffer): Promise<Buffer> {
 
   const label = new Int32Array(w * h);
   const areas: number[] = [0];
+  const minY: number[] = [0];
+  const maxY: number[] = [0];
   let n = 0;
   for (let s = 0; s < w * h; s++) {
     if (!grown[s] || label[s]) continue;
     n++;
     areas.push(0);
+    minY.push(h);
+    maxY.push(0);
     const stack = [s];
     label[s] = n;
     while (stack.length) {
       const p = stack.pop() as number;
-      if (solid[p]) areas[n]++;
       const x = p % w;
       const y = (p - x) / w;
+      if (solid[p]) {
+        areas[n]++;
+        if (y < minY[n]) minY[n] = y;
+        if (y > maxY[n]) maxY[n] = y;
+      }
       if (x > 0 && grown[p - 1] && !label[p - 1]) (label[p - 1] = n), stack.push(p - 1);
       if (x < w - 1 && grown[p + 1] && !label[p + 1]) (label[p + 1] = n), stack.push(p + 1);
       if (y > 0 && grown[p - w] && !label[p - w]) (label[p - w] = n), stack.push(p - w);
@@ -866,11 +874,18 @@ export async function keepMainSubject(cutout: Buffer): Promise<Buffer> {
     }
   }
   if (n <= 1) return cutout;
+  // 가장 큰 덩어리와 비슷한 키(세로 길이)의 덩어리는 같이 남긴다(좌우 양말 한 쌍 등). 짧게 잘린 조각만 지운다.
   let best = 1;
   for (let i = 2; i <= n; i++) if (areas[i] > areas[best]) best = i;
+  const bestH = maxY[best] - minY[best] + 1;
+  const keep = new Uint8Array(n + 1);
+  for (let i = 1; i <= n; i++) {
+    const tall = maxY[i] - minY[i] + 1 >= bestH * 0.7;
+    if (i === best || (tall && areas[i] >= areas[best] * 0.25)) keep[i] = 1;
+  }
 
   const mask = Buffer.alloc(w * h);
-  for (let i = 0; i < w * h; i++) mask[i] = label[i] === best ? 255 : 0;
+  for (let i = 0; i < w * h; i++) mask[i] = label[i] && keep[label[i]] ? 255 : 0;
   const bigMask = await sharp(mask, { raw: { width: w, height: h, channels: 1 } })
     .resize(W, H, { fit: 'fill', kernel: 'cubic' })
     .blur(1.5)
