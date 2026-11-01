@@ -15,6 +15,7 @@ import {
   DEFAULT_SIZE_NOTE,
   mergeSellingOptions,
   parseSizeTableText,
+  parseSizeMap,
   planRecolorJobs,
   type PlannedSection,
   type SellingOptions,
@@ -82,6 +83,8 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
   const [sizesText, setSizesText] = useState('');
   const [sizeText, setSizeText] = useState('');
   const [sizeNote, setSizeNote] = useState(DEFAULT_SIZE_NOTE);
+  const [sizeMapText, setSizeMapText] = useState('');
+  const parsedMap = useMemo(() => parseSizeMap(sizeMapText), [sizeMapText]);
   const [sizeBusy, setSizeBusy] = useState(false);
   const [sizeMsg, setSizeMsg] = useState<string | null>(null);
   const [recolorOn, setRecolorOn] = useState(true);
@@ -269,6 +272,7 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
         colorsText,
         sizesText,
         sizeTable: parsedSize.table ? { ...parsedSize.table, note: sizeNote } : null,
+        sizeMapText,
         flow: learnedFlow,
         flowError: learnedFlow ? null : flowError,
         sources: uploaded.map((u) => ({ url: u.url, colorLabel: u.colorLabel, analysis: u.analysis })),
@@ -428,6 +432,25 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
           사이즈를 입력하지 않으면 상세페이지 문구·사양표에 사이즈 정보를 넣지 않아요.
         </p>
       )}
+
+      {/* 사이즈 변환 (중국 표기 -> 한국 표기, 직접 입력) */}
+      <div className="bg-paper rounded-lg p-3 grid gap-2 max-w-3xl text-xs">
+        <span className="font-semibold">사이즈 변환 (중국 표기 → 한국 표기 · 직접 입력)</span>
+        <textarea
+          value={sizeMapText}
+          onChange={(e) => setSizeMapText(e.target.value)}
+          rows={3}
+          spellCheck={false}
+          placeholder={'한 줄에 하나씩 적어요. 사진 속 중국 사이즈를 한국 사이즈로 바꿔 상세페이지 문구에 써요\nL -> M\nXL -> L\nXXL -> XL'}
+          className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
+        />
+        {parsedMap.map.length > 0 && (
+          <p className="text-inkSoft">적용: {parsedMap.map.map((e) => `${e.from} → ${e.to}`).join(' · ')} (사진에서 읽은 문구에 한 번만 바꿔요)</p>
+        )}
+        {parsedMap.errors.map((er, i) => (
+          <p key={i} className="text-warn">{er}</p>
+        ))}
+      </div>
 
       {/* 사이즈표 (한국 기준 실제 치수 - 직접 입력) */}
       <div className="bg-paper rounded-lg p-3 grid gap-2 max-w-3xl text-xs">

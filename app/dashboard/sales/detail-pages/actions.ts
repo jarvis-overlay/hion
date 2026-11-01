@@ -30,6 +30,8 @@ import {
   MAX_PLANNED_SECTIONS,
   evaluatePhoto,
   finalizePlan,
+  parseSizeMap,
+  applySizeMap,
   mergeSellingOptions,
   normalizeSizeTable,
   encodeSizeTableRows,
@@ -881,6 +883,7 @@ export interface DetailPlanInput {
   colorsText: string; // 취급 색상 (쉼표로 구분)
   sizesText: string; // 취급 사이즈 (쉼표로 구분)
   sizeTable?: SizeTableData | null; // 직접 입력한 한국 기준 사이즈표 (없으면 사이즈표 장면 없음)
+  sizeMapText?: string; // 사이즈 변환표 (중국 -> 한국, 한 줄에 하나: L -> M)
   sources: { url: string; colorLabel: string; analysis: SourceAnalysis | null }[];
   // 화면이 구성 기획 전에 먼저 학습해서 넘겨주는 쿠팡 흐름 (학습은 오래 걸릴 수 있어 요청을 나눔).
   // 학습에 실패했으면 flowError만 넘어오고, 둘 다 없으면 서버가 직접 학습/재사용한다.
@@ -929,10 +932,25 @@ export async function planDetailPage(
   // 취급 옵션: 입력한 색상 + 사진에 붙인 색상 라벨
   const labels = input.sources.map((s) => (s.colorLabel || '').trim());
   const selling = mergeSellingOptions(input.colorsText || '', input.sizesText || '', labels);
-  const analyses = input.sources.map((s) => s.analysis ?? null);
+  // 사이즈 변환표(중국 -> 한국)가 있으면 사진에서 읽은 글의 사이즈 표기를 한 번만 바꾼다
+  const sizeMap = parseSizeMap(input.sizeMapText || '');
+  const mapText = (t: string) => applySizeMap(t, sizeMap.map);
+  const analyses = input.sources.map((s) =>
+    s.analysis && sizeMap.map.length > 0
+      ? {
+          ...s.analysis,
+          description: mapText(s.analysis.description),
+          koreanTexts: s.analysis.koreanTexts.map(mapText),
+          facts: s.analysis.facts.map(mapText),
+          sizesMentioned: s.analysis.sizesMentioned.map(mapText),
+        }
+      : s.analysis ?? null
+  );
   const verdicts = analyses.map((a, i) => evaluatePhoto(a, selling, labels[i] || null));
 
   const notes: string[] = [];
+  if (sizeMap.map.length > 0) notes.push(`사이즈 변환 적용: ${sizeMap.map.map((e) => `${e.from} → ${e.to}`).join(', ')}`);
+  sizeMap.errors.forEach((e) => notes.push(`⚠ 사이즈 변환표: ${e}`));
 
   // 쿠팡 인기상품 상세페이지 흐름 (학습/재사용, 실패하거나 카테고리가 없으면 일반 흐름 + 경고)
   let flow: DetailFlowBrief = DEFAULT_DETAIL_FLOW;

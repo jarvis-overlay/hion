@@ -230,6 +230,49 @@ export function chartToSpecRows(chart: SizeChart | null): { label: string; value
 }
 
 // ---------------------------------------------------------------------------
+// 2-1) 사이즈 변환표 (중국 표기 -> 한국 표기): 사용자가 직접 적는다
+// ---------------------------------------------------------------------------
+// 중국 사진에 "L"로 적힌 사이즈가 한국에서는 "M"에 해당하는 일이 많다. 어떻게 바꿀지는 상품마다 달라서 사용자가 직접 적고,
+// 코드는 적힌 대로만 바꾼다 (한 번에 한꺼번에 바꿔서 L->M, M->S처럼 연쇄 변환이 일어나지 않게 한다).
+export type SizeMapEntry = { from: string; to: string };
+
+export function parseSizeMap(text: string): { map: SizeMapEntry[]; errors: string[] } {
+  const map: SizeMapEntry[] = [];
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of (text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(.+?)\s*(?:->|=>|→|=|:|>)\s*(.+)$/);
+    const from = m ? m[1].trim() : '';
+    const to = m ? m[2].trim() : '';
+    if (!m || !from || !to || from.length > 12 || to.length > 12) {
+      errors.push(`"${line.slice(0, 20)}" 줄을 읽지 못했어요 (예: L -> M)`);
+      continue;
+    }
+    const key = from.toUpperCase();
+    if (seen.has(key)) {
+      errors.push(`"${from}"가 두 번 적혀 있어요 (첫 줄만 써요)`);
+      continue;
+    }
+    seen.add(key);
+    map.push({ from, to });
+  }
+  return { map, errors };
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// 글 속 사이즈 표기를 변환표대로 바꾼다 (한 번만, 영문/숫자에 붙어 있는 글자는 건드리지 않는다)
+export function applySizeMap(text: string, map: SizeMapEntry[]): string {
+  if (!text || map.length === 0) return text;
+  const byKey = new Map(map.map((e) => [e.from.toUpperCase(), e.to]));
+  const alt = [...map].sort((a, b) => b.from.length - a.from.length).map((e) => escapeRe(e.from)).join('|');
+  const re = new RegExp(`(?<![A-Za-z0-9])(${alt})(?![A-Za-z0-9])`, 'gi');
+  return text.replace(re, (all) => byKey.get(all.toUpperCase()) ?? all);
+}
+
+// ---------------------------------------------------------------------------
 // 2-2) 사용자가 직접 입력하는 사이즈표 (한국 기준 실제 치수)
 // ---------------------------------------------------------------------------
 // 중국 사진의 사이즈표 숫자는 한국으로 가져오면서 바뀌므로 상세페이지의 사이즈표는 이 입력값으로만 만든다.
