@@ -749,6 +749,29 @@ export async function deleteSection(id: string) {
   revalidatePath(PATH);
 }
 
+// 선택한 장면을 한 번에 삭제. 다른 프로젝트 장면이 섞여 지워지지 않도록 projectId와 함께 받는다.
+export async function deleteSections(
+  projectId: string,
+  ids: string[]
+): Promise<{ error: string } | { success: true; deleted: number }> {
+  const clean = Array.from(new Set((ids || []).filter((x) => typeof x === 'string' && x)));
+  if (clean.length === 0) return { error: '삭제할 장면을 선택해주세요.' };
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('detail_page_sections')
+      .delete()
+      .eq('project_id', projectId)
+      .in('id', clean)
+      .select('id');
+    if (error) return { error: error.message };
+    revalidatePath(PATH);
+    return { success: true, deleted: (data || []).length };
+  } catch (e: any) {
+    return { error: e?.message || '삭제에 실패했어요. 다시 시도해주세요.' };
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // 한 번에 만들기: 여러 장의 중국 상품 사진 + 쿠팡 인기상품 흐름 -> 상세페이지 전체

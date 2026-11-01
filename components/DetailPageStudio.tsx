@@ -12,6 +12,7 @@ import {
   retrySection,
   revertDetailSection,
   deleteSection,
+  deleteSections,
   extractImageText,
   recommendSectionCopy,
   moveSection,
@@ -429,6 +430,37 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
   const [categoryInput, setCategoryInput] = useState(project.category || '');
   const sections: any[] = [...(project.detail_page_sections || [])].sort((a, b) => a.position - b.position);
 
+  // 여러 장면을 골라 한 번에 삭제 (이미 없어진 장면은 선택에서 빼서 개수가 어긋나지 않게 한다)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const sectionIds = new Set<string>(sections.map((x) => x.id));
+  const selectedList = Array.from(selectedIds).filter((id) => sectionIds.has(id));
+  const allSelected = sections.length > 0 && selectedList.length === sections.length;
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function handleDeleteSelected() {
+    if (selectedList.length === 0) return;
+    if (!window.confirm(`선택한 장면 ${selectedList.length}개를 삭제할까요? 되돌릴 수 없어요.`)) return;
+    setError(null);
+    setNotice(null);
+    setBusyId('bulk-delete');
+    startTransition(async () => {
+      const res = await deleteSections(project.id, selectedList);
+      setBusyId(null);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '삭제에 실패했어요. 다시 시도해주세요.');
+        return;
+      }
+      setSelectedIds(new Set());
+      setNotice(`${res.deleted}개를 삭제했어요.`);
+    });
+  }
+
   function updateDraft(id: string, patch: Partial<Draft>) {
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }
@@ -761,7 +793,16 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
 
       <div className="card overflow-hidden">
         <div className={`grid ${GRID_COLS} bg-paper text-[11px] font-semibold text-inkSoft`}>
-          <div className="px-2 py-2">이미지</div>
+          <label className="px-2 py-2 flex items-center gap-1 cursor-pointer" title="전체 선택 / 해제">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => setSelectedIds(allSelected ? new Set() : new Set(sections.map((x) => x.id)))}
+              disabled={sections.length === 0}
+              aria-label="장면 전체 선택"
+            />
+            이미지
+          </label>
           <div className="px-2 py-2">키워드 / 분위기 / 설명</div>
           <div className="px-2 py-2">결과</div>
           <div className="px-2 py-2" />
@@ -774,6 +815,15 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
             <Fragment key={s.id}>
             <div className={`grid ${GRID_COLS} border-t border-paperLine items-start`}>
               <div className="p-2">
+                <label className="flex items-center gap-1 mb-1 text-[11px] text-inkSoft cursor-pointer w-fit">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(s.id)}
+                    onChange={() => toggleSelect(s.id)}
+                    aria-label="이 장면 선택"
+                  />
+                  선택
+                </label>
                 {s.input_image_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -1256,6 +1306,24 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
 
       {notice && <p className="text-xs text-profit bg-profitBg rounded-md px-3 py-2">{notice}</p>}
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">{error}</p>}
+
+      {/* 선택한 장면이 있으면 화면 아래에 떠서 어디서든 한 번에 삭제할 수 있게 한다 */}
+      {selectedList.length > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full bg-ink text-white px-5 py-2.5 shadow-xl text-xs">
+          <span className="font-semibold">{selectedList.length}개 선택됨</span>
+          <button
+            type="button"
+            onClick={handleDeleteSelected}
+            disabled={isPending && busyId === 'bulk-delete'}
+            className="rounded-full bg-accent px-3 py-1 font-semibold disabled:opacity-50"
+          >
+            {isPending && busyId === 'bulk-delete' ? '삭제 중...' : '선택 삭제'}
+          </button>
+          <button type="button" onClick={() => setSelectedIds(new Set())} className="text-white/70 hover:text-white">
+            해제
+          </button>
+        </div>
+      )}
     </div>
   );
 }
