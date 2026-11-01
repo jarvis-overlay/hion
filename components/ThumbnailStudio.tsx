@@ -887,6 +887,7 @@ function ProjectEditor({
         <FormHistoryPicker
           history={savedForm.history}
           onRestore={savedForm.restore}
+          status={savedForm.status}
           describe={(v) => [v.batchUrl, v.productNote].filter(Boolean).join(' / ') || '(빈 입력)'}
         />
 

@@ -453,6 +453,7 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
       <FormHistoryPicker
         history={savedForm.history}
         onRestore={savedForm.restore}
+        status={savedForm.status}
         describe={(v) => [v.productName, v.colorsText, v.sizesText].filter(Boolean).join(' / ') || '(빈 입력)'}
       />
 
