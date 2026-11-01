@@ -10,6 +10,7 @@ import {
   deleteProject,
   addSection,
   retrySection,
+  revertDetailSection,
   deleteSection,
   extractImageText,
   recommendSectionCopy,
@@ -487,6 +488,16 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
     });
   }
 
+  function handleRevert(sectionId: string) {
+    setError(null);
+    setBusyId(sectionId);
+    startTransition(async () => {
+      const res = await revertDetailSection(sectionId);
+      setBusyId(null);
+      if (!res || 'error' in res) setError(res?.error ?? '되돌리지 못했어요. 다시 시도해주세요.');
+    });
+  }
+
   function handleRetry(sectionId: string) {
     setBusyId(sectionId);
     startTransition(async () => {
@@ -839,6 +850,16 @@ function ProjectEditor({ project, onClose }: { project: any; onClose: () => void
                 >
                   {editing?.sectionId === s.id ? '닫기' : '수정'}
                 </button>
+                {s.output_image_url && (
+                  <button
+                    onClick={() => handleRevert(s.id)}
+                    disabled={isPending}
+                    title="수정하거나 다시 만들기 전 버전으로 되돌려요 (다시 누르면 원래대로)"
+                    className="text-[11px] text-accent font-semibold hover:underline disabled:opacity-40"
+                  >
+                    되돌리기
+                  </button>
+                )}
                 <button
                   onClick={() => startTransition(() => deleteSection(s.id))}
                   className="text-[11px] text-inkSoft hover:text-red-700"

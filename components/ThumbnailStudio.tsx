@@ -12,10 +12,12 @@ import {
   retryThumbnailImage,
   editThumbnailImage,
   keepMainSubjectOnly,
+  revertThumbnailImage,
   duplicateThumbnailStrip,
   deleteThumbnailImage,
   deleteThumbnailImages,
 } from '@/app/dashboard/sales/thumbnails/actions';
+import { useSavedForm, FormHistoryPicker } from '@/components/useSavedForm';
 
 // 썸네일은 상세페이지 섹션과 달리 그 자체가 결과물이라 "좀 크게 보여야
 // 한다"는 요청으로 큼직하게(288px) 보여준다.
@@ -213,6 +215,16 @@ function ImageCard({
     });
   }
 
+  const [revertMsg, setRevertMsg] = useState<string | null>(null);
+  const [isRevertPending, startRevertTransition] = useTransition();
+  function handleRevert() {
+    setRevertMsg(null);
+    startRevertTransition(async () => {
+      const res = await revertThumbnailImage(img.id);
+      if (!res || 'error' in res) setRevertMsg(res?.error ?? '되돌리지 못했어요. 다시 시도해주세요.');
+    });
+  }
+
   function handleDuplicate() {
     setDupError(null);
     startDupTransition(async () => {
@@ -317,6 +329,14 @@ function ImageCard({
               </button>
             )}
             <button
+              onClick={handleRevert}
+              disabled={isRevertPending}
+              title="수정하거나 다시 만들기 전 버전으로 되돌려요 (다시 누르면 원래대로)"
+              className="text-[11px] text-accent font-semibold disabled:opacity-50"
+            >
+              {isRevertPending ? '되돌리는 중...' : '되돌리기'}
+            </button>
+            <button
               onClick={() => {
                 setDuplicating((v) => !v);
                 setDupError(null);
@@ -331,6 +351,7 @@ function ImageCard({
           삭제
         </button>
       </div>
+      {revertMsg && <p className="text-[10px] text-warn text-center px-1 max-w-[16rem]">{revertMsg}</p>}
       {mainOnlyError && <p className="text-[10px] text-warn text-center px-1 max-w-[16rem]">{mainOnlyError}</p>}
       {editing && img.output_image_url && (
         <div className="grid gap-1.5 w-full">
@@ -438,6 +459,18 @@ function ProjectEditor({
   const [packageOnly, setPackageOnly] = useState(false);
   const [productNote, setProductNote] = useState('');
   const [batchResult, setBatchResult] = useState<string | null>(null);
+  // 적어둔 입력(URL·수량·패키지·메모)은 만들기를 돌린 뒤에도 남기고, 돌릴 때마다 기록해서 이전 입력으로 되돌릴 수 있게 한다
+  const savedForm = useSavedForm(
+    `thumb:${project.id}`,
+    { batchUrl, batchCounts, packages, packageOnly, productNote },
+    (v) => {
+      if (typeof v.batchUrl === 'string') setBatchUrl(v.batchUrl);
+      if (v.batchCounts && typeof v.batchCounts === 'object') setBatchCounts(v.batchCounts as Record<string, number>);
+      if (Array.isArray(v.packages)) setPackages(v.packages as typeof packages);
+      if (typeof v.packageOnly === 'boolean') setPackageOnly(v.packageOnly);
+      if (typeof v.productNote === 'string') setProductNote(v.productNote);
+    }
+  );
   const [batchNotes, setBatchNotes] = useState<string[]>([]);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -547,6 +580,7 @@ function ProjectEditor({
 
   function handleBatchGenerate() {
     if (batchFiles.length === 0 && !batchUrl.trim()) return;
+    savedForm.snapshot();
     setError(null);
     setBatchResult(null);
     setBatchNotes([]);
@@ -848,6 +882,12 @@ function ProjectEditor({
             setBatchUrl('');
             e.target.value = '';
           }}
+        />
+
+        <FormHistoryPicker
+          history={savedForm.history}
+          onRestore={savedForm.restore}
+          describe={(v) => [v.batchUrl, v.productNote].filter(Boolean).join(' / ') || '(빈 입력)'}
         />
 
         <div className="grid gap-1.5 max-w-md">

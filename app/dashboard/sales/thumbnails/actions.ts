@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
+import { archiveOutput, swapWithPrevious } from '@/lib/imageHistory';
 import { createClient } from '@/lib/supabase/server';
 import {
   generateThumbnailImage,
@@ -288,6 +289,7 @@ async function runStyledGeneration(
       readyCutout: !!spec.fromPackage,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
       contentType: 'image/jpeg',
       upsert: true,
@@ -709,6 +711,7 @@ async function savePackageMain(
   const imageId = randomUUID();
   const body = await enforceThumbnailSize(composite);
   const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
+  await archiveOutput(supabase, BUCKET, outPath);
   const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, body, { contentType: 'image/jpeg', upsert: true });
   if (upErr) return { error: upErr.message };
   const url = supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl;
@@ -792,6 +795,7 @@ async function runGeneration(
       referenceImages,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
       contentType: 'image/jpeg',
       upsert: true,
@@ -901,6 +905,7 @@ export async function editThumbnailImage(
     }
 
     const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(edited), {
       contentType: 'image/jpeg',
       upsert: true,
@@ -939,6 +944,7 @@ export async function keepMainSubjectOnly(imageId: string): Promise<{ error: str
       position: (img.product_position as ThumbnailPosition) || 'center',
     });
     const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
       contentType: 'image/jpeg',
       upsert: true,
@@ -978,6 +984,7 @@ export async function duplicateThumbnailStrip(
     const edited = await duplicateImageStrip(buffer, params);
 
     const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(edited), {
       contentType: 'image/jpeg',
       upsert: true,
@@ -1024,4 +1031,22 @@ export async function deleteThumbnailImages(
   if (error) return { error: error.message };
   revalidatePath(PATH);
   return { success: true, deleted: (data || []).length };
+}
+
+// 직전 버전으로 되돌리기 (현재와 직전 버전을 맞바꾼다 - 다시 누르면 원래대로)
+export async function revertThumbnailImage(imageId: string): Promise<{ error: string } | { success: true; url: string }> {
+  try {
+    const supabase = createClient();
+    const { data: img, error } = await supabase.from('thumbnail_images').select('project_id').eq('id', imageId).single();
+    if (error || !img) return { error: error?.message || '이미지를 찾을 수 없어요.' };
+    const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
+    const r = await swapWithPrevious(supabase, BUCKET, outPath);
+    if ('error' in r) return r;
+    const { error: updErr } = await supabase.from('thumbnail_images').update({ output_image_url: r.url, error: null }).eq('id', imageId);
+    if (updErr) return { error: updErr.message };
+    revalidatePath(PATH);
+    return { success: true, url: r.url };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
 }

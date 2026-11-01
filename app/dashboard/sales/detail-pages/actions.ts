@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
+import { archiveOutput, swapWithPrevious } from '@/lib/imageHistory';
 import { createClient } from '@/lib/supabase/server';
 import {
   generateDetailBackground,
@@ -298,6 +299,7 @@ export async function retrySection(
     try {
       const generated = await composeSpecTableSection(rows, section.spec_title || undefined);
       const outPath = `detail-pages/${section.project_id}/${sectionId}-output.jpg`;
+      await archiveOutput(supabase, BUCKET, outPath);
       const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
         contentType: 'image/jpeg',
         upsert: true,
@@ -381,6 +383,7 @@ async function runGeneration(
     }
     const generated = await composeDetailSectionImage(input, background);
     const outPath = `detail-pages/${projectId}/${sectionId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
       contentType: 'image/jpeg',
       upsert: true,
@@ -542,6 +545,7 @@ export async function updateSpecSection(
   try {
     const generated = await composeSpecTableSection(rows, input.title);
     const outPath = `detail-pages/${section.project_id}/${sectionId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
       contentType: 'image/jpeg',
       upsert: true,
@@ -626,6 +630,7 @@ export async function addSpecSection(
   try {
     const generated = await composeSpecTableSection(rows, input.title);
     const outPath = `detail-pages/${projectId}/${sectionId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
       contentType: 'image/jpeg',
       upsert: true,
@@ -654,6 +659,7 @@ async function renderSizeTable(
   try {
     const generated = await composeSizeTableSection(table);
     const outPath = `detail-pages/${projectId}/${sectionId}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, generated, {
       contentType: 'image/jpeg',
       upsert: true,
@@ -1160,4 +1166,22 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number
     })
   );
   return results;
+}
+
+// 직전 버전으로 되돌리기 (현재와 직전 버전을 맞바꾼다 - 다시 누르면 원래대로)
+export async function revertDetailSection(sectionId: string): Promise<{ error: string } | { success: true; url: string }> {
+  try {
+    const supabase = createClient();
+    const { data: section, error } = await supabase.from('detail_page_sections').select('project_id').eq('id', sectionId).single();
+    if (error || !section) return { error: error?.message || '장면을 찾을 수 없어요.' };
+    const outPath = `detail-pages/${section.project_id}/${sectionId}-output.jpg`;
+    const r = await swapWithPrevious(supabase, BUCKET, outPath);
+    if ('error' in r) return r;
+    const { error: updErr } = await supabase.from('detail_page_sections').update({ output_image_url: r.url, error: null }).eq('id', sectionId);
+    if (updErr) return { error: updErr.message };
+    revalidatePath(PATH);
+    return { success: true, url: r.url };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
 }

@@ -11,6 +11,7 @@ import {
   addSizeTableSection,
   type PhotoReportItem,
 } from '@/app/dashboard/sales/detail-pages/actions';
+import { useSavedForm, FormHistoryPicker } from '@/components/useSavedForm';
 import {
   DEFAULT_SIZE_NOTE,
   mergeSellingOptions,
@@ -89,6 +90,21 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
   const [sizeMsg, setSizeMsg] = useState<string | null>(null);
   const [recolorOn, setRecolorOn] = useState(true);
   const [recolorProgress, setRecolorProgress] = useState({ done: 0, total: 0 });
+  // 적어둔 입력은 만들기를 돌린 뒤에도 남기고, 돌릴 때마다 기록해서 이전 입력으로 되돌릴 수 있게 한다
+  const savedForm = useSavedForm(
+    `detail:${project.id}`,
+    { productName, category, colorsText, sizesText, sizeText, sizeNote, sizeMapText, recolorOn },
+    (v) => {
+      if (typeof v.productName === 'string') setProductName(v.productName);
+      if (typeof v.category === 'string') setCategory(v.category);
+      if (typeof v.colorsText === 'string') setColorsText(v.colorsText);
+      if (typeof v.sizesText === 'string') setSizesText(v.sizesText);
+      if (typeof v.sizeText === 'string') setSizeText(v.sizeText);
+      if (typeof v.sizeNote === 'string') setSizeNote(v.sizeNote);
+      if (typeof v.sizeMapText === 'string') setSizeMapText(v.sizeMapText);
+      if (typeof v.recolorOn === 'boolean') setRecolorOn(v.recolorOn);
+    }
+  );
   const parsedSize = useMemo(() => parseSizeTableText(sizeText), [sizeText]);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -154,6 +170,7 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
 
   async function run() {
     if (busy || sources.length === 0) return;
+    savedForm.snapshot();
     if (sizeText.trim() && !parsedSize.table) {
       setError(parsedSize.error || '사이즈표를 확인해주세요.');
       return;
@@ -432,6 +449,12 @@ export default function DetailAutoComposer({ project, sectionCount }: { project:
           사이즈를 입력하지 않으면 상세페이지 문구·사양표에 사이즈 정보를 넣지 않아요.
         </p>
       )}
+
+      <FormHistoryPicker
+        history={savedForm.history}
+        onRestore={savedForm.restore}
+        describe={(v) => [v.productName, v.colorsText, v.sizesText].filter(Boolean).join(' / ') || '(빈 입력)'}
+      />
 
       {/* 사이즈 변환 (중국 표기 -> 한국 표기, 직접 입력) */}
       <div className="bg-paper rounded-lg p-3 grid gap-2 max-w-3xl text-xs">
