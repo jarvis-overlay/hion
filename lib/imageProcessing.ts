@@ -903,9 +903,10 @@ export async function generateMainSubjectThumbnail(input: {
   productImage: { buffer: Buffer; mimeType: string };
   position: ThumbnailPosition;
 }): Promise<Buffer> {
+  // AI 사진 정리(cleanProductPhotoForCutout)는 사진을 다시 그려서 색이 바뀌고 신발 같은 부분이 사라질 수 있어 건너뛴다.
+  // 위치만 잘라(원본 픽셀 그대로) 흰 배경을 지운다.
   const cropped = await cropToProduct(input.productImage.buffer, input.productImage.mimeType);
-  const cleaned = await cleanProductPhotoForCutout(cropped, input.productImage.mimeType);
-  const cutout = await removeWhiteBackground(cleaned.buffer);
+  const cutout = await removeWhiteBackground(cropped);
   const only = await keepMainSubject(await sharp(cutout).trim().toBuffer());
   return composeThumbnailImage(await sharp(only).trim().toBuffer(), input.position);
 }
