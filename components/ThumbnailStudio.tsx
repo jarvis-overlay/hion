@@ -11,6 +11,7 @@ import {
   relearnStyle,
   retryThumbnailImage,
   editThumbnailImage,
+  keepMainSubjectOnly,
   duplicateThumbnailStrip,
   deleteThumbnailImage,
   deleteThumbnailImages,
@@ -202,6 +203,16 @@ function ImageCard({
     });
   }
 
+  const [mainOnlyError, setMainOnlyError] = useState<string | null>(null);
+  const [isMainOnlyPending, startMainOnlyTransition] = useTransition();
+  function handleMainOnly() {
+    setMainOnlyError(null);
+    startMainOnlyTransition(async () => {
+      const res = await keepMainSubjectOnly(img.id);
+      if (!res || 'error' in res) setMainOnlyError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+    });
+  }
+
   function handleDuplicate() {
     setDupError(null);
     startDupTransition(async () => {
@@ -295,6 +306,16 @@ function ImageCard({
             >
               {editing ? '취소' : '수정'}
             </button>
+            {!img.style_spec?.shot && img.input_image_url && (
+              <button
+                onClick={handleMainOnly}
+                disabled={isMainOnlyPending}
+                title="사진에 여러 조각이 섞여 있을 때 가장 큰 상품 하나만 남겨요"
+                className="text-[11px] text-accent font-semibold disabled:opacity-50"
+              >
+                {isMainOnlyPending ? '처리 중...' : '대표 상품만'}
+              </button>
+            )}
             <button
               onClick={() => {
                 setDuplicating((v) => !v);
@@ -310,6 +331,7 @@ function ImageCard({
           삭제
         </button>
       </div>
+      {mainOnlyError && <p className="text-[10px] text-warn text-center px-1 max-w-[16rem]">{mainOnlyError}</p>}
       {editing && img.output_image_url && (
         <div className="grid gap-1.5 w-full">
           <textarea

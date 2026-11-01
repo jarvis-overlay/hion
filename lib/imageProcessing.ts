@@ -814,6 +814,87 @@ export async function generateThumbnailImage(input: GenerateThumbnailInput): Pro
   return base;
 }
 
+// 누끼에서 가장 큰 덩어리(= 대표 상품)만 남기고 떨어져 있는 다른 조각은 지운다. 한 사진에 착용 컷과 잘린 제품 조각이
+// 같이 있을 때처럼 "AI가 다시 그리면 틀어지는" 경우를 코드로 정확히 처리한다. 가까이 붙은 부분(다리와 신발 등)은 한 덩어리로 본다.
+export async function keepMainSubject(cutout: Buffer): Promise<Buffer> {
+  const meta = await sharp(cutout).metadata();
+  const W = meta.width || 0;
+  const H = meta.height || 0;
+  if (!W || !H) return cutout;
+  const scale = Math.min(1, 240 / Math.max(W, H));
+  const w = Math.max(1, Math.round(W * scale));
+  const h = Math.max(1, Math.round(H * scale));
+  const alpha = await sharp(cutout).ensureAlpha().extractChannel(3).resize(w, h, { fit: 'fill' }).raw().toBuffer();
+  const solid = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) solid[i] = alpha[i] > 40 ? 1 : 0;
+
+  // 가까운 조각끼리 묶기 위해 가로/세로로 살짝 부풀린다
+  const r = Math.max(2, Math.round(Math.max(w, h) * 0.025));
+  const tmp = new Uint8Array(w * h);
+  const grown = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let last = -1e9;
+    for (let x = 0; x < w; x++) if (solid[y * w + x]) last = x, tmp[y * w + x] = 1; else if (x - last <= r) tmp[y * w + x] = 1;
+    last = 1e9;
+    for (let x = w - 1; x >= 0; x--) if (solid[y * w + x]) last = x, tmp[y * w + x] = 1; else if (last - x <= r) tmp[y * w + x] = 1;
+  }
+  for (let x = 0; x < w; x++) {
+    let last = -1e9;
+    for (let y = 0; y < h; y++) if (tmp[y * w + x]) last = y, grown[y * w + x] = 1; else if (y - last <= r) grown[y * w + x] = 1;
+    last = 1e9;
+    for (let y = h - 1; y >= 0; y--) if (tmp[y * w + x]) last = y, grown[y * w + x] = 1; else if (last - y <= r) grown[y * w + x] = 1;
+  }
+
+  const label = new Int32Array(w * h);
+  const areas: number[] = [0];
+  let n = 0;
+  for (let s = 0; s < w * h; s++) {
+    if (!grown[s] || label[s]) continue;
+    n++;
+    areas.push(0);
+    const stack = [s];
+    label[s] = n;
+    while (stack.length) {
+      const p = stack.pop() as number;
+      if (solid[p]) areas[n]++;
+      const x = p % w;
+      const y = (p - x) / w;
+      if (x > 0 && grown[p - 1] && !label[p - 1]) (label[p - 1] = n), stack.push(p - 1);
+      if (x < w - 1 && grown[p + 1] && !label[p + 1]) (label[p + 1] = n), stack.push(p + 1);
+      if (y > 0 && grown[p - w] && !label[p - w]) (label[p - w] = n), stack.push(p - w);
+      if (y < h - 1 && grown[p + w] && !label[p + w]) (label[p + w] = n), stack.push(p + w);
+    }
+  }
+  if (n <= 1) return cutout;
+  let best = 1;
+  for (let i = 2; i <= n; i++) if (areas[i] > areas[best]) best = i;
+
+  const mask = Buffer.alloc(w * h);
+  for (let i = 0; i < w * h; i++) mask[i] = label[i] === best ? 255 : 0;
+  const bigMask = await sharp(mask, { raw: { width: w, height: h, channels: 1 } })
+    .resize(W, H, { fit: 'fill', kernel: 'cubic' })
+    .blur(1.5)
+    .extractChannel(0)
+    .raw()
+    .toBuffer();
+  const rgba = await sharp(cutout).ensureAlpha().raw().toBuffer();
+  const m = bigMask;
+  for (let i = 0; i < W * H; i++) rgba[i * 4 + 3] = Math.min(rgba[i * 4 + 3], m[i]);
+  return sharp(rgba, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer();
+}
+
+// 메인 썸네일을 "대표 상품 하나만" 남긴 버전으로 다시 만든다
+export async function generateMainSubjectThumbnail(input: {
+  productImage: { buffer: Buffer; mimeType: string };
+  position: ThumbnailPosition;
+}): Promise<Buffer> {
+  const cropped = await cropToProduct(input.productImage.buffer, input.productImage.mimeType);
+  const cleaned = await cleanProductPhotoForCutout(cropped, input.productImage.mimeType);
+  const cutout = await removeWhiteBackground(cleaned.buffer);
+  const only = await keepMainSubject(await sharp(cutout).trim().toBuffer());
+  return composeThumbnailImage(await sharp(only).trim().toBuffer(), input.position);
+}
+
 // ---------------------------------------------------------------------------
 // 패키지(세트) 썸네일: 색상별 상품을 수량 그대로 한 장에 담는다
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import {
   generateThumbnailImage,
+  generateMainSubjectThumbnail,
   applyThumbnailEffect,
   isImageVisuallyUnchanged,
   duplicateImageStrip,
@@ -915,6 +916,40 @@ export async function editThumbnailImage(
       .eq('id', imageId);
     if (updateErr) return { error: updateErr.message };
 
+    revalidatePath(PATH);
+    return { success: true, url: outputUrl };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
+}
+
+// 원본 사진에 착용 컷과 잘린 제품 조각처럼 여러 덩어리가 섞여 있을 때, 가장 큰 덩어리(대표 상품)만 남겨 메인을 다시 만든다.
+// AI가 다시 그리지 않고 실제 사진 픽셀 그대로 쓰므로 길이·색이 바뀌지 않는다.
+export async function keepMainSubjectOnly(imageId: string): Promise<{ error: string } | { success: true; url: string }> {
+  const supabase = createClient();
+  try {
+    const { data: img, error } = await supabase.from('thumbnail_images').select('*').eq('id', imageId).single();
+    if (error || !img) return { error: error?.message || '이미지를 찾을 수 없어요.' };
+    if (!img.input_image_url) return { error: '원본 사진이 없어서 다시 만들 수 없어요.' };
+    if (img.style_spec?.shot) return { error: '스타일 컷에는 쓸 수 없어요. 메인 썸네일에서 사용해주세요.' };
+
+    const src = await fetchImageFromUrl(img.input_image_url);
+    const generated = await generateMainSubjectThumbnail({
+      productImage: src,
+      position: (img.product_position as ThumbnailPosition) || 'center',
+    });
+    const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (upErr) return { error: upErr.message };
+    const outputUrl = `${supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl}?v=${Date.now()}`;
+    const { error: updateErr } = await supabase
+      .from('thumbnail_images')
+      .update({ output_image_url: outputUrl, effect_prompt: '대표 상품만 남기기', error: null })
+      .eq('id', imageId);
+    if (updateErr) return { error: updateErr.message };
     revalidatePath(PATH);
     return { success: true, url: outputUrl };
   } catch (e: any) {
