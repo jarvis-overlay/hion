@@ -139,7 +139,7 @@ export function mirrorCells(cells: Cell[], box: Box): Cell[] {
 }
 
 export type BadgeShape = 'pill' | 'circle' | 'square';
-export type BadgeColor = 'red' | 'navy' | 'black' | 'green' | 'orange';
+export type BadgeColor = 'red' | 'navy' | 'darkgray' | 'black' | 'green' | 'orange' | 'blue' | 'purple';
 export const BADGE_SHAPES: { id: BadgeShape; name: string }[] = [
   { id: 'circle', name: '원' },
   { id: 'square', name: '둥근 사각' },
@@ -148,9 +148,12 @@ export const BADGE_SHAPES: { id: BadgeShape; name: string }[] = [
 export const BADGE_COLORS: { id: BadgeColor; name: string; hex: string }[] = [
   { id: 'navy', name: '남색', hex: '#1f3a68' },
   { id: 'red', name: '빨강', hex: '#c62828' },
+  { id: 'darkgray', name: '다크그레이', hex: '#4b4f56' },
   { id: 'black', name: '검정', hex: '#222222' },
   { id: 'green', name: '초록', hex: '#2e7d32' },
   { id: 'orange', name: '주황', hex: '#e65100' },
+  { id: 'blue', name: '파랑', hex: '#1565c0' },
+  { id: 'purple', name: '보라', hex: '#6a3fa0' },
 ];
 export const normBadgeShape = (v: unknown): BadgeShape => (BADGE_SHAPES.some((s) => s.id === v) ? (v as BadgeShape) : 'circle');
 export const normBadgeColor = (v: unknown): BadgeColor => (BADGE_COLORS.some((c) => c.id === v) ? (v as BadgeColor) : 'navy');
