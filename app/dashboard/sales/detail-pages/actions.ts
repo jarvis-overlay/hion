@@ -1100,7 +1100,14 @@ export async function planDetailPage(
     return { error: `구성 기획에 실패했어요: ${e?.message || String(e)}` };
   }
 
-  const finalized = finalizePlan(raw, { verdicts, analyses, selling, sizeTable: normalizeSizeTable(input.sizeTable) });
+  // 문구의 근거: 상품명 + 사진에서 읽은 설명/문구/사실. 여기에 없는 소재·원산지는 지어낸 것으로 보고 뺀다.
+  const evidence = [
+    productName,
+    ...analyses.flatMap((a) => (a ? [a.description, ...a.koreanTexts, ...a.facts] : [])),
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const finalized = finalizePlan(raw, { verdicts, analyses, selling, sizeTable: normalizeSizeTable(input.sizeTable), evidence });
   verdicts.forEach((v, i) => {
     if (!v.usable) notes.push(`사진 ${i + 1}번은 상품 사진으로 쓰지 않았어요: ${v.reason}`);
   });

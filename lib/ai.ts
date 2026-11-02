@@ -2,6 +2,8 @@
 // 아이템을 추천받기 위한 클라이언트. 구조화된 JSON 응답 신뢰도가 중요한
 // 작업이라(키워드를 정확히 그대로 반환해야 링크 매칭이 됨) 지시사항
 // 준수력이 좋은 Claude를 쓴다. 저빈도 호출이라 Haiku로도 비용이 매우 낮다.
+import { guardCopyText, guardCopyLines } from './copyGuard';
+
 const MODEL = 'claude-haiku-4-5-20251001';
 
 function requireEnv(name: string): string {
@@ -574,7 +576,7 @@ ${input.extractedText ? `원본(1688) 사진에 있던 셀링 포인트 문구 (
 - accentSubtitle: accentTitle의 한글 표기 (accentTitle을 채웠으면 같이 채움)
 - stat: 강조할 숫자/통계 (선택, 예: "50% 할인", "리뷰 1,200+", 없으면 빈 문자열)
 - statCaption: stat 아래에 붙는 짧은 설명 (stat을 채웠을 때만)
-- badge: 헤드라인 아래 작은 뱃지/인증 문구 (선택, 예: "특허출원 신개념 처방", 없으면 빈 문자열)
+- badge: 헤드라인 아래 작은 뱃지 문구 (선택, 예: "편안한 착용감", 없으면 빈 문자열). 인증·특허·수상 같은 문구는 근거가 확인된 경우가 아니면 쓰지 마세요.
 - bodyText: 스토리텔링/비교형 문단 카피 - 줄바꿈(\n)으로 2~4줄 구분 (선택, 없으면 빈 문자열)
 - listItems: 번호 매김 피처 리스트 - 줄바꿈(\n)으로 구분된 3~5개 짧은 문장 (선택, 없으면 빈 문자열). bodyText와 listItems는 보통 둘 중 하나만 채우세요.
 - keyword: AI가 배경 사진을 새로 생성/편집할 때 참고할 상황 키워드 (예: "원룸 현관")
@@ -586,6 +588,10 @@ ${input.extractedText ? `원본(1688) 사진에 있던 셀링 포인트 문구 (
 
 문구는 실제 쿠팡 상세페이지에 바로 써도 될 만큼 자연스럽고 설득력 있는 한국어로 작성하세요. 과장 광고나 근거 없는 최상급 표현은 피하세요.
 
+⚠ 사실 규칙 (어기면 허위 표시가 됩니다):
+- **상품명과 위 원본 문구에 없는 소재·원산지·함량·인증은 절대 쓰지 마세요.** (예: 상품명에 "면"이 없는데 "면 100%", "순면", "Cotton"; 지명 "신장/Xinjiang" 같은 원산지 수식; 임의의 %) 소재가 불확실하면 소재를 언급하지 말고 "편안한 착용감", "깔끔한 마감"처럼 누구에게나 맞는 표현을 쓰세요.
+- accentTitle(영문 문구)에도 같은 규칙이 적용됩니다. 소재·원산지를 영문으로 쓰지 말고, 상품 종류를 나타내는 짧은 영문(예: "Comfort Fit")이나 빈 문자열로 두세요.
+
 반드시 아래 JSON 객체 형식으로만 응답하세요:
 {
   "keyword": "...", "mood": "...", "eyebrow": "...", "description": "...",
@@ -596,18 +602,22 @@ ${input.extractedText ? `원본(1688) 사진에 있던 셀링 포인트 문구 (
 
   const cleaned = await callClaude(prompt);
   const parsed = parseJsonObject(cleaned) as Partial<DetailCopyRecommendation>;
+  // 프롬프트를 어겨도 코드에서 한 번 더 거른다: 근거 없는 소재·원산지·함량 단정은 비운다
+  const evidence = [input.productName, input.extractedText, input.existingHints].filter(Boolean).join('\n');
+  const g =(v: unknown) => guardCopyText(String(v || ''), evidence).text;
+  const gl = (v: unknown) => guardCopyLines(String(v || ''), evidence).text;
   return {
     keyword: parsed.keyword || '',
     mood: parsed.mood || '',
-    eyebrow: parsed.eyebrow || '',
-    description: parsed.description || '',
-    accentTitle: parsed.accentTitle || '',
-    accentSubtitle: parsed.accentSubtitle || '',
-    stat: parsed.stat || '',
-    statCaption: parsed.statCaption || '',
-    badge: parsed.badge || '',
-    bodyText: parsed.bodyText || '',
-    listItems: parsed.listItems || '',
+    eyebrow: g(parsed.eyebrow),
+    description: g(parsed.description),
+    accentTitle: g(parsed.accentTitle),
+    accentSubtitle: g(parsed.accentSubtitle),
+    stat: g(parsed.stat),
+    statCaption: g(parsed.statCaption),
+    badge: g(parsed.badge),
+    bodyText: gl(parsed.bodyText),
+    listItems: gl(parsed.listItems),
     layoutStyle: (['white', 'overlay', 'typography'] as const).includes(parsed.layoutStyle as any)
       ? (parsed.layoutStyle as DetailLayoutStyle)
       : 'white',

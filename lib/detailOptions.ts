@@ -8,6 +8,8 @@
 //   3) 사이즈표는 취급하는 사이즈만 남긴다.
 // 이 규칙을 AI 프롬프트에만 맡기면 어겨질 수 있어서, 결과를 코드로 한 번 더 검사한다.
 
+import { findUnsupportedClaims, describeIssues } from './copyGuard';
+
 export interface SellingOptions {
   colors: string[]; // 실제로 파는 색상 (사용자 입력 + 사진 색상 라벨)
   sizes: string[]; // 실제로 파는 사이즈
@@ -432,13 +434,20 @@ export interface PlannedFields {
 export function sanitizePlannedFields(
   fields: PlannedFields,
   selling: SellingOptions,
-  extraColorWords: string[] = []
+  extraColorWords: string[] = [],
+  evidence = ''
 ): { fields: PlannedFields; removed: string[] } {
   const removed: string[] = [];
   const clean = (label: string, v: string) => {
     const bad = findOptionViolations(v, selling, extraColorWords);
     if (bad.length > 0) {
       removed.push(`${label}: ${bad.join(', ')}`);
+      return '';
+    }
+    // 상품 정보에 없는 소재·원산지·함량 단정은 지어낸 문구라서 비운다
+    const claims = findUnsupportedClaims(v, evidence);
+    if (claims.length > 0) {
+      removed.push(`${label}: ${describeIssues(claims)}`);
       return '';
     }
     return v;
@@ -461,7 +470,10 @@ export function sanitizePlannedFields(
       .filter((l) => {
         const bad = findOptionViolations(l, selling, extraColorWords);
         if (bad.length > 0) removed.push(`목록: ${bad.join(', ')}`);
-        return bad.length === 0;
+        if (bad.length > 0) return false;
+        const claims = findUnsupportedClaims(l, evidence);
+        if (claims.length > 0) removed.push(`목록: ${describeIssues(claims)}`);
+        return claims.length === 0;
       })
       .join('\n'),
     colorPrompt: clean('색상 지시', fields.colorPrompt),
@@ -473,7 +485,8 @@ export function sanitizePlannedFields(
 export function sanitizeSpecRows(
   rows: { label: string; value: string }[],
   selling: SellingOptions,
-  extraColorWords: string[] = []
+  extraColorWords: string[] = [],
+  evidence = ''
 ): { rows: { label: string; value: string }[]; removed: string[] } {
   const removed: string[] = [];
   const out: { label: string; value: string }[] = [];
@@ -498,6 +511,11 @@ export function sanitizeSpecRows(
     const bad = findOptionViolations(`${label} ${value}`, selling, extraColorWords);
     if (bad.length > 0) {
       removed.push(`사양표 '${label}' 행: ${bad.join(', ')}`);
+      continue;
+    }
+    const claims = findUnsupportedClaims(`${label} ${value}`, evidence);
+    if (claims.length > 0) {
+      removed.push(`사양표 '${label}' 행: ${describeIssues(claims)}`);
       continue;
     }
     out.push({ label, value });
@@ -656,6 +674,7 @@ export function finalizePlan(
     analyses: (SourceAnalysis | null)[];
     selling: SellingOptions;
     sizeTable?: SizeTableData | null; // 사용자가 입력한 사이즈표 (없으면 사이즈표 장면을 만들지 않는다)
+    evidence?: string; // 상품명·사진 문구 등 문구의 근거가 되는 글 (소재·원산지 지어내기 검사용)
   }
 ): { sections: PlannedSection[]; notes: string[] } {
   const notes: string[] = [];
@@ -686,7 +705,7 @@ export function finalizePlan(
       const rows = (Array.isArray(r?.specRows) ? r.specRows : [])
         .map((x: any) => ({ label: fstr(x?.label, 20), value: fstr(x?.value, 60) }))
         .filter((x: any) => x.label && x.value);
-      const cleaned = sanitizeSpecRows(rows, selling, extraColorWords);
+      const cleaned = sanitizeSpecRows(rows, selling, extraColorWords, ctx.evidence || '');
       notes.push(...cleaned.removed);
       if (cleaned.rows.length === 0) continue;
       sections.push({
@@ -720,7 +739,7 @@ export function finalizePlan(
       }
     }
 
-    const cleaned = sanitizePlannedFields(readFields(r), selling, extraColorWords);
+    const cleaned = sanitizePlannedFields(readFields(r), selling, extraColorWords, ctx.evidence || '');
     for (const x of cleaned.removed) {
       notes.push(`'${purpose || template.id}' 장면에서 취급하지 않는 옵션 표현을 뺐어요 (${x})`);
     }
