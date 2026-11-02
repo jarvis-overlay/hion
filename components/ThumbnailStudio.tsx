@@ -8,6 +8,7 @@ import {
   deleteProject,
   addThumbnailImage,
   generateThumbnailBatch,
+  generateMoreAdditionalImages,
   relearnStyle,
   retryThumbnailImage,
   editThumbnailImage,
@@ -516,6 +517,11 @@ function ProjectEditor({
   const [batchNotes, setBatchNotes] = useState<string[]>([]);
   const batchFileInputRef = useRef<HTMLInputElement>(null);
 
+  // 메인은 그대로 두고 추가 이미지만 몇 장 더 만들기 - 사진을 다시 올릴 필요 없이
+  // 저장해둔 메인의 원본 사진을 재사용한다. 키는 색상 라벨('' = 색상 미지정).
+  const [moreCounts, setMoreCounts] = useState<Record<string, number>>({});
+  const [moreResult, setMoreResult] = useState<Record<string, string>>({});
+
   // 일괄 생성 박스의 카테고리(쿠팡 검색어) - 이걸로 인기상품을 분석해서 참고한다.
   // 위쪽 카테고리 설정과 같은 값이라, 거기서 바꾸면 여기도 따라가게 동기화한다.
   const [batchCategory, setBatchCategory] = useState(project.category || '');
@@ -568,6 +574,12 @@ function ProjectEditor({
     setBatchCounts((prev) => ({
       ...prev,
       [key]: Math.min(MAX_ADDITIONAL, Math.max(0, Number.isFinite(value) ? Math.round(value) : DEFAULT_ADDITIONAL)),
+    }));
+  const moreCountOf = (key: string) => Math.min(MAX_ADDITIONAL, Math.max(1, moreCounts[key] ?? DEFAULT_ADDITIONAL));
+  const setMoreCountFor = (key: string, value: number) =>
+    setMoreCounts((prev) => ({
+      ...prev,
+      [key]: Math.min(MAX_ADDITIONAL, Math.max(1, Number.isFinite(value) ? Math.round(value) : DEFAULT_ADDITIONAL)),
     }));
 
   const images: any[] = project.thumbnail_images || [];
@@ -673,6 +685,23 @@ function ProjectEditor({
       setPackages([]);
       setPackageOnly(false);
       setBatchUrl('');
+    });
+  }
+
+  function handleGenerateMore(colorKey: string) {
+    setError(null);
+    const count = moreCountOf(colorKey);
+    const busyKey = `more:${colorKey}`;
+    setMoreResult((prev) => ({ ...prev, [colorKey]: '' }));
+    setBusyId(busyKey);
+    startTransition(async () => {
+      const res = await generateMoreAdditionalImages(project.id, colorKey, count, productNote);
+      setBusyId(null);
+      if (!res || 'error' in res) {
+        setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
+        return;
+      }
+      setMoreResult((prev) => ({ ...prev, [colorKey]: `추가 이미지 ${res.ok}/${res.total}장 더 생성 완료` }));
     });
   }
 
@@ -1328,6 +1357,57 @@ function ProjectEditor({
               {n}
             </p>
           ))}
+
+          {mainImages.length > 0 && (
+            <div className="grid gap-2 border-t border-paperLine pt-3 mt-1">
+              <p className="text-[11px] font-semibold text-inkSoft">
+                메인은 그대로 두고 추가 이미지만 더 만들기 (사진을 다시 올릴 필요 없이 저장된 메인 사진을 재사용해요)
+              </p>
+              <div className="grid gap-2">
+                {colorGroupKeys
+                  .filter((key) => mainImages.some((i) => (i.color_label || '') === key))
+                  .map((key) => {
+                    const busyKey = `more:${key}`;
+                    return (
+                      <div key={key || '__default__'} className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-semibold text-accent min-w-[4rem]">
+                          {key || (colorGroupKeys.length > 1 ? '색상 미지정' : '추가 이미지')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setMoreCountFor(key, moreCountOf(key) - 1)}
+                          disabled={moreCountOf(key) <= 1}
+                          className="w-6 h-6 rounded border border-paperLine bg-white disabled:opacity-40"
+                          aria-label="개수 줄이기"
+                        >
+                          −
+                        </button>
+                        <span className="w-6 text-center font-mono">{moreCountOf(key)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setMoreCountFor(key, moreCountOf(key) + 1)}
+                          disabled={moreCountOf(key) >= MAX_ADDITIONAL}
+                          className="w-6 h-6 rounded border border-paperLine bg-white disabled:opacity-40"
+                          aria-label="개수 늘리기"
+                        >
+                          +
+                        </button>
+                        <span className="text-inkSoft">장</span>
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateMore(key)}
+                          disabled={isPending && busyId === busyKey}
+                          className="rounded border border-accent text-accent px-3 py-1 font-semibold disabled:opacity-50"
+                        >
+                          {isPending && busyId === busyKey ? '생성 중...' : `${moreCountOf(key)}장 더 만들기`}
+                        </button>
+                        {moreResult[key] && <span className="text-[11px] text-accent">{moreResult[key]}</span>}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

@@ -710,6 +710,82 @@ export async function generateThumbnailBatch(
   };
 }
 
+// "한 번에 만들기"로 이미 메인을 만든 뒤, 메인은 바꾸지 않고 추가 이미지만 몇 장 더
+// 만들고 싶을 때 쓴다("추가이미지만 추가로 여러장 돌리게 해달라"는 요청) - 사진을
+// 다시 올릴 필요 없이 저장해둔 메인의 원본 상품 사진을 그대로 재사용한다.
+export async function generateMoreAdditionalImages(
+  projectId: string,
+  colorLabel: string,
+  count: number,
+  note: string
+): Promise<{ error: string } | { success: true; ok: number; total: number }> {
+  const supabase = createClient();
+  const label = colorLabel.trim() || null;
+  const safeCount = clampCount(count, 5) || 1;
+
+  const { data: projectRow } = await supabase
+    .from('thumbnail_projects')
+    .select('title, category')
+    .eq('id', projectId)
+    .maybeSingle();
+  if (!projectRow) return { error: '프로젝트를 찾을 수 없어요.' };
+
+  let mainQuery = supabase
+    .from('thumbnail_images')
+    .select('input_image_url')
+    .eq('project_id', projectId)
+    .eq('kind', 'main');
+  mainQuery = label ? mainQuery.eq('color_label', label) : mainQuery.is('color_label', null);
+  const { data: mainRow } = await mainQuery.maybeSingle();
+  if (!mainRow?.input_image_url) {
+    return { error: '이 색상의 메인 썸네일이 없어서 원본 상품 사진을 찾을 수 없어요. 먼저 메인을 만들어주세요.' };
+  }
+
+  let source: BatchSource;
+  try {
+    source = await fetchImageFromUrl(mainRow.input_image_url);
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
+
+  const category = (projectRow.category || '').trim();
+  const productName = (projectRow.title || '').trim() || category;
+  let brief: StyleBrief = DEFAULT_STYLE_BRIEF;
+  if (category) {
+    try {
+      brief = (await getOrLearnBrief(supabase, category)).brief;
+    } catch {
+      // 실패해도 범용 기본 구성으로 계속 만든다 (일괄 생성과 같은 동작)
+    }
+  }
+
+  const { count: existingCount } = await supabase
+    .from('thumbnail_images')
+    .select('id', { count: 'exact', head: true })
+    .eq('project_id', projectId)
+    .eq('kind', 'additional');
+  const startIndex = existingCount || 0;
+
+  const { jobs } = await prepareStyledGroup({
+    productName,
+    category,
+    brief,
+    sources: [source],
+    count: safeCount,
+    label,
+    startIndex,
+    note: note.trim().slice(0, 400),
+  });
+
+  const results = await mapLimit(jobs, 3, (job) =>
+    insertAndGenerateStyled(supabase, projectId, job.position, job.source, job.spec, job.label, job.appearanceSpec)
+  );
+  const ok = results.filter((r) => 'success' in r).length;
+
+  revalidatePath(PATH);
+  return { success: true, ok, total: jobs.length };
+}
+
 // 패키지 메인: 이미 완성된 합성 이미지를 그대로 저장한다 (누끼 파이프라인을 다시 타지 않음).
 // 같은 패키지 구성의 기존 메인은 교체한다.
 async function savePackageMain(
