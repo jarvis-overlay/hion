@@ -189,6 +189,12 @@ interface StyledSpec {
   note?: string; // 상품 특징 메모/수정 요청 (다시 만들 때도 같이 적용)
   productName?: string;
   fromPackage?: boolean; // 입력 사진이 패키지 합성 이미지(흰 배경에 상품만)
+  // false면 "실사 합성"(배경만 AI가 그리고 실제 상품 사진을 그 위에 붙이는 방식) 대신
+  // AI가 상품까지 통째로 그린다 - 장면 프롬프트를 직접 입력했을 때 쓴다. 실사 합성은
+  // 상품이 놓일 자리를 비워서 그리므로 "신발장에 신발을 올려달라"처럼 소품이 상품
+  // 위/안에 놓이는 연출은 표현할 수 없기 때문(비워둔 자리를 실제 상품 사진이 그대로
+  // 덮어써서, 그 자리에 그려 넣은 소품이 가려져 버림).
+  composite?: boolean;
 }
 
 async function getOrLearnBrief(
@@ -288,6 +294,7 @@ async function runStyledGeneration(
       note: spec.note,
       productName: spec.productName,
       readyCutout: !!spec.fromPackage,
+      composite: spec.composite,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
     await archiveOutput(supabase, BUCKET, outPath);
@@ -440,6 +447,11 @@ async function prepareStyledGroup(args: {
       ...(args.note ? { note: args.note } : {}),
       productName: args.productName,
       ...(args.fromPackage ? { fromPackage: true } : {}),
+      // 장면을 직접 입력했으면 "실사 합성"(상품 자리를 비워 그리고 나중에 실제 사진을
+      // 붙이는 방식) 대신 AI가 상품까지 통째로 그리게 한다 - 안 그러면 "신발장에 신발을
+      // 올려줘"처럼 소품이 상품 위/안에 놓이는 연출을 비워둔 자리 뒤에 실제 상품 사진이
+      // 그대로 덮어써서 표현할 수 없다.
+      ...(customPrompt ? { composite: false } : {}),
     },
   }));
   return { jobs, copyMissing: copyByShot.size === 0 };
