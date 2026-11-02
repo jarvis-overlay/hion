@@ -497,11 +497,15 @@ function ProjectEditor({
   const [packages, setPackages] = useState<{ id: string; items: { color: string; qty: number }[]; additional: number; template?: TemplateChoice; flip?: boolean; badge?: boolean; badgeShape?: BadgeShape; badgeColor?: BadgeColor }[]>([]);
   const [packageOnly, setPackageOnly] = useState(false);
   const [productNote, setProductNote] = useState('');
+  // 장면을 AI가 학습한 스타일/기본 구성에 맡기지 않고 직접 입력하고 싶을 때
+  // ("추가 이미지에다가 프롬프트를 내가 입력할 수 있어야해"라는 요청으로 추가) -
+  // 입력하면 모든 추가 이미지가 이 장면 하나로 만들어진다.
+  const [customScenePrompt, setCustomScenePrompt] = useState('');
   const [batchResult, setBatchResult] = useState<string | null>(null);
   // 적어둔 입력(URL·수량·패키지·메모)은 만들기를 돌린 뒤에도 남기고, 돌릴 때마다 기록해서 이전 입력으로 되돌릴 수 있게 한다
   const savedForm = useSavedForm(
     `thumb:${project.id}`,
-    { batchUrl, batchCounts, packages, packageOnly, productNote },
+    { batchUrl, batchCounts, packages, packageOnly, productNote, customScenePrompt },
     (v) => {
       if (typeof v.batchUrl === 'string') setBatchUrl(v.batchUrl);
       if (v.batchCounts && typeof v.batchCounts === 'object') setBatchCounts(v.batchCounts as Record<string, number>);
@@ -512,6 +516,7 @@ function ProjectEditor({
       }
       if (typeof v.packageOnly === 'boolean') setPackageOnly(v.packageOnly);
       if (typeof v.productNote === 'string') setProductNote(v.productNote);
+      if (typeof v.customScenePrompt === 'string') setCustomScenePrompt(v.customScenePrompt);
     }
   );
   const [batchNotes, setBatchNotes] = useState<string[]>([]);
@@ -521,6 +526,7 @@ function ProjectEditor({
   // 저장해둔 메인의 원본 사진을 재사용한다. 키는 색상 라벨('' = 색상 미지정).
   const [moreCounts, setMoreCounts] = useState<Record<string, number>>({});
   const [moreResult, setMoreResult] = useState<Record<string, string>>({});
+  const [morePrompt, setMorePrompt] = useState('');
 
   // 일괄 생성 박스의 카테고리(쿠팡 검색어) - 이걸로 인기상품을 분석해서 참고한다.
   // 위쪽 카테고리 설정과 같은 값이라, 거기서 바꾸면 여기도 따라가게 동기화한다.
@@ -651,6 +657,7 @@ function ProjectEditor({
     }
     fd.set('category', batchCategory.trim());
     fd.set('productNote', productNote.trim());
+    fd.set('customPrompt', customScenePrompt.trim());
     fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional, template: p.template, flip: p.flip, badge: p.badge, badgeShape: p.badgeShape, badgeColor: p.badgeColor }))));
     if (usePackageOnly) fd.set('packageOnly', '1');
     fd.set('additionalCount', String(DEFAULT_ADDITIONAL));
@@ -695,7 +702,7 @@ function ProjectEditor({
     setMoreResult((prev) => ({ ...prev, [colorKey]: '' }));
     setBusyId(busyKey);
     startTransition(async () => {
-      const res = await generateMoreAdditionalImages(project.id, colorKey, count, productNote);
+      const res = await generateMoreAdditionalImages(project.id, colorKey, count, productNote, morePrompt);
       setBusyId(null);
       if (!res || 'error' in res) {
         setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
@@ -1105,6 +1112,18 @@ function ProjectEditor({
               />
             </label>
           )}
+          {(batchFiles.length > 0 || batchUrl.trim()) && (
+            <label className="grid gap-1 text-[11px] font-semibold text-inkSoft">
+              장면 프롬프트 직접 입력 (선택 - 입력하면 학습된 스타일 대신 이 장면으로 추가 이미지를 전부 만들어요)
+              <textarea
+                value={customScenePrompt}
+                onChange={(e) => setCustomScenePrompt(e.target.value)}
+                rows={2}
+                placeholder="예: 눈이 소복이 쌓인 겨울 현관 바닥에 놓인 모습, 따뜻한 느낌의 조명"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs font-normal text-ink"
+              />
+            </label>
+          )}
           {batchFiles.length > 0 && (
             <div className="grid gap-2 bg-paper rounded p-2.5">
               <p className="text-[11px] font-semibold text-inkSoft">
@@ -1363,6 +1382,16 @@ function ProjectEditor({
               <p className="text-[11px] font-semibold text-inkSoft">
                 메인은 그대로 두고 추가 이미지만 더 만들기 (사진을 다시 올릴 필요 없이 저장된 메인 사진을 재사용해요)
               </p>
+              <label className="grid gap-1 text-[11px] font-semibold text-inkSoft">
+                장면 프롬프트 직접 입력 (선택 - 비우면 학습된 스타일에서 자동으로 골라요)
+                <textarea
+                  value={morePrompt}
+                  onChange={(e) => setMorePrompt(e.target.value)}
+                  rows={2}
+                  placeholder="예: 거실 러그 위에 올려둔 모습, 은은한 아침 햇살"
+                  className="border border-paperLine bg-white px-2 py-1.5 text-xs font-normal text-ink"
+                />
+              </label>
               <div className="grid gap-2">
                 {colorGroupKeys
                   .filter((key) => mainImages.some((i) => (i.color_label || '') === key))

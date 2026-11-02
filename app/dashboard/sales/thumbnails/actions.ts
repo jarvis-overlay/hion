@@ -388,14 +388,26 @@ async function prepareStyledGroup(args: {
   startIndex: number;
   note?: string;
   fromPackage?: boolean;
+  // 사용자가 장면을 직접 입력했으면, 학습된/기본 컷을 쓰지 않고 이 장면으로만 만든다
+  // ("추가 이미지에다가 프롬프트를 내가 입력할 수 있어야해"라는 요청으로 추가).
+  customPrompt?: string;
 }): Promise<{ jobs: StyledJob[]; copyMissing: boolean }> {
   const { brief, sources, count } = args;
   if (count <= 0) return { jobs: [], copyMissing: false };
-  const shots: StyleShot[] = Array.from({ length: count }, (_, i) => brief.shots[i % brief.shots.length]);
+  const customPrompt = (args.customPrompt || '').trim();
+  const shots: StyleShot[] = customPrompt
+    ? Array.from({ length: count }, (_, i) => ({
+        id: `custom${i + 1}`,
+        title: '직접 입력한 장면',
+        scene: customPrompt,
+        textPosition: i % 2 === 0 ? 'bottom' : 'top',
+        layout: 'caption',
+      }))
+    : Array.from({ length: count }, (_, i) => brief.shots[i % brief.shots.length]);
 
-  // 컷별 한국어 문구 (실패하면 문구 없이 이미지만 만든다)
+  // 컷별 한국어 문구 (실패하면 문구 없이 이미지만 만든다) - 같은 id(컷)는 한 번만 요청한다
   const copyByShot = new Map<string, ShotCopyText>();
-  const uniqueShots = brief.shots.slice(0, Math.min(count, brief.shots.length));
+  const uniqueShots = Array.from(new Map(shots.map((s) => [s.id, s])).values());
   try {
     const copies = await generateThumbnailCopies({
       productName: args.productName,
@@ -529,6 +541,8 @@ export async function generateThumbnailBatch(
   }
   const productName = (projectRow?.title || '').trim() || category;
   const productNote = String(formData.get('productNote') || '').trim().slice(0, 400);
+  // 장면을 직접 입력하면 학습된/기본 컷 대신 이 장면으로만 추가 이미지를 만든다
+  const customPrompt = String(formData.get('customPrompt') || '').trim().slice(0, 400);
   const notes: string[] = [];
   // 패키지(세트) 구성: 예) 검정 1 + 회색 1. 색상별 개별 이미지 대신(또는 함께) 그 구성 그대로 담은 이미지를 만든다.
   const parsedPackages = parsePackages(String(formData.get('packages') || '[]'));
@@ -639,6 +653,7 @@ export async function generateThumbnailBatch(
         label,
         startIndex: startIndexes[i],
         note: productNote,
+        customPrompt,
       })
     )
   );
@@ -660,6 +675,7 @@ export async function generateThumbnailBatch(
         startIndex: packageStarts[i],
         note: productNote,
         fromPackage: true,
+        customPrompt,
       })
     )
   );
@@ -717,7 +733,8 @@ export async function generateMoreAdditionalImages(
   projectId: string,
   colorLabel: string,
   count: number,
-  note: string
+  note: string,
+  customPrompt: string = ''
 ): Promise<{ error: string } | { success: true; ok: number; total: number }> {
   const supabase = createClient();
   const label = colorLabel.trim() || null;
@@ -775,6 +792,7 @@ export async function generateMoreAdditionalImages(
     label,
     startIndex,
     note: note.trim().slice(0, 400),
+    customPrompt: customPrompt.trim().slice(0, 400),
   });
 
   const results = await mapLimit(jobs, 3, (job) =>
