@@ -4,6 +4,7 @@ Next.js 14 App Router + Supabase + Vercel(GitHub `main` 푸시 시 자동 배포
 사용자는 두 PC(`jarvis`, `wook`)에서 작업한다. 작업 시작 전 `git pull`, 푸시 전 다시 pull.
 
 ## 항상 지킬 것
+- 세션 시작 시 `HANDOFF.md`(현재 진행 상황·미실행 SQL·확인 못 한 것)를 먼저 읽고, 작업이 끝나면 갱신한다.
 - 에러가 나면 안 된다: 외부 API(Gemini/Claude/Supabase/Bright Data)는 실패를 전제로, 화면에 읽을 수 있는 한국어 오류 문구와 대체 동작을 둔다.
 - wook PC 작업이 기준이다. 요청 없이 덮어쓰지 않는다.
 - `.env*`와 비밀키는 읽어서 출력·커밋하지 않는다. GitHub 로그인/자격 증명 변경은 사용자가 직접 한다.

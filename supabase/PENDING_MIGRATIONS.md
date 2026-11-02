@@ -9,6 +9,8 @@ Supabase SQL Editor에서 아직 실행했는지 확인 안 된 `.sql` 파일 �
 
 ## 체크리스트
 
+> 2026-11-02 기준 실행 확인이 안 된 것은 아래 `[ ]` 2개뿐이고, 11/1~11/2 작업(패키지 템플릿·다운로드·문구 검사 등)은 새 SQL이 필요 없다. 현재 진행 상황은 `HANDOFF.md` 참고.
+
 - [x] `supabase/ai_product_recommendations.sql` — AI 소싱추천 결과를 자동소싱 탭 안에서 바로 담을 수 있게 하는 캐시 테이블 (2026-10-31, 커밋 b10b10c)
 - [x] `supabase/sales_category_learning.sql` — 썸네일/상세페이지 제작 시 "인기상품 참고"용 카테고리 컬럼 추가 (2026-10-31, 커밋 97cc624)
 - [x] `supabase/thumbnail_color_label.sql` — 썸네일 일괄생성 색상별 완전 별도 세트 생성용 컬럼 추가 (2026-10-31, 커밋 2a6629a)
