@@ -9,14 +9,14 @@ Supabase SQL Editor에서 아직 실행했는지 확인 안 된 `.sql` 파일 �
 
 ## 체크리스트
 
-> 2026-11-02 기준 실행 확인이 안 된 것은 아래 `[ ]` 2개뿐이고, 11/1~11/2 작업(패키지 템플릿·다운로드·문구 검사 등)은 새 SQL이 필요 없다. 현재 진행 상황은 `HANDOFF.md` 참고.
+> 2026-11-02 기준 실행 대기 중인 항목 없음 (전부 실행 확인됨). 현재 진행 상황은 `HANDOFF.md` 참고.
 
 - [x] `supabase/ai_product_recommendations.sql` — AI 소싱추천 결과를 자동소싱 탭 안에서 바로 담을 수 있게 하는 캐시 테이블 (2026-10-31, 커밋 b10b10c)
 - [x] `supabase/sales_category_learning.sql` — 썸네일/상세페이지 제작 시 "인기상품 참고"용 카테고리 컬럼 추가 (2026-10-31, 커밋 97cc624)
 - [x] `supabase/thumbnail_color_label.sql` — 썸네일 일괄생성 색상별 완전 별도 세트 생성용 컬럼 추가 (2026-10-31, 커밋 2a6629a)
 - [x] `supabase/pipeline_candidates.sql` — 자동소싱 탭 단계별 후보 테이블 (커밋 7ba816a, 위 체크리스트에서 빠져 있던 것)
-- [ ] `supabase/thumbnail_style_learning.sql` — 썸네일 "인기상품 스타일 학습" 저장 테이블(category_style_briefs) + 스타일 컷 재현용 컬럼(thumbnail_images.style_spec) (2026-11-01). 안 돌려도 동작은 하지만 스타일 저장/재사용과 실패 이미지의 같은 컷 재생성이 안 됨
-- [ ] `supabase/brand_templates.sql` — 상세페이지 "브랜드 템플릿" 저장 테이블(brand_templates) (2026-11-01). 안 돌려도 상세페이지 제작/다운로드는 되지만 내 브랜드 템플릿을 저장할 수 없고 기본 제공 색상 템플릿만 쓸 수 있음
+- [x] `supabase/thumbnail_style_learning.sql` — 썸네일 "인기상품 스타일 학습" 저장 테이블(category_style_briefs) + 스타일 컷 재현용 컬럼(thumbnail_images.style_spec) (2026-11-01, 2026-11-02 실행 확인)
+- [x] `supabase/brand_templates.sql` — 상세페이지 "브랜드 템플릿" 저장 테이블(brand_templates) (2026-11-01, 2026-11-02 실행 확인)
 
 ## 오늘(2026-10-31) 추가된 SQL 전체 내용 (순서대로 실행)
 

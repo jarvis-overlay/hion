@@ -881,3 +881,63 @@ create policy "pipeline_candidates_update" on pipeline_candidates
   with check (auth.jwt() ->> 'email' in (select email from allowed_users));
 create policy "pipeline_candidates_delete" on pipeline_candidates
   for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+
+-- 썸네일 "인기상품 스타일 학습" 저장 + 스타일 컷 재현용 컬럼
+create table if not exists category_style_briefs (
+  id uuid primary key default gen_random_uuid(),
+  category text not null unique,
+  brief jsonb not null,
+  source_count int not null default 0,
+  learned_at timestamptz not null default now(),
+  author_email text
+);
+alter table category_style_briefs enable row level security;
+drop policy if exists "category_style_briefs_select" on category_style_briefs;
+drop policy if exists "category_style_briefs_insert" on category_style_briefs;
+drop policy if exists "category_style_briefs_update" on category_style_briefs;
+drop policy if exists "category_style_briefs_delete" on category_style_briefs;
+create policy "category_style_briefs_select" on category_style_briefs
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "category_style_briefs_insert" on category_style_briefs
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "category_style_briefs_update" on category_style_briefs
+  for update
+  using (auth.jwt() ->> 'email' in (select email from allowed_users))
+  with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "category_style_briefs_delete" on category_style_briefs
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
+alter table thumbnail_images add column if not exists style_spec jsonb;
+
+-- 상세페이지 "브랜드 템플릿" 저장
+create table if not exists brand_templates (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  brand_name text not null default '',
+  tagline text not null default '',
+  logo_url text,
+  primary_color text not null default '#1c1c1c',
+  accent_color text not null default '#7c4fd1',
+  apply_colors boolean not null default true,
+  header_enabled boolean not null default true,
+  footer_enabled boolean not null default true,
+  footer_title text not null default '안내사항',
+  footer_notice text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  author_email text
+);
+alter table brand_templates enable row level security;
+drop policy if exists "brand_templates_select" on brand_templates;
+drop policy if exists "brand_templates_insert" on brand_templates;
+drop policy if exists "brand_templates_update" on brand_templates;
+drop policy if exists "brand_templates_delete" on brand_templates;
+create policy "brand_templates_select" on brand_templates
+  for select using (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "brand_templates_insert" on brand_templates
+  for insert with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "brand_templates_update" on brand_templates
+  for update
+  using (auth.jwt() ->> 'email' in (select email from allowed_users))
+  with check (auth.jwt() ->> 'email' in (select email from allowed_users));
+create policy "brand_templates_delete" on brand_templates
+  for delete using (auth.jwt() ->> 'email' in (select email from allowed_users));
