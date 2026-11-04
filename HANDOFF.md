@@ -1,34 +1,51 @@
 # 인수인계 (HANDOFF) — 다른 PC에서 바로 이어서 작업하기
 
-마지막 갱신: 2026-11-02 (jarvis PC). 최종 커밋: `1622b73` (main, origin/main과 동일, 로컬 미커밋 변경 없음).
-개발 규칙은 `CLAUDE.md`, 미실행 SQL은 `supabase/PENDING_MIGRATIONS.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+마지막 갱신: 2026-11-05 (wook PC). 최종 커밋: 이 세션에서 푸시 예정 (아래 "오늘 한 일" 참고).
+개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+
+## 0. 오늘(2026-11-05) 한 일 — SQL/배포 구조 변경
+
+- **SQL 마이그레이션을 Supabase CLI로 전환.** 이제 `supabase/PENDING_MIGRATIONS.md`
+  체크리스트 + SQL Editor 수동 복붙 방식은 안 쓴다 (레거시로 남겨둠).
+  - `npx supabase link --project-ref isqsvclrdzdsnizzqsia` 로 프로젝트 연결 완료 (로그인 끝남)
+  - 기존 운영 DB 스키마(`supabase/schema.sql`)를 `supabase/migrations/20261105005639_baseline.sql`로
+    베이스라인 삼아 `supabase migration repair ... --status applied`로 "이미 적용됨"
+    기록만 함 (실제 SQL 재실행 아님 - 메타데이터만)
+  - 앞으로 새 스키마 변경: `npx supabase migration new <이름>` → SQL 작성 →
+    `npx supabase db push --remote`. 원격 DB가 적용 여부를 자체 기록해서 다른
+    PC에서 똑같이 `db push` 해도 중복 적용 안 됨
+  - **주의**: 이 PC엔 Docker가 없어서 `db pull`/`db diff`는 못 쓴다 (Docker 필요).
+    `db push`/`migration new`/`migration repair`는 Docker 없이도 동작함
+  - `package.json`에 `supabase` CLI를 devDependency로 추가함 (`npx supabase ...`로 사용)
+- **배포 전 테스트 방식 문서화**: 큰 기능은 feature 브랜치 푸시 → Vercel Preview URL
+  확인 → main 머지. 작은 수정은 바로 main. (`CLAUDE.md`, `README.md` 5번 참고)
+- **미해결로 남긴 것**: `README.md`/`SETUP_MACOS_SELFHOST.md`는 운영을 맥북
+  자체 호스팅(pm2+Cloudflare Tunnel)으로 옮긴 것처럼 써있는데, 이 세션에서
+  `vercel whoami`/`.vercel/project.json` 확인 결과 **지금도 실제 운영은 Vercel**이다.
+  `SETUP_MACOS_SELFHOST.md`는 9/20에 작성된 계획 문서로 보이고 실제 전환은
+  안 된 것 같음 - 다음에 다룰 때 사용자에게 먼저 확인할 것 (맥북을 실제로
+  서버로 쓰기 시작했는지, 아니면 아직 계획 단계인지).
 
 ## 1. 다른 PC에서 시작하는 순서 (5분)
 
 ```bash
 cd <hion 폴더>
 git pull            # 먼저 받는다 (wook PC 작업이 기준 - 덮어쓰지 말 것)
-npm install         # package.json이 바뀌었을 수 있음
+npm install         # package.json이 바뀌었을 수 있음 (supabase CLI 추가됨)
 npm run dev         # http://localhost:3000
 ```
 
 - `.env.local`은 git에 없다. 새 PC라면 `.env.local.example`을 보고 직접 채운다 (비밀키는 채팅/커밋에 올리지 말 것).
+- 새 PC에서 처음 SQL 마이그레이션을 돌리려면: `npx supabase login` (브라우저 승인 필요,
+  비대화형 셸에서는 안 되니 진짜 터미널에서 실행) → `npx supabase link --project-ref isqsvclrdzdsnizzqsia`
 - 푸시 전에도 `git pull`을 한 번 더 한다. 푸시하면 Vercel이 자동 배포한다 → Vercel에서 **Ready** 확인 후 사이트에서 `Ctrl+Shift+R`.
 - Claude Code로 이어갈 때는 첫 요청에 "HANDOFF.md 읽고 이어서 작업해줘"라고 하면 된다.
 
 ## 2. SQL — 지금 해야 할 것
 
-Supabase 대시보드 → SQL Editor. **실행 확인이 안 된 것은 2개뿐**이다. (전체 SQL 본문은 `supabase/PENDING_MIGRATIONS.md`에 있고, 파일은 `supabase/` 폴더에 있다. 둘 다 `if not exists` / `drop policy if exists`라서 이미 실행했어도 다시 실행해도 안전하다.)
-
-| 순서 | 파일 | 안 돌리면 | 상태 |
-|---|---|---|---|
-| 1 | `supabase/thumbnail_style_learning.sql` | 썸네일 "인기상품 스타일 학습" 저장/재사용이 안 되고, 실패한 이미지를 같은 컷으로 다시 생성하지 못함 (그 외 기능은 동작) | ☐ 미확인 |
-| 2 | `supabase/brand_templates.sql` | 상세페이지 "내 브랜드 템플릿" 저장 불가 (기본 색상 템플릿은 사용 가능) | ☐ 미확인 |
-
-- 두 파일 모두 마지막 줄이 `notify pgrst, 'reload schema';` 라서 실행하면 바로 반영된다.
-- 실행했으면 `PENDING_MIGRATIONS.md`의 체크박스를 `[x]`로 바꾸고 커밋·푸시한다 (그래야 다른 PC에서도 "완료"로 보인다).
-- **이번 세션(11/1~11/2)에 만든 기능들은 새 SQL이 필요 없다.** 사용한 컬럼(`thumbnail_images.input_image_url/output_image_url/error/kind/position/color_label/style_spec`, `detail_page_sections.output_image_url/error/prompt_text`)은 기존 SQL에 이미 있다. 입력 저장용 `form-state/*.json`은 기존 `detail-images` 스토리지 버킷을 쓴다 (SQL 아님).
-- 참고: `supabase/schema.sql`에는 위 2개 테이블이 아직 합쳐져 있지 않다. 실행 확인 후 합쳐도 된다.
+없음. Supabase CLI 마이그레이션 전환 완료 후 원격 DB는 "최신" 상태로 기록돼 있다
+(`npx supabase db push --remote --dry-run` → `upToDate: true` 확인함). 새 스키마
+변경이 필요하면 위 "0. 오늘 한 일"의 CLI 절차를 따른다.
 
 ## 3. 이번 세션에 한 일 (전부 main에 푸시됨)
 

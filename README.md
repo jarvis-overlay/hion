@@ -106,15 +106,23 @@ URL도 같이 바꿔줘야 합니다.
 ## 5. 앞으로 기능 추가하는 흐름
 
 - 새 기능 아이디어 있으면 이 프로젝트 폴더 통째로 Claude Code에 열어서 요청
-- DB 테이블을 추가/수정할 땐 `supabase/schema.sql`에도 반영해서 최신 상태 유지
-  (개별 마이그레이션이 필요하면 `supabase/` 밑에 새 파일로 추가하고, 최종
-  반영된 구조는 `schema.sql`에도 합쳐두는 걸 권장 - 과거처럼 마이그레이션
-  파일만 쌓이고 schema.sql이 안 갱신되면 나중에 새 환경 세팅할 때 애먹음)
-- 새 마이그레이션을 추가하면 `supabase/PENDING_MIGRATIONS.md`에도 체크리스트로
-  기록한다 - 이 파일은 git에 커밋되므로 다른 PC에서 `git pull`만 받아도 "아직
-  Supabase에서 안 돌린 SQL이 뭔지" 바로 확인 가능 (사용자가 실행 확인해주면
-  체크 표시하고 schema.sql에 합침)
-- 로컬에서 `npm run dev`로 먼저 확인 → `git push` 하면 자동 반영
+- 로컬에서 `npm run dev`로 먼저 확인
+- **작은 수정**(한 줄 수정, 문구 변경 등)은 바로 `main`에 `git push` → Vercel 자동 배포
+- **큰 기능·위험한 변경**은 feature 브랜치에 푸시 → Vercel이 자동으로 만들어주는
+  Preview URL에서 실제 서버 환경(이미지 생성 등 로컬에서 안 되는 기능 포함)으로
+  확인 → 문제없으면 `main`에 머지해서 운영 배포
+- DB 스키마 변경은 **Supabase CLI 마이그레이션**으로 관리 (2026-11-05부터):
+  ```bash
+  npx supabase migration new <이름>      # supabase/migrations/에 새 파일 생성
+  # 파일에 SQL 작성
+  npx supabase db push --remote          # 운영 DB에 적용
+  ```
+  원격 DB가 "어떤 마이그레이션까지 적용됐는지" 자체적으로 기록하기 때문에,
+  어느 PC에서 `git pull` 받고 `db push`를 실행해도 이미 적용된 건 자동으로
+  건너뛴다 - 사람이 체크리스트로 따로 관리할 필요가 없다. 마이그레이션 파일은
+  git에 커밋해서 다른 PC와 공유한다.
+  (`supabase/PENDING_MIGRATIONS.md`와 `supabase/*.sql` 낱개 파일들은 이 방식으로
+  바꾸기 전의 기록이라 참고용으로만 남아있음 - 새 변경은 여기 추가하지 않음)
 
 ---
 
@@ -157,7 +165,9 @@ lib/
   kakao.ts / webpush.ts        # 알림 발송
 components/                    # 재사용 UI 컴포넌트
 supabase/
+  migrations/                  # Supabase CLI 마이그레이션 (2026-11-05부터 - `npx supabase db push --remote`)
+  config.toml                  # Supabase CLI 프로젝트 설정 (비밀값 없음, 커밋 대상)
   schema.sql                   # 통합 스키마 (새 환경 세팅 시 이 파일만 실행하면 됨)
-  PENDING_MIGRATIONS.md        # Supabase에서 아직 실행 확인 안 된 SQL 체크리스트
-  *.sql                          # 개별 변경 이력 (참고용 - schema.sql에 이미 반영됨)
+  PENDING_MIGRATIONS.md        # (레거시) CLI 전환 전 수동 체크리스트 - 참고용
+  *.sql                          # (레거시) CLI 전환 전 개별 변경 이력 - 참고용
 ```

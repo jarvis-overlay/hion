@@ -10,6 +10,8 @@ Next.js 14 App Router + Supabase + Vercel(GitHub `main` 푸시 시 자동 배포
 - `.env*`와 비밀키는 읽어서 출력·커밋하지 않는다. GitHub 로그인/자격 증명 변경은 사용자가 직접 한다.
 - 커밋 메시지 끝: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`
 - 배포는 작업 완료 후 푸시. 사용자에게 Vercel Ready 확인과 강력 새로고침을 안내한다.
+- **큰 기능·위험한 변경(AI 생성 로직, 결제/인증 관련 등)은 feature 브랜치로 푸시 → Vercel이 만들어주는 Preview URL에서 실제로 눌러보고 확인 → main에 머지**한다. 한 줄 수정·문구 변경처럼 작은 일은 바로 main에 푸시해도 된다. (Preview 환경은 운영과 동일한 서버 환경이라 sharp/canvas 등 로컬에 없는 기능도 실제로 확인 가능)
+- DB 스키마 변경은 이제 Supabase CLI 마이그레이션으로 관리한다: `npx supabase migration new <이름>`으로 `supabase/migrations/`에 파일 생성 → SQL 작성 → `npx supabase db push --remote`로 적용. 원격 DB가 적용 여부를 자체 기록하므로 어느 PC에서 실행해도 중복 걱정이 없다. 마이그레이션 파일은 반드시 git에 커밋한다. (`supabase/PENDING_MIGRATIONS.md`와 `supabase/*.sql` 낱개 파일은 2026-11-05 이전 기록이라 참고용으로만 남겨둠)
 - AI가 만든 결과는 원본과 대조 검증한다(`lib/outputVerifier.ts`: 종류·실루엣·색·부품 비교 → 다르면 틀린 점을 알려 재생성 → 그래도 다르면 원본 사진 사용 + 화면에 경고). 새 AI 생성 기능엔 같은 검증을 붙인다.
 - AI가 상품을 "다시 그리면" 색·길이·부품이 틀어진다. 상품 픽셀은 원본 사진 그대로 쓰고, 한글 문구는 AI가 아닌 코드(node-canvas)로 합성한다.
 
