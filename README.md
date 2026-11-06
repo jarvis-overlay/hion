@@ -5,7 +5,7 @@
 이메일 2개만 접속 가능한 프라이빗 시스템입니다.
 
 **배포**: 원래 Vercel(`hion.vercel.app`)로 운영했으나, 비용 절감을 위해
-맥북 자체 호스팅(pm2 + Cloudflare Tunnel)으로 이전 중입니다. 자세한 절차는
+맥북 자체 호스팅(pm2 + Cloudflare Tunnel, `https://hion.cc`)으로 이전해 운영 중입니다. 자세한 절차는
 [SETUP_MACOS_SELFHOST.md](./SETUP_MACOS_SELFHOST.md) 참고. **맥북 서버는
 `git push`가 곧 배포입니다** - main 브랜치에 반영되면 서버가 자동으로 받아서
 재적용하는 구조로 세팅되어 있으니, 기능 추가/수정은 반드시 로컬에서
@@ -107,7 +107,7 @@ URL도 같이 바꿔줘야 합니다.
 
 - 새 기능 아이디어 있으면 이 프로젝트 폴더 통째로 Claude Code에 열어서 요청
 - 로컬에서 `npm run dev`로 먼저 확인
-- **작은 수정**(한 줄 수정, 문구 변경 등)은 바로 `main`에 `git push` → Vercel 자동 배포
+- **작은 수정**(한 줄 수정, 문구 변경 등)은 바로 `main`에 `git push` → 맥북이 약 90초 안에 자동 배포 (`https://hion.cc`)
 - **큰 기능·위험한 변경**은 feature 브랜치에 푸시 → Vercel이 자동으로 만들어주는
   Preview URL에서 실제 서버 환경(이미지 생성 등 로컬에서 안 되는 기능 포함)으로
   확인 → 문제없으면 `main`에 머지해서 운영 배포

@@ -19,12 +19,11 @@
   - `package.json`에 `supabase` CLI를 devDependency로 추가함 (`npx supabase ...`로 사용)
 - **배포 전 테스트 방식 문서화**: 큰 기능은 feature 브랜치 푸시 → Vercel Preview URL
   확인 → main 머지. 작은 수정은 바로 main. (`CLAUDE.md`, `README.md` 5번 참고)
-- **미해결로 남긴 것**: `README.md`/`SETUP_MACOS_SELFHOST.md`는 운영을 맥북
-  자체 호스팅(pm2+Cloudflare Tunnel)으로 옮긴 것처럼 써있는데, 이 세션에서
-  `vercel whoami`/`.vercel/project.json` 확인 결과 **지금도 실제 운영은 Vercel**이다.
-  `SETUP_MACOS_SELFHOST.md`는 9/20에 작성된 계획 문서로 보이고 실제 전환은
-  안 된 것 같음 - 다음에 다룰 때 사용자에게 먼저 확인할 것 (맥북을 실제로
-  서버로 쓰기 시작했는지, 아니면 아직 계획 단계인지).
+- **운영 서버 = 맥북 (사용자 확인, 2026-11-07).** `https://hion.cc`, pm2 + Cloudflare Tunnel.
+  `main`에 푸시하면 맥북이 약 90초 안에 자동 pull → build → 재시작한다.
+  (11/5 세션에서 `vercel whoami`로 Vercel이 운영이라고 적었던 것은 틀린 판단이었다 -
+  Vercel 프로젝트는 아직 남아 있을 뿐 운영이 아니다. `SETUP_MACOS_SELFHOST.md`/
+  `PROCESS_ARCHITECTURE.md`가 실제 구조다.) Vercel 프로젝트 정리(8단계)는 아직 안 했다.
 
 ## 1. 다른 PC에서 시작하는 순서 (5분)
 
@@ -38,7 +37,7 @@ npm run dev         # http://localhost:3000
 - `.env.local`은 git에 없다. 새 PC라면 `.env.local.example`을 보고 직접 채운다 (비밀키는 채팅/커밋에 올리지 말 것).
 - 새 PC에서 처음 SQL 마이그레이션을 돌리려면: `npx supabase login` (브라우저 승인 필요,
   비대화형 셸에서는 안 되니 진짜 터미널에서 실행) → `npx supabase link --project-ref isqsvclrdzdsnizzqsia`
-- 푸시 전에도 `git pull`을 한 번 더 한다. 푸시하면 Vercel이 자동 배포한다 → Vercel에서 **Ready** 확인 후 사이트에서 `Ctrl+Shift+R`.
+- 푸시 전에도 `git pull`을 한 번 더 한다. **푸시가 곧 운영 배포다**: 약 90초 뒤 https://hion.cc 에서 `Ctrl+Shift+R`로 확인. 안 바뀌면 맥북에서 `tail -30 /Users/wook/.pm2/autodeploy.log` 확인 (이 PC에서는 못 봄).
 - Claude Code로 이어갈 때는 첫 요청에 "HANDOFF.md 읽고 이어서 작업해줘"라고 하면 된다.
 
 ## 2. SQL — 지금 해야 할 것
@@ -86,7 +85,7 @@ npm run dev         # http://localhost:3000
 
 ## 6. 푸시 전 검증 절차 (CLAUDE.md와 동일)
 
-Vercel 빌드는 전체 TS 검사를 한다. 로컬에 `sharp`/`canvas`가 없으면 `tsc`가 오류를 숨기므로:
+맥북 운영 빌드(`next build`)는 전체 TS 검사를 한다. 푸시가 곧 배포라 오류가 있으면 운영이 깨질 수 있다. 로컬에 `sharp`/`canvas`가 없으면 `tsc`가 오류를 숨기므로:
 1. `sharp`, `canvas`와 의존 패키지(`@img, color, color-string, color-convert, color-name, detect-libc, semver, simple-swizzle, is-arrayish, node-addon-api`)를 임시로 `node_modules`에 복사 (또는 `npm i --no-save sharp canvas`)
 2. `node node_modules/typescript/bin/tsc --noEmit -p .` (`web-push` 관련 오류만 무시)
 3. 임시 패키지와 `tsconfig.tsbuildinfo` 삭제 후 커밋·푸시
