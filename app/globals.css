@@ -96,3 +96,74 @@ h1, h2, h3, .font-display {
   padding-left: 10px;
   border-left: 2px solid #EEF0F4;
 }
+
+/* 업무수첩 Tiptap 에디터 본문(쓰기용 .note-editor, 변경 이력 읽기전용
+   .note-history-view) - 둘 다 같은 확장(lib/notes/editorExtensions.ts)을
+   쓰므로 같은 기본 타이포그래피를 공유한다. */
+.note-editor .ProseMirror,
+.note-history-view .ProseMirror {
+  outline: none;
+  font-size: 14.5px;
+  line-height: 1.7;
+}
+.note-editor .ProseMirror h1,
+.note-history-view .ProseMirror h1 {
+  font-size: 1.5em;
+  font-weight: 800;
+  margin: 0.6em 0 0.3em;
+}
+.note-editor .ProseMirror h2,
+.note-history-view .ProseMirror h2 {
+  font-size: 1.2em;
+  font-weight: 800;
+  margin: 0.5em 0 0.3em;
+}
+.note-editor .ProseMirror p,
+.note-history-view .ProseMirror p {
+  margin: 0.3em 0;
+}
+.note-editor .ProseMirror ul,
+.note-editor .ProseMirror ol,
+.note-history-view .ProseMirror ul,
+.note-history-view .ProseMirror ol {
+  padding-left: 1.4em;
+  margin: 0.3em 0;
+}
+.note-editor .ProseMirror ul[data-type='taskList'],
+.note-history-view .ProseMirror ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0.2em;
+}
+.note-editor .ProseMirror ul[data-type='taskList'] li,
+.note-history-view .ProseMirror ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.note-editor .ProseMirror blockquote,
+.note-history-view .ProseMirror blockquote {
+  border-left: 3px solid #F1F1F4;
+  padding-left: 0.8em;
+  color: #6B7280;
+  margin: 0.4em 0;
+}
+.note-editor .ProseMirror pre,
+.note-history-view .ProseMirror pre {
+  background: #1F2430;
+  color: #F5F5F7;
+  padding: 0.6em 0.8em;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.note-editor .ProseMirror mark,
+.note-history-view .ProseMirror mark {
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.note-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #9CA3AF;
+  float: left;
+  pointer-events: none;
+  height: 0;
+}
