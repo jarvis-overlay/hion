@@ -12,7 +12,7 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
     <>
       {/* 모바일 상단바 - md 이상에서는 숨김 */}
       <div className="md:hidden flex items-center justify-between px-4 py-3 bg-white shadow-[0_1px_2px_rgba(31,36,48,0.06)] sticky top-0 z-40">
-        <Link href="/dashboard" onClick={() => setOpen(false)}>
+        <Link href="/dashboard" prefetch={false} onClick={() => setOpen(false)}>
           <img src="/logo.png" alt="HION HUB" className="h-9 w-auto object-contain" />
         </Link>
         <button
@@ -42,7 +42,7 @@ export default function SidebarNav({ userEmail }: { userEmail: string }) {
         }`}
       >
         <div className="px-5 py-8 flex items-center justify-between">
-          <Link href="/dashboard" onClick={() => setOpen(false)}>
+          <Link href="/dashboard" prefetch={false} onClick={() => setOpen(false)}>
             <img src="/logo.png" alt="HION HUB" className="h-16 w-auto object-contain" />
           </Link>
           <button
