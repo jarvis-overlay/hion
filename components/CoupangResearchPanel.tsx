@@ -7,7 +7,7 @@ import {
   type CoupangResearchResult,
 } from '@/app/dashboard/sourcing/list/researchActions';
 import { addSourcingComparisons } from '@/app/dashboard/sourcing/list/actions';
-import { MarketBadgeRow } from '@/components/MarketBadge';
+import { Badge, MarketBadgeRow } from '@/components/MarketBadge';
 import { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
 
 function candidateKey(c: CoupangResearchCandidate, i: number): string {
@@ -42,10 +42,12 @@ export default function CoupangResearchPanel({
   onSaved: () => void;
 }) {
   const [keyword, setKeyword] = useState(item.title || '');
+  const [userMaterial, setUserMaterial] = useState('');
   const [loading, setLoading] = useState(false);
   const [researchError, setResearchError] = useState<string | null>(null);
   const [result, setResult] = useState<CoupangResearchResult | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [priceRange, setPriceRange] = useState('');
   const [priceRangeTouched, setPriceRangeTouched] = useState(false);
   const [marketSize, setMarketSize] = useState<'high' | 'mid' | 'low' | ''>('');
@@ -66,6 +68,18 @@ export default function CoupangResearchPanel({
     });
   }
 
+  // 경쟁 상품이 아닌 후보(재질·용도가 다른 상품 등)를 목록에서 치운다.
+  // 저장 전 후보 목록에서만 숨기는 것이라 DB엔 영향 없다.
+  function handleRemove(key: string) {
+    setRemoved((prev) => new Set(prev).add(key));
+    setSelected((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }
+
   // 선택이 바뀔 때마다, 사용자가 직접 가격대를 수정하지 않았으면 선택된
   // 후보 기준으로 다시 추천값을 채워준다 (직접 수정한 뒤에는 덮어쓰지 않음).
   useEffect(() => {
@@ -81,9 +95,10 @@ export default function CoupangResearchPanel({
     setResearchError(null);
     setResult(null);
     setSelected(new Set());
+    setRemoved(new Set());
     setSaveError(null);
     try {
-      const res = await researchCoupangComparisons(keyword);
+      const res = await researchCoupangComparisons(keyword, userMaterial.trim() || undefined);
       if ('error' in res) {
         setResearchError(res.error);
         return;
@@ -142,6 +157,14 @@ export default function CoupangResearchPanel({
         </button>
       </div>
 
+      <input
+        value={userMaterial}
+        onChange={(e) => setUserMaterial(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && handleResearch()}
+        placeholder="내 상품 재질/방식 (선택 - 예: 극세사)"
+        className="border border-paperLine bg-white px-2 py-1.5 text-xs"
+      />
+
       {loading && (
         <p className="text-[11px] text-inkSoft">
           조사 중이에요... 캡차 재시도가 겹치면 최대 1~2분 걸릴 수 있어요.
@@ -159,52 +182,83 @@ export default function CoupangResearchPanel({
           <MarketBadgeRow badges={result.badges} />
 
           <div className="grid gap-1.5">
-            {result.candidates.map((c, i) => {
-              const key = candidateKey(c, i);
-              const checked = selected.has(key);
-              return (
-                <label
-                  key={key}
-                  className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs cursor-pointer ring-1 ${
-                    checked ? 'ring-accent bg-accentBg' : 'ring-paperLine bg-white'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => handleToggle(key)}
-                    className="shrink-0"
-                  />
-                  {c.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={c.imageUrl}
-                      alt={c.name}
-                      className="w-10 h-10 rounded object-cover shrink-0 bg-paperLine"
-                    />
-                  ) : (
-                    <div className="w-10 h-10 rounded shrink-0 bg-paperLine" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-ink line-clamp-2 leading-snug">{c.name}</p>
-                    <p className="text-inkSoft">
-                      {c.price ? `${c.price}원` : '가격 미상'}
-                      {c.reviewCount ? ` · 리뷰 ${c.reviewCount}개` : ''}
-                    </p>
-                  </div>
-                  <a
-                    href={c.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="text-profit underline shrink-0"
+            {result.candidates
+              .map((c, i) => ({ c, key: candidateKey(c, i) }))
+              .filter(({ key }) => !removed.has(key))
+              .map(({ c, key }) => {
+                const checked = selected.has(key);
+                return (
+                  <label
+                    key={key}
+                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs cursor-pointer ring-1 ${
+                      checked ? 'ring-accent bg-accentBg' : 'ring-paperLine bg-white'
+                    }`}
                   >
-                    [링크]
-                  </a>
-                </label>
-              );
-            })}
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => handleToggle(key)}
+                      className="shrink-0"
+                    />
+                    {c.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={c.imageUrl}
+                        alt={c.name}
+                        className="w-10 h-10 rounded object-cover shrink-0 bg-paperLine"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded shrink-0 bg-paperLine" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-ink line-clamp-2 leading-snug">{c.name}</p>
+                      <p className="text-inkSoft">
+                        {c.price ? `${c.price}원` : '가격 미상'}
+                        {c.reviewCount ? ` · 리뷰 ${c.reviewCount}개` : ''}
+                      </p>
+                      {c.materialBadge && (
+                        <Badge tier={c.materialBadge.type === 'ai_different' ? 'ok' : 'bad'}>
+                          {c.materialBadge.type === 'dictionary_different'
+                            ? `재질 다름: ${c.materialBadge.matchedKeyword}`
+                            : 'AI 추정: 다른 방식일 수 있음'}
+                        </Badge>
+                      )}
+                    </div>
+                    <a
+                      href={c.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-profit underline shrink-0"
+                    >
+                      [링크]
+                    </a>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleRemove(key);
+                      }}
+                      title="경쟁 상품 아님 - 목록에서 제거"
+                      className="text-inkSoft hover:text-warn shrink-0 px-1"
+                    >
+                      ✕
+                    </button>
+                  </label>
+                );
+              })}
           </div>
+
+          {removed.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setRemoved(new Set())}
+              className="text-[11px] text-inkSoft underline justify-self-start"
+            >
+              제거한 {removed.size}개 다시 보기
+            </button>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <input

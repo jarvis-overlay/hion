@@ -8,6 +8,7 @@
 // 사용자가 계속 작업할 수 있다.
 import { fetchCoupangBestsellers } from '@/lib/brightdata';
 import { analyzeCoupangResults, type MarketBadges } from '@/lib/coupangMarket';
+import { classifyByDictionary, classifyMaterialMismatch, type MaterialTierVerdict } from '@/lib/materialClassify';
 
 export interface CoupangResearchCandidate {
   name: string;
@@ -15,6 +16,8 @@ export interface CoupangResearchCandidate {
   reviewCount: string | null;
   imageUrl: string | null;
   url: string;
+  // 사용자가 재질/방식을 입력했을 때만 채워지는 참고용 배지. 저장하지 않음(순수 UI 참고용).
+  materialBadge?: MaterialTierVerdict;
 }
 
 export interface CoupangResearchResult {
@@ -33,7 +36,8 @@ function toThreeTierMarketSize(tier: MarketBadges['marketScaleTier']): 'high' | 
 }
 
 export async function researchCoupangComparisons(
-  keyword: string
+  keyword: string,
+  userMaterial?: string
 ): Promise<CoupangResearchResult | { error: string }> {
   const q = keyword.trim();
   if (!q) return { error: '조사할 키워드를 입력해주세요.' };
@@ -65,14 +69,48 @@ export async function researchCoupangComparisons(
     };
   }
 
+  const candidates: CoupangResearchCandidate[] = coupang.map((c) => ({
+    name: c.name,
+    price: c.price,
+    reviewCount: c.reviewCount,
+    imageUrl: c.imageUrl,
+    url: c.url,
+  }));
+
+  // 재질/방식을 입력 안 하면(기존 사용자) 이 블록 전체를 건너뛴다 - 동작이
+  // 1바이트도 안 바뀌어야 함. 이 기능은 참고용 보너스라서, 사전/AI 판정이
+  // 뭔가 잘못돼도 전체 조사 결과를 날리면 안 돼서 한 번 더 try/catch로
+  // 감싼다(이중 방어).
+  const material = userMaterial?.trim();
+  if (material) {
+    try {
+      const ambiguous: { index: number; title: string }[] = [];
+      candidates.forEach((c, i) => {
+        const verdict = classifyByDictionary(material, c.name);
+        if (verdict === 'ambiguous') {
+          ambiguous.push({ index: i, title: c.name });
+        } else if (verdict !== null) {
+          c.materialBadge = verdict;
+        }
+      });
+
+      if (ambiguous.length > 0) {
+        const aiResults = await classifyMaterialMismatch(material, ambiguous.map((a) => a.title));
+        if (aiResults) {
+          ambiguous.forEach((a, i) => {
+            if (aiResults[i] === 'different') {
+              candidates[a.index].materialBadge = { type: 'ai_different' };
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[researchActions] 재질 배지 판정 실패 - 배지 없이 통과:', e);
+    }
+  }
+
   return {
-    candidates: coupang.map((c) => ({
-      name: c.name,
-      price: c.price,
-      reviewCount: c.reviewCount,
-      imageUrl: c.imageUrl,
-      url: c.url,
-    })),
+    candidates,
     badges: analysis.badges,
     suggestedMarketSize: toThreeTierMarketSize(analysis.badges.marketScaleTier),
   };
