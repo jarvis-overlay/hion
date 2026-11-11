@@ -2,6 +2,12 @@ import { createClient } from '@/lib/supabase/server';
 import SourcingForm from '@/components/SourcingForm';
 import SourcingList from '@/components/SourcingList';
 
+// "쿠팡 실데이터로 조사" 버튼이 부르는 researchCoupangComparisons는 Bright
+// Data 캡차 재시도로 한 번에 최악 135초까지 걸릴 수 있다. Vercel 기본
+// 서버리스 제한(10~15초)보다 훨씬 길어서, 지정 안 하면 Preview에서 매번
+// 타임아웃으로 실패한다(맥북 pm2는 타임아웃 자체가 없어 영향 없음).
+export const maxDuration = 180;
+
 export default async function SourcingPage() {
   const supabase = createClient();
   // 옵션/공급처 테이블 마이그레이션을 아직 안 돌렸으면 이 조인 쿼리

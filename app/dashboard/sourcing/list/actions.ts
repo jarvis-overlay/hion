@@ -31,36 +31,98 @@ export interface ComparisonPriceInput {
   priceRange: string;
   marketSize: 'high' | 'mid' | 'low' | '';
 }
+// source: 사용자가 손으로 입력했는지('manual'), "쿠팡 실데이터로 조사"
+// 기능으로 자동 저장했는지('coupang_auto') 구분. 생략하면 'manual'로
+// 저장(과거 호출부와 호환).
 export interface ComparisonInput {
   title: string;
   link: string;
   prices: ComparisonPriceInput[];
+  source?: 'manual' | 'coupang_auto';
 }
 
+// title+link 쌍으로 비교 상품을 구분하기 위한 키 - insert 전 입력값과
+// insert 후 반환값에 항상 같은 변환(빈 문자열 -> null)을 적용해야 매칭된다.
+function comparisonKey(title: string, link: string): string {
+  return `${title || ''}|||${link || ''}`;
+}
+
+// comparisons 전체를 sourcing_item_comparisons에 한 번에(배열로) insert한다
+// - 예전엔 한 건씩 루프로 insert해서, 여러 건 저장 중 중간에 하나가
+// 실패하면 이미 저장된 건까지 포함해 "저장 실패"로 보이고 사용자가
+// 재시도하면 중복 저장되는 문제가 있었다. 완벽한 트랜잭션은 아니지만,
+// 이 테이블에 대한 insert 자체를 단일 statement로 묶어서 부분 실패
+// 가능성을 크게 줄인다.
+//
+// 반환된 id를 원래 입력과 매칭할 때 inserted[i] <-> comparisons[i] 인덱스
+// 순서가 그대로 보존된다고 가정하면 안 된다(Postgres/PostgREST가 공식으로
+// 보장하는 동작이 아님) - 실제로 순서가 어긋나면 A 상품에 B 상품의
+// 가격대가 조용히 붙는 데이터 오염이 생기고 에러도 안 난다. 그래서 title+link
+// 쌍으로 다시 매칭한다. 같은 배치 안에 title+link가 완전히 동일한 항목이
+// 여러 개 들어오는 극단적 경우는 큐(순서대로 소비)로 대충 구분되지만
+// 완벽히 보장되진 않는다 - 이 프로젝트 규모(2인용, 배치당 몇 건)에선
+// 감당할 만한 리스크로 보고 넘어간다.
 async function insertComparisons(
   supabase: ReturnType<typeof createClient>,
   sourcingItemId: string,
   comparisons: ComparisonInput[]
 ): Promise<string | null> {
-  for (const c of comparisons) {
-    const { data: comp, error: compErr } = await supabase
-      .from('sourcing_item_comparisons')
-      .insert({ sourcing_item_id: sourcingItemId, title: c.title || null, link: c.link || null })
-      .select('id')
-      .single();
-    if (compErr) return compErr.message;
+  if (comparisons.length === 0) return null;
 
-    if (c.prices.length > 0) {
-      const { error: priceErr } = await supabase.from('sourcing_comparison_prices').insert(
-        c.prices.map((p) => ({
-          comparison_id: (comp as { id: string }).id,
-          platform: p.platform,
-          price_range: p.priceRange || null,
-          market_size: p.marketSize || null,
-        }))
-      );
-      if (priceErr) return priceErr.message;
+  const { data: inserted, error: compErr } = await supabase
+    .from('sourcing_item_comparisons')
+    .insert(
+      comparisons.map((c) => ({
+        sourcing_item_id: sourcingItemId,
+        title: c.title || null,
+        link: c.link || null,
+        source: c.source || 'manual',
+      }))
+    )
+    .select('id, title, link');
+  if (compErr) {
+    // source 컬럼 마이그레이션(supabase/migrations/..._add_comparison_source.sql)이
+    // 원격 DB에 아직 적용 안 됐으면 기존 수동 "비교 상품 추가"까지 전부
+    // 깨질 수 있어서, 컬럼 없음 에러를 알아보기 쉬운 한국어 안내로
+    // 바꿔준다 (updateSourcingPriority/archiveSourcingItem과 같은 패턴).
+    if (/source/i.test(compErr.message) && /column|schema cache/i.test(compErr.message)) {
+      return '비교 상품 구분(수동/쿠팡 자동조사) 컬럼이 DB에 아직 없어요. supabase/migrations의 add_comparison_source 마이그레이션을 원격 DB에 먼저 적용해주세요(npx supabase db push --remote).';
     }
+    return compErr.message;
+  }
+
+  // (title, link) -> id 큐. 같은 키가 여러 번 나오면 순서대로 하나씩 빼서 쓴다.
+  const idQueueByKey = new Map<string, string[]>();
+  for (const row of (inserted as { id: string; title: string | null; link: string | null }[]) || []) {
+    const key = comparisonKey(row.title || '', row.link || '');
+    const queue = idQueueByKey.get(key) || [];
+    queue.push(row.id);
+    idQueueByKey.set(key, queue);
+  }
+
+  const priceRows: {
+    comparison_id: string;
+    platform: ComparisonPriceInput['platform'];
+    price_range: string | null;
+    market_size: ComparisonPriceInput['marketSize'] | null;
+  }[] = [];
+  for (const c of comparisons) {
+    const key = comparisonKey(c.title, c.link);
+    const id = idQueueByKey.get(key)?.shift();
+    if (!id) return '비교 상품을 저장했지만 가격대 정보를 연결하지 못했어요. 새로고침 후 다시 시도해주세요.';
+    for (const p of c.prices) {
+      priceRows.push({
+        comparison_id: id,
+        platform: p.platform,
+        price_range: p.priceRange || null,
+        market_size: p.marketSize || null,
+      });
+    }
+  }
+
+  if (priceRows.length > 0) {
+    const { error: priceErr } = await supabase.from('sourcing_comparison_prices').insert(priceRows);
+    if (priceErr) return priceErr.message;
   }
   return null;
 }
@@ -134,6 +196,21 @@ export async function addSourcingComparison(
 ): Promise<{ error: string } | { success: true }> {
   const supabase = createClient();
   const err = await insertComparisons(supabase, sourcingItemId, [comparison]);
+  if (err) return { error: err };
+
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
+// "쿠팡 실데이터로 조사"에서 선택한 후보 여러 건을 한 번에 저장한다 -
+// insertComparisons가 이미 배열을 받으므로 N번 왕복 없이 그대로 재사용.
+export async function addSourcingComparisons(
+  sourcingItemId: string,
+  comparisons: ComparisonInput[]
+): Promise<{ error: string } | { success: true }> {
+  if (comparisons.length === 0) return { error: '저장할 비교 상품을 선택해주세요.' };
+  const supabase = createClient();
+  const err = await insertComparisons(supabase, sourcingItemId, comparisons);
   if (err) return { error: err };
 
   revalidatePath('/dashboard/sourcing/list');

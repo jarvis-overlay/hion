@@ -40,6 +40,8 @@ import FxCalculator from '@/components/FxCalculator';
 import { MarginDetailFields } from '@/components/MarginDetailFields';
 import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
+import CoupangResearchPanel from '@/components/CoupangResearchPanel';
+import MarginReverseCalc from '@/components/MarginReverseCalc';
 import NoteTimeline from '@/components/NoteTimeline';
 import CollapsibleText from '@/components/CollapsibleText';
 import { useDraft } from '@/lib/useDraft';
@@ -1319,6 +1321,7 @@ function ChecklistSection({ item, template }: { item: any; template: any[] }) {
 // 남겨서 이 후보가 시장에서 어느 위치인지 참고하려는 목적으로 추가함.
 function ComparisonsSection({ item }: { item: any }) {
   const [adding, setAdding] = useState(false);
+  const [researching, setResearching] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -1328,16 +1331,35 @@ function ComparisonsSection({ item }: { item: any }) {
     <div className="rounded-md ring-1 ring-paperLine p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-inkSoft">비교 상품군 ({comparisons.length})</span>
-        <button
-          onClick={() => {
-            setAdding((v) => !v);
-            setEditingId(null);
-          }}
-          className="text-xs text-accent font-semibold"
-        >
-          {adding ? '닫기' : '+ 비교 상품 추가'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setResearching((v) => !v);
+              setAdding(false);
+              setEditingId(null);
+            }}
+            className="text-xs text-accent font-semibold"
+          >
+            {researching ? '조사 닫기' : '쿠팡 실데이터로 조사'}
+          </button>
+          <button
+            onClick={() => {
+              setAdding((v) => !v);
+              setResearching(false);
+              setEditingId(null);
+            }}
+            className="text-xs text-accent font-semibold"
+          >
+            {adding ? '닫기' : '+ 비교 상품 추가'}
+          </button>
+        </div>
       </div>
+
+      {researching && (
+        <div className="mb-2">
+          <CoupangResearchPanel item={item} onSaved={() => setResearching(false)} />
+        </div>
+      )}
 
       {comparisons.length > 0 && (
         <div className="grid gap-1.5 mb-2">
@@ -1434,7 +1456,7 @@ function ComparisonsSection({ item }: { item: any }) {
           onSave={(c) =>
             startTransition(async () => {
               setError(null);
-              const res = await addSourcingComparison(item.id, c);
+              const res = await addSourcingComparison(item.id, { ...c, source: 'manual' });
               if (!res || 'error' in res) {
                 setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
                 return;
@@ -1444,6 +1466,8 @@ function ComparisonsSection({ item }: { item: any }) {
           }
         />
       )}
+
+      <MarginReverseCalc item={item} comparisons={comparisons} />
     </div>
   );
 }

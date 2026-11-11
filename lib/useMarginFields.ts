@@ -14,6 +14,11 @@ import { computeMargin } from '@/lib/marginCalc';
 // 데이터도 있어서 정액 모드 기본값으로 그대로 불러와진다).
 export type CouponMode = 'amount' | 'percent';
 
+// 마진 역산 위젯(MarginReverseCalc)에서도 같은 기본값을 써야 해서 상수로
+// 뽑아둠 - 동작 변화는 없음(이전엔 훅 안에 '8.6'/'10' 문자열로 박혀있었음).
+export const DEFAULT_FEE_RATE_PCT = 8.6;
+export const DEFAULT_AD_RATE_PCT = 10;
+
 export interface MarginFieldsInit {
   price?: number | null;
   cost?: number | null;
@@ -37,10 +42,10 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
   const [couponValue, setCouponValue] = useState(toStr(init.coupon));
   const [importVat, setImportVat] = useState(toStr(init.importVat));
   const [feeRatePct, setFeeRatePct] = useState(
-    init.feeRatePct != null ? String(init.feeRatePct) : '8.6'
+    init.feeRatePct != null ? String(init.feeRatePct) : String(DEFAULT_FEE_RATE_PCT)
   );
   const [adRatePct, setAdRatePct] = useState(
-    init.adRatePct != null ? String(init.adRatePct) : '10'
+    init.adRatePct != null ? String(init.adRatePct) : String(DEFAULT_AD_RATE_PCT)
   );
   const [shipping, setShipping] = useState(toStr(init.shipping));
   const [intlShipping, setIntlShipping] = useState(toStr(init.intlShipping));
@@ -86,8 +91,8 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
     setCouponMode('amount');
     setCouponValue('');
     setImportVat('');
-    setFeeRatePct('8.6');
-    setAdRatePct('10');
+    setFeeRatePct(String(DEFAULT_FEE_RATE_PCT));
+    setAdRatePct(String(DEFAULT_AD_RATE_PCT));
     setShipping('');
     setIntlShipping('');
     setEtcCost('');

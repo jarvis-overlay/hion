@@ -1,7 +1,17 @@
 # 인수인계 (HANDOFF) — 다른 PC에서 바로 이어서 작업하기
 
-마지막 갱신: 2026-11-05 (wook PC). 최종 커밋: 이 세션에서 푸시 예정 (아래 "오늘 한 일" 참고).
-개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+마지막 갱신: 2026-11-11 (jarvis PC). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+
+## -1. 오늘(2026-11-11) 한 일 — 소싱 리스트: 쿠팡 실데이터 조사 + 마진 역산
+
+소싱 리스트 "비교 상품군 ▼"에 두 기능 추가 (`/build` 체계: planner→architect→developer→reviewer/qa 2라운드 교차검증 거침):
+- **"쿠팡 실데이터로 조사" 버튼**: 기존 트렌드 탭이 쓰던 `lib/brightdata.ts`의 `fetchCoupangBestsellers`를 재사용해서 실제 쿠팡 검색 결과(이름/가격/리뷰수/이미지)를 보여주고, 체크한 것만 비교 상품군에 저장(`source='coupang_auto'`로 수동 입력과 구분). 신규: `app/dashboard/sourcing/list/researchActions.ts`, `components/CoupangResearchPanel.tsx`, `lib/coupangMarket.ts`(트렌드 탭 분석 로직을 `'use server'` 아닌 lib로 분리 - 재사용을 위해 이동만 함, 기존 import 경로는 재노출로 안 바꿈).
+- **마진 역산(`components/MarginReverseCalc.tsx`)**: 목표 마진율(기본 20%) → `lib/marginCalc.ts`의 `computeMinPriceForTargetMargin`으로 최소 판매가 즉시 계산, "이 가격 적용"으로 `sourcing_items`에 저장. **쿠폰은 반영 안 함(적용 시 쿠폰 0으로 강제 저장, 화면에 경고 문구 있음)** - 쿠폰 있는 항목에 쓸 때 주의.
+- **마이그레이션**: `supabase/migrations/20261111015515_add_comparison_source.sql` (`sourcing_item_comparisons.source` 컬럼 추가). **다른 PC에서 이 브랜치/커밋을 받으면 머지 전에 `npx supabase db push --remote`를 먼저 실행했는지 확인할 것** - 안 하면 비교 상품 추가(수동 포함) 전체가 실패한다(한국어 에러 안내는 떠서 안전하게 실패는 하지만, 기능은 막힘).
+- CLAUDE.md의 "위험한 변경은 feature 브랜치 → Vercel Preview 확인 → main" 규칙에 따라 feature 브랜치로 푸시함 (아래 "확인한 것/확인 못한 것" 참고).
+
+**확인함(이 PC)**: tsc 전체 통과, `npm run build` clean, 쿠폰 이중반영·배열 insert 순서뒤섞임 버그를 가짜 데이터로 재현/수정 확인(스크래치패드 스텁 스크립트).
+**확인 못함 — 사용자가 Vercel Preview에서 직접 봐야 함**: 실제 Bright Data 호출(캡차/타임아웃/응답 형태), 실제 화면에서 버튼 클릭→체크박스 선택→저장 흐름, "이 가격 적용" 후 카드 배지 갱신, `source` 컬럼이 실제 DB에 반영되는지.
 
 ## 0. 오늘(2026-11-05) 한 일 — SQL/배포 구조 변경
 

@@ -214,9 +214,6 @@ ${dataSection}
   }
 }
 
-export type MarketScaleTier = 'very-high' | 'high' | 'mid' | 'low' | 'very-low';
-export type CompetitionTier = 'low' | 'mid' | 'high';
-
 export interface CategoryFinding {
   category: string;
   summary: string; // 그 카테고리명으로 실제 쿠팡 검색을 해본 결과 요약
