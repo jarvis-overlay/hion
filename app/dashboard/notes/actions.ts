@@ -448,7 +448,18 @@ export async function setNoteShare(
   // 대상 이메일 → auth uuid 변환이 필요해서 service role 클라이언트를
   // 쓴다(allowed_users엔 이메일만 있고 uuid가 없음). 2명 규모라 listUsers()
   // 전체 목록을 받아서 메모리에서 찾아도 괜찮다.
-  const admin = createAdminClient();
+  // SUPABASE_SERVICE_ROLE_KEY가 비어있으면 createClient()가 그 자리에서
+  // 예외를 던진다(supabase-js 자체 동작) - 잡지 않으면 Server Action이
+  // 그대로 죽어서 사용자에게 "Server Components render" 원시 에러 화면이
+  // 뜬다(실제로 맥북 env에 이 키가 빠져 있어서 재현됨). try/catch로 막아서
+  // 다른 액션들과 같은 한국어 안내로 바꾼다.
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch (e) {
+    console.error('[work notes] 관리자 클라이언트 생성 실패(SUPABASE_SERVICE_ROLE_KEY 확인 필요):', e);
+    return { error: '공유 기능이 아직 설정되지 않았어요. 잠시 후 다시 시도해주세요.' };
+  }
   const { data: usersPage, error: listError } = await admin.auth.admin.listUsers({
     perPage: 1000,
   });
