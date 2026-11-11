@@ -1,14 +1,26 @@
 # 인수인계 (HANDOFF) — 다른 PC에서 바로 이어서 작업하기
 
-마지막 갱신: 2026-11-12 (jarvis PC). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+마지막 갱신: 2026-11-12 (jarvis PC, 퇴근 전 마무리). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
 
-## -2. 지금 바로 할 일 (2026-11-12)
+## -3. 다음 세션이 제일 먼저 할 일 (2026-11-12)
 
-**Bright Data 환경변수 — 해결됨.** 맥북 `.env.local`에 `BRIGHTDATA_API_KEY`/`BRIGHTDATA_UNLOCKER_ZONE` 추가 + `pm2 restart hion` 완료, 사용자가 실제 화면에서 "조사하기"로 쿠팡 후보가 뜨는 것까지 확인함(스크린샷 확인). 아래 "-1"의 "확인 못함" 중 "실제 Bright Data 호출" 항목은 확인 완료로 처리.
+1. **`SUPABASE_SERVICE_ROLE_KEY` 맥북에 있는지 확인.** 업무수첩 공유(보기/편집 권한 주기)를 한 번 눌러봐서 "공유 기능이 아직 설정되지 않았어요"가 뜨면 이 키가 없는 것 — Bright Data 때와 같은 절차(Supabase 대시보드 → Project Settings → API → service_role 키 확인 → 맥북 `~/hion/.env.local`에 추가 → `pm2 restart hion`)로 처리. 자세한 배경은 아래 "-2" 참고.
+2. **재질 구분 배지 기능을 실제 Gemini 키가 있는 환경(맥북)에서 한 번 써볼 것.** 소싱 리스트 > 비교 상품군 > "내 상품 재질(선택)"에 값 넣고 조사해서, ① 사전에 걸리는 경우(예: "극세사" 입력 + "규조토" 포함 후보)에 배지가 바로 붙는지 ② 애매한 제목에 "AI 추정" 배지가 실제로 붙는지(Gemini 응답 품질은 이 PC에서 전혀 검증 못 함, 전부 모킹 테스트만 함) 확인. 안 붙어도 에러는 안 떠야 정상(설계 의도) — 그게 "꺼져 있는 것"인지 "다 매칭이라 안 붙은 것"인지는 화면만으론 구분 안 됨(QA가 지적한 알려진 한계, 아래 "-2" 참고).
 
-**새로 발견한 비슷한 문제 — `SUPABASE_SERVICE_ROLE_KEY`도 맥북에 없을 가능성 높음.** 업무수첩(노트) 공유 다이얼로그에서 다른 사람에게 "보기/편집" 권한을 줄 때 `setNoteShare`(`app/dashboard/notes/actions.ts`)가 `createAdminClient()`(`lib/supabase/admin.ts`)를 쓰는데, 여기 필요한 `SUPABASE_SERVICE_ROLE_KEY`가 없으면 그 자리에서 예외가 터져서 화면 전체가 Next.js 원시 에러("Server Components render" + digest)로 죽는 걸 실제로 겪음. **코드는 이미 고쳐서 푸시함(커밋 `32213ff`)** - 이제는 크래시 대신 "공유 기능이 아직 설정되지 않았어요" 한국어 안내로만 뜬다. 단, **이 코드 수정은 화면이 안 죽게만 할 뿐, 공유 기능 자체가 실제로 되게 하려면 Bright Data 때와 똑같이 맥북 `.env.local`에 `SUPABASE_SERVICE_ROLE_KEY`를 추가해야 함** (Supabase 대시보드 → Project Settings → API → service_role 키에서 확인 가능, `SETUP_MACOS_SELFHOST.md` 107번 줄에도 문서화돼 있었음). 맥북 Claude 세션이 이어서: 사용자에게 공유 시도해보라고 안내 → 여전히 "공유 기능이 아직 설정되지 않았어요"가 뜨면 이 키가 없는 게 확정이니 Bright Data 때와 같은 절차(값 받아서 `.env.local`에 추가 → `pm2 restart hion`)로 처리할 것.
+## -2. 오늘(2026-11-12) 한 일 요약
 
-**재질/구조 구분 기능 — 빌드 진행 중(jarvis PC, 이 커밋 이후 push될 예정).** 쿠팡 실데이터 조사 후보 중 사용자 상품과 재질·작동 방식이 다른 것(예: 극세사 발매트 조사에 규조토 발매트가 섞임)을 배지로 구분해주는 기능을 `/build` 체계로 진행 중. 설계: `CoupangResearchPanel`에 "내 상품 재질(선택)" 입력란 → 시드 키워드 사전으로 1차 판정(비용 0) → 애매한 것만 Gemini 배치 호출로 "AI 추정" 배지 보완. 이 섹션 아래에 진행 상황이 이어서 갱신될 것 - 만약 이 문단이 그대로 남아있고 아래에 완료 보고가 없다면, jarvis PC 세션이 중간에 끊긴 것이니 git log로 어디까지 커밋됐는지 먼저 확인할 것.
+**1) Bright Data 환경변수 누락 — 해결 완료.** 맥북 `.env.local`에 `BRIGHTDATA_API_KEY`/`BRIGHTDATA_UNLOCKER_ZONE` 추가 + `pm2 restart hion` 완료, 사용자가 실제 화면에서 "조사하기"로 쿠팡 후보가 뜨는 것까지 확인함(스크린샷 확인). 아래 "-1"의 "확인 못함" 중 "실제 Bright Data 호출" 항목은 확인 완료로 처리.
+
+**2) 업무수첩 공유 크래시 수정 (커밋 `32213ff`).** `setNoteShare`가 `SUPABASE_SERVICE_ROLE_KEY` 누락 시 `createAdminClient()`에서 던지는 예외를 안 잡고 있어서, 공유 권한을 지정할 때마다 화면 전체가 Next.js 원시 에러("Server Components render" + digest)로 죽는 걸 사용자가 실제로 겪음. try/catch로 감싸서 "공유 기능이 아직 설정되지 않았어요" 한국어 안내로 대체 — **단, 이건 화면이 안 죽게만 할 뿐 공유 기능 자체가 되게 하려면 위 "-3"의 1번 작업이 필요함.**
+
+**3) 소싱 쿠팡 조사에 재질/방식 구분 배지 추가 (커밋 `92d110a`).** `/build` 체계(planner→architect→developer→reviewer/qa)로 진행, 완료해서 push까지 함.
+- 신규: `lib/materialKeywords.ts`(욕실매트류 재질 키워드 시드 사전 - 범용 아님, 이 카테고리 전용으로 작게 시작), `lib/materialClassify.ts`(`classifyByDictionary` 순수 함수 + `classifyMaterialMismatch` Gemini 배치 호출, 8초 타임아웃, 절대 throw 안 함).
+- 수정: `app/dashboard/sourcing/list/researchActions.ts`(`researchCoupangComparisons`에 `userMaterial?` 파라미터 추가, 비우면 기존과 100% 동일 동작), `components/CoupangResearchPanel.tsx`("내 상품 재질(선택)" 입력란 + 후보별 배지).
+- 판정 3단계: ①제목에 사용자 입력 재질이 그대로 있으면 매칭(배지 없음) ②시드 사전에 있는 다른 재질 키워드면 "재질 다름" 배지(결정적, 비용 0) ③둘 다 아닌 애매한 것만 모아 한 번의 Gemini 배치 호출로 "AI 추정" 배지.
+- **QA 라운드에서 찾아서 고친 문제**: 초기 사전에 "미끄럼방지/패브릭/고무"처럼 재질이 아닌 범용 기능어가 섞여 있어서, 진짜 극세사 경쟁상품인데도 "재질 다름"(확정, 빨간색) 배지가 잘못 붙을 위험이 있었음 — 해당 단어들을 사전에서 제거해서 고침.
+- **알려진 한계(배포는 했지만 손 안 댐 - 경미)**: AI 호출이 꺼져있거나 실패해도 에러 문구가 안 뜨는 건 의도된 설계인데, 그 결과 "AI가 다 같은 재질이라 판단했다"와 "AI 호출 자체가 안 됐다"를 화면만 보고 구분할 방법이 없음. 필요해지면 "AI 보완 N건 확인함" 같은 작은 상태 표시를 추가하는 걸 다음 후보로 남겨둠.
+- **확인함(이 PC)**: tsc 전체 통과, `classifyByDictionary`/`classifyMaterialMismatch`/`researchCoupangComparisons` 전부 스텁/모킹으로 단위·통합 테스트, reviewer(치명/중요 문제 없음)·QA(성공기준 5개 전부 PASS) 교차검증 통과.
+- **확인 못함**: 실제 Gemini 호출 품질(진짜로 "규조토 vs 극세사"를 잘 구분하는지), 실제 브라우저 레이아웃(입력란 위치, 배지 줄바꿈 등) — 위 "-3" 2번 참고.
 
 ## -1. 오늘(2026-11-11) 한 일 — 소싱 리스트: 쿠팡 실데이터 조사 + 마진 역산
 
