@@ -2,22 +2,13 @@
 
 마지막 갱신: 2026-11-12 (jarvis PC). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
 
-## -2. 지금 바로 할 일 (2026-11-12) — 맥북에 Bright Data 환경변수 누락
+## -2. 지금 바로 할 일 (2026-11-12)
 
-아래 "-1" 기능(쿠팡 실데이터 조사)이 운영(hion.cc)에서 작동 안 함: "조사하기" 누르면 `BRIGHTDATA_API_KEY 환경변수가 설정 안 되어있어요` 에러. **코드 문제 아님** — 맥북 `~/hion/.env.local`에 `BRIGHTDATA_API_KEY`/`BRIGHTDATA_UNLOCKER_ZONE`이 원래부터 없었음(`SETUP_MACOS_SELFHOST.md`엔 필수로 문서화돼 있는데 실제 파일엔 빠져 있었음). 트렌드 탭의 AI 추천 기능도 같은 env var를 쓰므로 거기도 영향 있을 수 있음.
+**Bright Data 환경변수 — 해결됨.** 맥북 `.env.local`에 `BRIGHTDATA_API_KEY`/`BRIGHTDATA_UNLOCKER_ZONE` 추가 + `pm2 restart hion` 완료, 사용자가 실제 화면에서 "조사하기"로 쿠팡 후보가 뜨는 것까지 확인함(스크린샷 확인). 아래 "-1"의 "확인 못함" 중 "실제 Bright Data 호출" 항목은 확인 완료로 처리.
 
-**이 세션(맥북 Claude Code)이 할 일**: 사용자가 Bright Data 새 API 토큰 값을 채팅으로 알려주면(기존 토큰은 Bright Data 계정에서 못 찾아서 새로 발급받기로 함), 그 값을 그대로 받아서:
-1. `~/hion/.env.local` 맨 아래에 추가 (Edit/Write 도구로 직접 수정 가능, 이 파일은 git에 없어서 커밋 걱정 없음):
-   ```
-   BRIGHTDATA_API_KEY=<사용자가 알려준 값>
-   BRIGHTDATA_UNLOCKER_ZONE=<사용자가 알려준 zone 이름>
-   ```
-   (zone 이름은 비밀값 아님 — Bright Data 콘솔 Proxies & Scraping Infrastructure 목록에 그대로 보임)
-2. `pm2 restart hion` 실행
-3. 사용자에게 hion.cc 소싱 리스트 > 비교 상품군 > "조사하기"로 재확인 요청
-4. 확인되면 이 섹션(-2) 삭제하고 아래 "-1"의 "확인 못함" 줄에서 Bright Data 호출 관련 항목을 "확인함"으로 옮길 것
+**새로 발견한 비슷한 문제 — `SUPABASE_SERVICE_ROLE_KEY`도 맥북에 없을 가능성 높음.** 업무수첩(노트) 공유 다이얼로그에서 다른 사람에게 "보기/편집" 권한을 줄 때 `setNoteShare`(`app/dashboard/notes/actions.ts`)가 `createAdminClient()`(`lib/supabase/admin.ts`)를 쓰는데, 여기 필요한 `SUPABASE_SERVICE_ROLE_KEY`가 없으면 그 자리에서 예외가 터져서 화면 전체가 Next.js 원시 에러("Server Components render" + digest)로 죽는 걸 실제로 겪음. **코드는 이미 고쳐서 푸시함(커밋 `32213ff`)** - 이제는 크래시 대신 "공유 기능이 아직 설정되지 않았어요" 한국어 안내로만 뜬다. 단, **이 코드 수정은 화면이 안 죽게만 할 뿐, 공유 기능 자체가 실제로 되게 하려면 Bright Data 때와 똑같이 맥북 `.env.local`에 `SUPABASE_SERVICE_ROLE_KEY`를 추가해야 함** (Supabase 대시보드 → Project Settings → API → service_role 키에서 확인 가능, `SETUP_MACOS_SELFHOST.md` 107번 줄에도 문서화돼 있었음). 맥북 Claude 세션이 이어서: 사용자에게 공유 시도해보라고 안내 → 여전히 "공유 기능이 아직 설정되지 않았어요"가 뜨면 이 키가 없는 게 확정이니 Bright Data 때와 같은 절차(값 받아서 `.env.local`에 추가 → `pm2 restart hion`)로 처리할 것.
 
-(참고: Vercel의 `BRIGHTDATA_API_KEY`도 같은 새 값으로 갱신해두면 나중에 Preview 쓸 때 편함 — 필수 아님, 지금 운영은 맥북뿐.)
+**재질/구조 구분 기능 — 빌드 진행 중(jarvis PC, 이 커밋 이후 push될 예정).** 쿠팡 실데이터 조사 후보 중 사용자 상품과 재질·작동 방식이 다른 것(예: 극세사 발매트 조사에 규조토 발매트가 섞임)을 배지로 구분해주는 기능을 `/build` 체계로 진행 중. 설계: `CoupangResearchPanel`에 "내 상품 재질(선택)" 입력란 → 시드 키워드 사전으로 1차 판정(비용 0) → 애매한 것만 Gemini 배치 호출로 "AI 추정" 배지 보완. 이 섹션 아래에 진행 상황이 이어서 갱신될 것 - 만약 이 문단이 그대로 남아있고 아래에 완료 보고가 없다면, jarvis PC 세션이 중간에 끊긴 것이니 git log로 어디까지 커밋됐는지 먼저 확인할 것.
 
 ## -1. 오늘(2026-11-11) 한 일 — 소싱 리스트: 쿠팡 실데이터 조사 + 마진 역산
 
