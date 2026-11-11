@@ -1,6 +1,23 @@
 # 인수인계 (HANDOFF) — 다른 PC에서 바로 이어서 작업하기
 
-마지막 갱신: 2026-11-11 (jarvis PC). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+마지막 갱신: 2026-11-12 (jarvis PC). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+
+## -2. 지금 바로 할 일 (2026-11-12) — 맥북에 Bright Data 환경변수 누락
+
+아래 "-1" 기능(쿠팡 실데이터 조사)이 운영(hion.cc)에서 작동 안 함: "조사하기" 누르면 `BRIGHTDATA_API_KEY 환경변수가 설정 안 되어있어요` 에러. **코드 문제 아님** — 맥북 `~/hion/.env.local`에 `BRIGHTDATA_API_KEY`/`BRIGHTDATA_UNLOCKER_ZONE`이 원래부터 없었음(`SETUP_MACOS_SELFHOST.md`엔 필수로 문서화돼 있는데 실제 파일엔 빠져 있었음). 트렌드 탭의 AI 추천 기능도 같은 env var를 쓰므로 거기도 영향 있을 수 있음.
+
+**이 세션(맥북 Claude Code)이 할 일**: 사용자가 Bright Data 새 API 토큰 값을 채팅으로 알려주면(기존 토큰은 Bright Data 계정에서 못 찾아서 새로 발급받기로 함), 그 값을 그대로 받아서:
+1. `~/hion/.env.local` 맨 아래에 추가 (Edit/Write 도구로 직접 수정 가능, 이 파일은 git에 없어서 커밋 걱정 없음):
+   ```
+   BRIGHTDATA_API_KEY=<사용자가 알려준 값>
+   BRIGHTDATA_UNLOCKER_ZONE=<사용자가 알려준 zone 이름>
+   ```
+   (zone 이름은 비밀값 아님 — Bright Data 콘솔 Proxies & Scraping Infrastructure 목록에 그대로 보임)
+2. `pm2 restart hion` 실행
+3. 사용자에게 hion.cc 소싱 리스트 > 비교 상품군 > "조사하기"로 재확인 요청
+4. 확인되면 이 섹션(-2) 삭제하고 아래 "-1"의 "확인 못함" 줄에서 Bright Data 호출 관련 항목을 "확인함"으로 옮길 것
+
+(참고: Vercel의 `BRIGHTDATA_API_KEY`도 같은 새 값으로 갱신해두면 나중에 Preview 쓸 때 편함 — 필수 아님, 지금 운영은 맥북뿐.)
 
 ## -1. 오늘(2026-11-11) 한 일 — 소싱 리스트: 쿠팡 실데이터 조사 + 마진 역산
 
