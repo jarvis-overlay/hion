@@ -29,6 +29,19 @@ export default async function NotificationsPage({
     subscriptions = fallback.data as typeof subscriptions;
   }
 
+  // 알림 받을 이메일 선택 목록(접속 허용 계정). 못 읽으면 내 이메일만 쓴다.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const loginEmail = user?.email?.toLowerCase() ?? '';
+  let allowedEmails: string[] = [];
+  try {
+    const { data: allowed } = await supabase.from('allowed_users').select('email');
+    allowedEmails = (allowed ?? []).map((r: any) => String(r.email).toLowerCase()).sort();
+  } catch {
+    allowedEmails = [];
+  }
+
   return (
     <div>
       <h1 className="font-display text-2xl font-bold mb-1">알림 설정</h1>
@@ -44,7 +57,11 @@ export default async function NotificationsPage({
       )}
 
       <div className="grid gap-5">
-        <PushSubscribeForm subscriptions={subscriptions || []} />
+        <PushSubscribeForm
+          subscriptions={subscriptions || []}
+          loginEmail={loginEmail}
+          allowedEmails={allowedEmails}
+        />
         <KakaoConnectForm recipients={recipients || []} />
       </div>
     </div>

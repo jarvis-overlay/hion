@@ -5,6 +5,7 @@ import {
   deletePushSubscription,
   savePushSubscription,
   sendTestPushNotification,
+  updatePushOwner,
 } from '@/app/dashboard/notifications/actions';
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -16,10 +17,18 @@ function urlBase64ToUint8Array(base64String: string) {
 
 export default function PushSubscribeForm({
   subscriptions,
+  loginEmail = '',
+  allowedEmails = [],
 }: {
   subscriptions: { id: string; label: string; created_at: string; user_email?: string | null }[];
+  loginEmail?: string;
+  allowedEmails?: string[];
 }) {
   const [label, setLabel] = useState('');
+  // 알림을 받을 이메일(기본은 로그인한 내 이메일). 접속 허용 계정 중에서만 지정할 수 있다.
+  const [ownerEmail, setOwnerEmail] = useState(loginEmail);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editEmail, setEditEmail] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -55,14 +64,14 @@ export default function PushSubscribeForm({
       });
 
       startTransition(async () => {
-        const res = await savePushSubscription(label.trim(), subscription.toJSON() as any);
+        const res = await savePushSubscription(label.trim(), subscription.toJSON() as any, ownerEmail.trim());
         if (!res || !res.ok) {
           setStatus(`⚠️ ${res?.error || '등록하지 못했어요. 잠시 후 다시 시도해주세요.'}`);
           return;
         }
         setStatus(
           res.ownerLinked
-            ? '✅ 이 기기에 등록됐어요. 업무수첩 공유 알림도 이 기기로 와요.'
+            ? `✅ 이 기기에 등록됐어요. ${res.ownerEmail} 앞으로 온 업무수첩 공유 알림이 이 기기로 와요.`
             : '✅ 이 기기에 등록됐어요. (다만 기기 주인 정보는 아직 저장하지 못해서, 업무수첩 공유 알림은 관리자가 DB 설정을 마친 뒤 다시 등록해야 와요.)'
         );
         setLabel('');
@@ -70,6 +79,19 @@ export default function PushSubscribeForm({
     } catch (e: any) {
       setStatus(`⚠️ 등록 실패: ${e?.message || String(e)}`);
     }
+  }
+
+  function handleSaveOwner(id: string) {
+    setStatus(null);
+    startTransition(async () => {
+      const res = await updatePushOwner(id, editEmail.trim());
+      if (!res.ok) {
+        setStatus(`⚠️ ${res.error}`);
+        return;
+      }
+      setEditingId(null);
+      setStatus(`✅ 이 기기의 알림 받을 이메일을 ${res.email}로 바꿨어요.`);
+    });
   }
 
   function handleTest() {
@@ -90,20 +112,41 @@ export default function PushSubscribeForm({
         따로 등록해야 해요. 업무수첩을 공유받으면 로그인한 계정으로 등록된
         기기에만 알림이 가요.
       </p>
-      <form onSubmit={handleSubscribe} className="flex gap-2 mb-5">
-        <input
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          placeholder="이 기기 이름 (예: 사장님 폰)"
-          className="border border-paperLine bg-white px-3 py-2 text-sm flex-1"
-        />
-        <button
-          type="submit"
-          disabled={!label.trim() || isPending}
-          className="btn-primary px-4 py-2 text-sm font-semibold disabled:opacity-50"
-        >
-          이 기기 등록하기
-        </button>
+      <datalist id="push-owner-emails">
+        {allowedEmails.map((em) => (
+          <option key={em} value={em} />
+        ))}
+      </datalist>
+      <form onSubmit={handleSubscribe} className="grid gap-2 mb-5">
+        <div className="flex gap-2">
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="이 기기 이름 (예: 사장님 폰)"
+            className="border border-paperLine bg-white px-3 py-2 text-sm flex-1"
+          />
+          <button
+            type="submit"
+            disabled={!label.trim() || isPending}
+            className="btn-primary px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          >
+            이 기기 등록하기
+          </button>
+        </div>
+        <div className="grid gap-1">
+          <input
+            value={ownerEmail}
+            onChange={(e) => setOwnerEmail(e.target.value)}
+            list="push-owner-emails"
+            type="email"
+            placeholder="알림 받을 이메일 (기본: 내 이메일)"
+            className="border border-paperLine bg-white px-3 py-2 text-sm"
+          />
+          <p className="text-[11px] text-inkSoft">
+            업무수첩 공유 알림은 이 이메일 앞으로 온 것이 이 기기로 와요. 기본은 로그인한 내 이메일이고,
+            접속이 허용된 다른 계정 이메일도 지정할 수 있어요.
+          </p>
+        </div>
       </form>
 
       <div className="grid gap-2 mb-5">
@@ -121,13 +164,53 @@ export default function PushSubscribeForm({
                     : '주인 미지정 - 이 기기에서 "이 기기 등록하기"를 다시 누르면 연결돼요'}
                 </span>
               </span>
-              <button
-                onClick={() => startTransition(() => deletePushSubscription(s.id))}
-                disabled={isPending}
-                className="text-xs text-inkSoft hover:text-red-700"
-              >
-                등록 해제
-              </button>
+              <span className="flex items-center gap-3 shrink-0">
+                {editingId === s.id ? (
+                  <span className="flex items-center gap-1.5">
+                    <input
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                      list="push-owner-emails"
+                      type="email"
+                      placeholder="알림 받을 이메일"
+                      className="border border-paperLine bg-white px-2 py-1 text-xs w-48"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveOwner(s.id)}
+                      disabled={isPending || !editEmail.trim()}
+                      className="text-xs text-accent font-semibold disabled:opacity-50"
+                    >
+                      저장
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      className="text-xs text-inkSoft"
+                    >
+                      취소
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingId(s.id);
+                      setEditEmail(s.user_email || loginEmail);
+                    }}
+                    className="text-xs text-inkSoft hover:text-ink"
+                  >
+                    이메일 변경
+                  </button>
+                )}
+                <button
+                  onClick={() => startTransition(() => deletePushSubscription(s.id))}
+                  disabled={isPending}
+                  className="text-xs text-inkSoft hover:text-red-700"
+                >
+                  등록 해제
+                </button>
+              </span>
             </div>
           ))
         ) : (

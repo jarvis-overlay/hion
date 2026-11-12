@@ -24,15 +24,44 @@ export async function sendTestKakaoNotification() {
 // 사람에게만 보내려면 필요하다. user_email 컬럼/UPDATE 정책이 아직 DB에 없으면
 // (마이그레이션 20261112120000 실행 전) 저장이 실패하는데, 그렇다고 기존 푸시
 // 등록 자체가 안 되면 안 되므로 주인 없이 한 번 더 저장해본다.
+// 알림을 받을 이메일(기기 주인)을 검증한다. 접속이 허용된 계정(allowed_users)만
+// 지정할 수 있다 - 오타나 엉뚱한 주소로 알림이 새는 걸 막는다. 허용 목록을 못 읽으면
+// 안전하게 내 로그인 이메일만 허용한다.
+async function resolveOwnerEmail(
+  supabase: ReturnType<typeof createClient>,
+  loginEmail: string,
+  requested: string | undefined
+): Promise<{ email: string } | { error: string }> {
+  const mine = loginEmail.toLowerCase();
+  const want = (requested ?? '').trim().toLowerCase();
+  if (!want || want === mine) return { email: mine };
+  if (want.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(want)) {
+    return { error: '이메일 형식이 올바르지 않아요.' };
+  }
+  const { data, error } = await supabase.from('allowed_users').select('email');
+  if (error || !data) {
+    console.error('[push] 허용 이메일 목록 조회 실패:', error?.message);
+    return { error: '이메일 목록을 확인하지 못했어요. 잠시 후 다시 시도해주세요.' };
+  }
+  if (!data.some((r: any) => String(r.email).toLowerCase() === want)) {
+    return { error: '이 이메일은 접속이 허용된 계정이 아니에요. 허용된 계정 이메일만 지정할 수 있어요.' };
+  }
+  return { email: want };
+}
+
 export async function savePushSubscription(
   label: string,
-  subscription: { endpoint: string; keys: { p256dh: string; auth: string } }
-): Promise<{ ok: true; ownerLinked: boolean } | { ok: false; error: string }> {
+  subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
+  ownerEmail?: string
+): Promise<{ ok: true; ownerLinked: boolean; ownerEmail: string } | { ok: false; error: string }> {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user?.email) return { ok: false, error: '로그인이 필요해요.' };
+
+  const owner = await resolveOwnerEmail(supabase, user.email, ownerEmail);
+  if ('error' in owner) return { ok: false, error: owner.error };
 
   const base = {
     label,
@@ -43,7 +72,7 @@ export async function savePushSubscription(
 
   const { error } = await supabase
     .from('push_subscriptions')
-    .upsert({ ...base, user_email: user.email.toLowerCase() }, { onConflict: 'endpoint' });
+    .upsert({ ...base, user_email: owner.email }, { onConflict: 'endpoint' });
 
   let ownerLinked = true;
   if (error) {
@@ -59,7 +88,35 @@ export async function savePushSubscription(
   }
 
   revalidatePath('/dashboard/notifications');
-  return { ok: true, ownerLinked };
+  return { ok: true, ownerLinked, ownerEmail: owner.email };
+}
+
+// 이미 등록된 기기의 알림 받을 이메일만 바꾼다(기기를 다시 등록할 필요 없음).
+export async function updatePushOwner(
+  id: string,
+  ownerEmail: string
+): Promise<{ ok: true; email: string } | { ok: false; error: string }> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.email) return { ok: false, error: '로그인이 필요해요.' };
+  if (typeof id !== 'string' || !id) return { ok: false, error: '기기를 찾지 못했어요.' };
+
+  const owner = await resolveOwnerEmail(supabase, user.email, ownerEmail || undefined);
+  if ('error' in owner) return { ok: false, error: owner.error };
+
+  const { data: updated, error } = await supabase
+    .from('push_subscriptions')
+    .update({ user_email: owner.email })
+    .eq('id', id)
+    .select('id');
+  if (error || !updated || updated.length === 0) {
+    console.error('[push] 기기 이메일 변경 실패:', error?.message || '변경된 행 없음');
+    return { ok: false, error: '이메일을 바꾸지 못했어요. 잠시 후 다시 시도해주세요.' };
+  }
+  revalidatePath('/dashboard/notifications');
+  return { ok: true, email: owner.email };
 }
 
 export async function deletePushSubscription(id: string) {
