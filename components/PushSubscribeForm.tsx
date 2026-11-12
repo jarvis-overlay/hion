@@ -5,8 +5,10 @@ import {
   deletePushSubscription,
   savePushSubscription,
   sendTestPushNotification,
-  updatePushOwner,
+  addPushOwner,
+  removePushOwner,
 } from '@/app/dashboard/notifications/actions';
+import { parseOwners } from '@/lib/pushOwners';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -58,10 +60,24 @@ export default function PushSubscribeForm({
         return;
       }
 
-      const subscription = await registration.pushManager.subscribe({
+      const subscribeOptions = {
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-      });
+      };
+      let subscription: PushSubscription;
+      try {
+        subscription = await registration.pushManager.subscribe(subscribeOptions);
+      } catch (err: any) {
+        // 서버 알림 키가 바뀐 뒤에는 이 브라우저에 남은 예전 구독과 키가 달라서 실패한다.
+        // 예전 구독을 해제하고 새 키로 다시 구독한다.
+        if (err?.name === 'InvalidStateError') {
+          const old = await registration.pushManager.getSubscription();
+          if (old) await old.unsubscribe();
+          subscription = await registration.pushManager.subscribe(subscribeOptions);
+        } else {
+          throw err;
+        }
+      }
 
       startTransition(async () => {
         const res = await savePushSubscription(label.trim(), subscription.toJSON() as any, ownerEmail.trim());
@@ -70,7 +86,9 @@ export default function PushSubscribeForm({
           return;
         }
         setStatus(
-          res.ownerLinked
+          res.merged
+            ? `✅ 이 기기는 이미 등록돼 있어서, 이름은 그대로 두고 ${res.ownerEmail}을(를) 알림 받을 이메일에 추가했어요. (지금 받는 이메일: ${res.owners.join(', ')})`
+            : res.ownerLinked
             ? `✅ 이 기기에 등록됐어요. ${res.ownerEmail} 앞으로 온 업무수첩 공유 알림이 이 기기로 와요.`
             : '✅ 이 기기에 등록됐어요. (다만 기기 주인 정보는 아직 저장하지 못해서, 업무수첩 공유 알림은 관리자가 DB 설정을 마친 뒤 다시 등록해야 와요.)'
         );
@@ -81,16 +99,32 @@ export default function PushSubscribeForm({
     }
   }
 
-  function handleSaveOwner(id: string) {
+  function handleAddOwner(id: string) {
     setStatus(null);
     startTransition(async () => {
-      const res = await updatePushOwner(id, editEmail.trim());
+      const res = await addPushOwner(id, editEmail.trim());
       if (!res.ok) {
         setStatus(`⚠️ ${res.error}`);
         return;
       }
       setEditingId(null);
-      setStatus(`✅ 이 기기의 알림 받을 이메일을 ${res.email}로 바꿨어요.`);
+      setStatus(`✅ 이 기기가 ${res.email} 앞으로 온 알림도 받아요.`);
+    });
+  }
+
+  function handleRemoveOwner(id: string, email: string) {
+    setStatus(null);
+    startTransition(async () => {
+      const res = await removePushOwner(id, email);
+      if (!res.ok) {
+        setStatus(`⚠️ ${res.error}`);
+        return;
+      }
+      setStatus(
+        res.deleted
+          ? '✅ 마지막 이메일이라 이 기기 등록을 지웠어요.'
+          : `✅ ${email}을(를) 이 기기에서 뺐어요.`
+      );
     });
   }
 
@@ -145,7 +179,8 @@ export default function PushSubscribeForm({
           <p className="text-[11px] text-inkSoft">
             업무수첩 공유 알림은 이 이메일 앞으로 온 것이 이 기기로 와요. 기본은 로그인한 내 이메일이고,
             다른 사람 이메일도 직접 적을 수 있어요. (업무수첩 공유는 접속이 허용된 계정끼리만 되니, 허용되지 않은
-            이메일로 등록한 기기는 공유 알림은 안 오고 주문 알림 같은 전체 알림만 받아요.)
+            이메일로 등록한 기기는 공유 알림은 안 오고 주문 알림 같은 전체 알림만 받아요.) 이 브라우저는 기기
+            한 대로 취급돼서, 다시 등록하면 기존 줄에 이메일이 추가돼요(내 이메일과 다른 사람 이메일을 같이 받을 수 있어요).
           </p>
         </div>
       </form>
@@ -159,10 +194,30 @@ export default function PushSubscribeForm({
             >
               <span className="min-w-0">
                 {s.label}
-                <span className="block text-[11px] text-inkSoft truncate">
-                  {s.user_email
-                    ? s.user_email
-                    : '주인 미지정 - 이 기기에서 "이 기기 등록하기"를 다시 누르면 연결돼요'}
+                <span className="flex flex-wrap gap-1 mt-0.5">
+                  {parseOwners(s.user_email).length > 0 ? (
+                    parseOwners(s.user_email).map((em) => (
+                      <span
+                        key={em}
+                        className="inline-flex items-center gap-1 rounded-full bg-paper px-2 py-0.5 text-[11px] text-inkSoft"
+                      >
+                        {em}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOwner(s.id, em)}
+                          disabled={isPending}
+                          title="이 이메일을 이 기기에서 빼기"
+                          className="hover:text-red-700"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[11px] text-inkSoft">
+                      주인 미지정 - 이 기기에서 "이 기기 등록하기"를 다시 누르면 연결돼요
+                    </span>
+                  )}
                 </span>
               </span>
               <span className="flex items-center gap-3 shrink-0">
@@ -178,11 +233,11 @@ export default function PushSubscribeForm({
                     />
                     <button
                       type="button"
-                      onClick={() => handleSaveOwner(s.id)}
+                      onClick={() => handleAddOwner(s.id)}
                       disabled={isPending || !editEmail.trim()}
                       className="text-xs text-accent font-semibold disabled:opacity-50"
                     >
-                      저장
+                      추가
                     </button>
                     <button
                       type="button"
@@ -197,11 +252,11 @@ export default function PushSubscribeForm({
                     type="button"
                     onClick={() => {
                       setEditingId(s.id);
-                      setEditEmail(s.user_email || loginEmail);
+                      setEditEmail('');
                     }}
                     className="text-xs text-inkSoft hover:text-ink"
                   >
-                    이메일 변경
+                    + 이메일 추가
                   </button>
                 )}
                 <button

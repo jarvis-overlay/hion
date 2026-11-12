@@ -1,4 +1,5 @@
 import webpush from 'web-push';
+import { hasOwner } from '@/lib/pushOwners';
 
 let configured = false;
 function ensureConfigured() {
@@ -81,14 +82,18 @@ export async function sendPushToEmail(
   payload: PushPayload
 ): Promise<PushResult & { noDevice: boolean; queryError: string | null }> {
   ensureConfigured();
-  const { data: subs, error } = await supabase
+  const target = email.trim().toLowerCase();
+  // 기기 한 대에 이메일이 쉼표로 여러 개 저장될 수 있어서(lib/pushOwners.ts), 포함 검색 후
+  // 정확히 그 이메일이 들어 있는 기기만 남긴다(_ % 같은 와일드카드로 더 가져온 것 걸러냄).
+  const { data: found, error } = await supabase
     .from('push_subscriptions')
     .select('*')
-    .eq('user_email', email.toLowerCase());
+    .ilike('user_email', `%${target}%`);
   if (error) {
     return { sent: 0, failed: 0, details: [], noDevice: false, queryError: error.message };
   }
-  if (!subs || subs.length === 0) {
+  const subs = (found || []).filter((s: any) => hasOwner(s.user_email, target));
+  if (subs.length === 0) {
     return { sent: 0, failed: 0, details: [], noDevice: true, queryError: null };
   }
   const result = await sendToSubscriptions(supabase, subs, payload);
