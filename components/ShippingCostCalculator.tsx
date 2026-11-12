@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   cbmFromDimensions,
   computeLclFreightKrw,
@@ -34,6 +34,32 @@ export interface ShippingCalcState {
   height: string;
   quantity: string;
   extraFees: { label: string; amount: string; basis: FeeBasis }[];
+}
+
+// 부가서비스 "기본값" - 자주 쓰는 항목 조합(검수·포장·서류비 등)을 이 브라우저에
+// 저장해두고, 새 상품에서 계산기를 열면 자동으로 채워준다. 저장 위치는 브라우저
+// localStorage라서 PC/브라우저마다 따로다(서버 저장 아님). 접근이 막혀 있으면
+// (프라이빗 모드 등) 기능만 조용히 빠진다.
+const DEFAULTS_KEY = 'hion.shippingExtraFeeDefaults.v1';
+type DefaultFee = { label: string; amount: string; basis: FeeBasis };
+
+function loadFeeDefaults(): DefaultFee[] {
+  try {
+    const raw = localStorage.getItem(DEFAULTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .slice(0, 30)
+      .map((r: any) => ({
+        label: typeof r?.label === 'string' ? r.label.slice(0, 60) : '',
+        amount: typeof r?.amount === 'string' ? r.amount.slice(0, 20) : '',
+        basis: (r?.basis === 'perUnit' ? 'perUnit' : 'total') as FeeBasis,
+      }))
+      .filter((r) => r.label || r.amount);
+  } catch {
+    return [];
+  }
 }
 
 // LCL(해상 혼적) 배송비를 CBM 기준으로 계산해서, 그 결과를 "배송비" 입력칸에
@@ -85,6 +111,65 @@ export default function ShippingCostCalculator({
       ? initial.extraFees.map((f) => ({ id: nextRowId(), ...f }))
       : [{ id: nextRowId(), label: '', amount: '', basis: 'total' }]
   );
+
+  const [defaultsCount, setDefaultsCount] = useState(0);
+  const [defaultsMsg, setDefaultsMsg] = useState('');
+  const defaultsApplied = useRef(false);
+
+  // 저장된 기본값 개수 확인 + 새 상품(입력이 하나도 없는 상태)에서 계산기를
+  // 열었을 때 한 번만 자동으로 채운다. 이미 입력/저장된 값이 있으면 건드리지 않는다.
+  // (계산기가 접혀 있을 땐 채우지 않는다 - 폼에 숨은 값이 따라 저장되는 걸 막기 위해)
+  useEffect(() => {
+    if (!open || defaultsApplied.current) return;
+    defaultsApplied.current = true;
+    const saved = loadFeeDefaults();
+    setDefaultsCount(saved.length);
+    if (hasInitial || saved.length === 0) return;
+    setExtraFees((rows) =>
+      rows.every((r) => !r.label && !r.amount)
+        ? saved.map((f) => ({ id: nextRowId(), ...f }))
+        : rows
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  function saveAsDefaults() {
+    const rows = extraFees
+      .filter((r) => r.label.trim() || r.amount)
+      .map((r) => ({ label: r.label.trim(), amount: r.amount, basis: r.basis }));
+    try {
+      if (rows.length === 0) {
+        localStorage.removeItem(DEFAULTS_KEY);
+        setDefaultsCount(0);
+        setDefaultsMsg('입력된 항목이 없어서 기본값을 비웠어요.');
+      } else {
+        localStorage.setItem(DEFAULTS_KEY, JSON.stringify(rows));
+        setDefaultsCount(rows.length);
+        setDefaultsMsg(`기본값 ${rows.length}개를 저장했어요. 새 상품에서 계산기를 열면 자동으로 채워져요.`);
+      }
+    } catch {
+      setDefaultsMsg('이 브라우저에서는 기본값을 저장할 수 없어요 (저장 공간 접근이 막혀 있어요).');
+    }
+  }
+  function loadDefaults() {
+    const saved = loadFeeDefaults();
+    setDefaultsCount(saved.length);
+    if (saved.length === 0) {
+      setDefaultsMsg('저장된 기본값이 없어요.');
+      return;
+    }
+    setExtraFees(saved.map((f) => ({ id: nextRowId(), ...f })));
+    setDefaultsMsg(`기본값 ${saved.length}개를 불러왔어요 (지금 입력한 항목은 교체됐어요).`);
+  }
+  function clearDefaults() {
+    try {
+      localStorage.removeItem(DEFAULTS_KEY);
+      setDefaultsCount(0);
+      setDefaultsMsg('저장된 기본값을 지웠어요.');
+    } catch {
+      setDefaultsMsg('기본값을 지우지 못했어요.');
+    }
+  }
 
   function addFeeRow() {
     setExtraFees((rows) => [...rows, { id: nextRowId(), label: '', amount: '', basis: 'total' }]);
@@ -293,6 +378,23 @@ export default function ShippingCostCalculator({
             </button>
           </div>
         ))}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+          <button type="button" onClick={saveAsDefaults} className="text-accent underline">
+            지금 목록을 기본값으로 저장
+          </button>
+          {defaultsCount > 0 && (
+            <>
+              <button type="button" onClick={loadDefaults} className="text-inkSoft underline">
+                기본값 불러오기 ({defaultsCount}개)
+              </button>
+              <button type="button" onClick={clearDefaults} className="text-inkSoft hover:text-red-700 underline">
+                기본값 지우기
+              </button>
+            </>
+          )}
+        </div>
+        {defaultsMsg && <p className="text-[11px] text-inkSoft">{defaultsMsg}</p>}
       </div>
 
       <div className="border-t border-paperLine pt-2 grid gap-1">
