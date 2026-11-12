@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { analyzeCoupangResults } from '@/lib/coupangMarket';
 import { colorMismatch, sizeMismatch } from '@/lib/candidateFilter';
+import { scoreCandidate, type DimState, type ScoreResult } from '@/lib/candidateScore';
 import {
   researchCoupangComparisons,
   inspectCoupangCandidate,
@@ -36,7 +37,14 @@ function parsePrice(p: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-type SortMode = 'default' | 'review' | 'priceAsc' | 'priceDesc';
+type SortMode = 'default' | 'accuracy' | 'review' | 'priceAsc' | 'priceDesc';
+
+const DIM_MARK: Record<DimState, string> = { match: '✓', mismatch: '✗', unknown: '?' };
+const DIM_CLS: Record<DimState, string> = {
+  match: 'text-profit',
+  mismatch: 'text-warn',
+  unknown: 'text-inkSoft',
+};
 
 function parseCount(s: string | null): number | null {
   if (!s) return null;
@@ -79,7 +87,7 @@ export default function CoupangResearchPanel({
   const [userColor, setUserColor] = useState('');
   // 조사하기를 누른 시점의 사이즈/색상 - 조사 후 입력칸을 고쳐도 이미 받은
   // 후보의 배지가 슬쩍 바뀌지 않게 고정해둔다(다시 조사해야 반영).
-  const [applied, setApplied] = useState({ material: '', size: '', color: '' });
+  const [applied, setApplied] = useState({ keyword: '', material: '', size: '', color: '' });
   const [details, setDetails] = useState<Map<string, DetailState>>(new Map());
   const [inspecting, setInspecting] = useState(false);
   const [inspectProgress, setInspectProgress] = useState({ done: 0, total: 0 });
@@ -156,6 +164,38 @@ export default function CoupangResearchPanel({
         else if (det.colorStatus === 'match') color = null;
       }
       map.set(key, { material, size, color });
+    });
+    return map;
+  }, [result, applied, details]);
+
+  // 후보별 정확도 점수(0~100). 상품명 + 사전/AI 재질 판정 + 상품 페이지를 읽은 결과를 합친다.
+  const scores = useMemo(() => {
+    const map = new Map<string, ScoreResult>();
+    if (!result) return map;
+    result.candidates.forEach((c, i) => {
+      const key = candidateKey(c, i);
+      const d = details.get(key);
+      map.set(
+        key,
+        scoreCandidate({
+          title: c.name,
+          keyword: applied.keyword,
+          conditions: { material: applied.material, size: applied.size, color: applied.color },
+          materialBadge: c.materialBadge
+            ? c.materialBadge.type === 'dictionary_different'
+              ? 'dict'
+              : 'ai'
+            : null,
+          detail:
+            d?.status === 'done'
+              ? {
+                  materialVerdict: d.detail.materialVerdict,
+                  sizeStatus: d.detail.sizeStatus,
+                  colorStatus: d.detail.colorStatus,
+                }
+              : null,
+        })
+      );
     });
     return map;
   }, [result, applied, details]);
@@ -248,7 +288,14 @@ export default function CoupangResearchPanel({
         setResearchError(res.error);
         return;
       }
-      setApplied({ material: userMaterial.trim(), size: userSize.trim(), color: userColor.trim() });
+      setApplied({
+        keyword: keyword.trim(),
+        material: userMaterial.trim(),
+        size: userSize.trim(),
+        color: userColor.trim(),
+      });
+      // 조건을 적었으면 "내 상품과 가까운 순"으로 먼저 보여준다
+      setSortMode(userMaterial.trim() || userSize.trim() || userColor.trim() ? 'accuracy' : 'default');
       setResult(res);
       setPriceRange('');
       setPriceRangeTouched(false);
@@ -265,7 +312,12 @@ export default function CoupangResearchPanel({
     if (!result || inspecting) return;
     const targets = visibleKeys
       .filter((k) => details.get(k)?.status !== 'done')
-      .sort((a, b) => Number(selected.has(b)) - Number(selected.has(a)))
+      // 체크한 것 먼저, 그다음 정확도 점수가 높은 것부터(위쪽 후보부터 확인해야 의미가 큼)
+      .sort(
+        (a, b) =>
+          Number(selected.has(b)) - Number(selected.has(a)) ||
+          (scores.get(b)?.score ?? 0) - (scores.get(a)?.score ?? 0)
+      )
       .slice(0, INSPECT_MAX);
     if (targets.length === 0) return;
 
@@ -549,6 +601,7 @@ export default function CoupangResearchPanel({
             {(
               [
                 ['default', '쿠팡 순서'],
+                ['accuracy', '정확도 높은 순'],
                 ['review', '리뷰 많은 순'],
                 ['priceAsc', '가격 낮은 순'],
                 ['priceDesc', '가격 높은 순'],
@@ -572,6 +625,11 @@ export default function CoupangResearchPanel({
               .map((c, i) => ({ c, key: candidateKey(c, i) }))
               .filter(({ key }) => !removed.has(key))
               .sort((x, y) => {
+                if (sortMode === 'accuracy') {
+                  const d = (scores.get(y.key)?.score ?? 0) - (scores.get(x.key)?.score ?? 0);
+                  // 점수가 같으면 리뷰 많은 쪽이 위
+                  return d || compareNullLast(parseCount(x.c.reviewCount), parseCount(y.c.reviewCount), -1);
+                }
                 if (sortMode === 'review') return compareNullLast(parseCount(x.c.reviewCount), parseCount(y.c.reviewCount), -1);
                 if (sortMode === 'priceAsc') return compareNullLast(parsePrice(x.c.price), parsePrice(y.c.price), 1);
                 if (sortMode === 'priceDesc') return compareNullLast(parsePrice(x.c.price), parsePrice(y.c.price), -1);
@@ -608,6 +666,36 @@ export default function CoupangResearchPanel({
                         {c.price ? `${c.price}원` : '가격 미상'}
                         {c.reviewCount ? ` · 리뷰 ${c.reviewCount}개` : ''}
                       </p>
+                      {(() => {
+                        const s = scores.get(key);
+                        if (!s) return null;
+                        const dims: [string, DimState | null][] = [
+                          ['재질', s.material],
+                          ['사이즈', s.size],
+                          ['색상', s.color],
+                        ];
+                        const shown = dims.filter((x): x is [string, DimState] => x[1] != null);
+                        return (
+                          <p className="text-[11px] flex flex-wrap items-center gap-x-2">
+                            <span
+                              className={`font-semibold ${
+                                s.score >= 70 ? 'text-profit' : s.score >= 40 ? 'text-ink' : 'text-warn'
+                              }`}
+                            >
+                              정확도 {s.score}점
+                            </span>
+                            {shown.map(([label, st]) => (
+                              <span key={label} className={DIM_CLS[st]}>
+                                {label} {DIM_MARK[st]}
+                                {label === '재질' && s.aiGuess ? '(AI추정)' : ''}
+                              </span>
+                            ))}
+                            {shown.some(([, st]) => st === 'unknown') && !s.inspected && (
+                              <span className="text-inkSoft">· ? = 상품명만으론 몰라요</span>
+                            )}
+                          </p>
+                        );
+                      })()}
                       <div className="flex flex-wrap gap-1 mt-0.5 empty:hidden">
                         {/* 재질 배지는 일괄 제거 버튼과 같은 판정(mismatches)을 그려서, 배지와 버튼 숫자가 어긋나지 않게 한다 */}
                         {mismatches.get(key)?.material === 'dict' && c.materialBadge?.type === 'dictionary_different' && (

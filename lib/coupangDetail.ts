@@ -84,7 +84,11 @@ export async function extractProductFacts(
     if (pageText.trim().length < 30) return { error: '상품 페이지에서 읽을 내용이 없었어요.' };
 
     const materialLine = userMaterial
-      ? `내 상품의 재질/방식: ${userMaterial}\n이 상품이 내 상품과 같은 재질/방식(직접 경쟁 상품)인지 materialVerdict로 판정하세요(same/different/unknown). 페이지에 재질 정보가 없으면 unknown.`
+      ? `내 상품의 재질/방식: ${userMaterial}\n이 상품이 내 상품과 같은 재질/방식(직접 경쟁 상품)인지 materialVerdict로 판정하세요(same/different/unknown). 페이지에 재질 정보가 없으면 unknown.
+판정 주의:
+- 섬유 성분 이름(폴리에스터/폴리에스테르/나일론/아크릴 등)은 극세사·마이크로화이바·샤기·기모 같은 제품 방식과 겹치는 경우가 많습니다. 성분만 적혀 있고 제품 방식이 불분명하면 different가 아니라 unknown으로 답하세요.
+- different는 페이지가 내 상품과 확실히 다른 방식임을 보여줄 때만 쓰세요 (예: 규조토, 메모리폼, PVC/실리콘/고무, 대나무, 코르크, 퍼즐매트 등 흡수·구조 방식 자체가 다른 경우).
+- same은 페이지가 내 재질/방식과 같거나 동의어(예: 극세사=마이크로화이바)임을 보여줄 때만 쓰세요.`
       : '재질 비교는 필요 없으니 materialVerdict는 "unknown"으로 두세요.';
 
     const prompt = `아래는 쿠팡 상품 페이지에서 뽑은 텍스트입니다. 페이지에 실제로 적힌 내용만 근거로 답하세요. 적혀 있지 않으면 null 또는 빈 배열로 두고, 절대 추측하지 마세요.
