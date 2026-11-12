@@ -89,7 +89,12 @@ async function unlockerMarkdown(
         }
       }
       if (attempt === retries) {
-        throw new Error(`Bright Data 요청 실패 (HTTP ${res.status})`);
+        // HTTP 200인데 여기까지 왔다면 응답이 캡차/차단 페이지이거나 내용이 비어 있다는 뜻
+        throw new Error(
+          res.ok
+            ? '쿠팡이 페이지를 막았거나 내용이 비어 있어요 (캡차 가능성). 잠시 뒤 다시 눌러보세요'
+            : `Bright Data 요청 실패 (HTTP ${res.status})`
+        );
       }
     } catch (e: any) {
       if (attempt === retries) {

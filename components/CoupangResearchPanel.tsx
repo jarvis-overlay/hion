@@ -36,6 +36,22 @@ function parsePrice(p: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+type SortMode = 'default' | 'review' | 'priceAsc' | 'priceDesc';
+
+function parseCount(s: string | null): number | null {
+  if (!s) return null;
+  const n = Number(String(s).replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+// 값이 없는 후보(가격 미상 등)는 어느 방향이든 항상 맨 아래로 보낸다.
+function compareNullLast(a: number | null, b: number | null, dir: 1 | -1): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return (a - b) * dir;
+}
+
 // 선택된 후보들의 가격을 보고 "price_range" 기본값을 만든다. 쿠팡
 // 가격대 표기(components/SourcingList.tsx의 PLATFORM_LABEL 옆에 쓰는
 // 문구)와 같은 형식("12,000~34,000원" / "12,000원")으로 맞춤.
@@ -77,6 +93,7 @@ export default function CoupangResearchPanel({
   const [result, setResult] = useState<CoupangResearchResult | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [sortMode, setSortMode] = useState<SortMode>('default');
   const [priceRange, setPriceRange] = useState('');
   const [priceRangeTouched, setPriceRangeTouched] = useState(false);
   const [marketSize, setMarketSize] = useState<'high' | 'mid' | 'low' | ''>('');
@@ -527,10 +544,39 @@ export default function CoupangResearchPanel({
             </div>
           )}
 
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="text-inkSoft">정렬</span>
+            {(
+              [
+                ['default', '쿠팡 순서'],
+                ['review', '리뷰 많은 순'],
+                ['priceAsc', '가격 낮은 순'],
+                ['priceDesc', '가격 높은 순'],
+              ] as [SortMode, string][]
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setSortMode(mode)}
+                className={`rounded-full px-2.5 py-1 font-semibold ${
+                  sortMode === mode ? 'bg-ink text-white' : 'bg-paper text-ink hover:text-accent'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <div className="grid gap-1.5">
             {result.candidates
               .map((c, i) => ({ c, key: candidateKey(c, i) }))
               .filter(({ key }) => !removed.has(key))
+              .sort((x, y) => {
+                if (sortMode === 'review') return compareNullLast(parseCount(x.c.reviewCount), parseCount(y.c.reviewCount), -1);
+                if (sortMode === 'priceAsc') return compareNullLast(parsePrice(x.c.price), parsePrice(y.c.price), 1);
+                if (sortMode === 'priceDesc') return compareNullLast(parsePrice(x.c.price), parsePrice(y.c.price), -1);
+                return 0;
+              })
               .map(({ c, key }) => {
                 const checked = selected.has(key);
                 return (
