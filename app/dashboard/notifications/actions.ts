@@ -24,11 +24,10 @@ export async function sendTestKakaoNotification() {
 // 사람에게만 보내려면 필요하다. user_email 컬럼/UPDATE 정책이 아직 DB에 없으면
 // (마이그레이션 20261112120000 실행 전) 저장이 실패하는데, 그렇다고 기존 푸시
 // 등록 자체가 안 되면 안 되므로 주인 없이 한 번 더 저장해본다.
-// 알림을 받을 이메일(기기 주인)을 검증한다. 접속이 허용된 계정(allowed_users)만
-// 지정할 수 있다 - 오타나 엉뚱한 주소로 알림이 새는 걸 막는다. 허용 목록을 못 읽으면
-// 안전하게 내 로그인 이메일만 허용한다.
+// 알림을 받을 이메일(기기 주인)을 정한다. 비워두면 내 로그인 이메일, 적으면 그 이메일
+// (다른 사람 이메일도 가능 - 허용 계정이 아니어도 됨, 형식만 확인한다).
 async function resolveOwnerEmail(
-  supabase: ReturnType<typeof createClient>,
+  _supabase: ReturnType<typeof createClient>,
   loginEmail: string,
   requested: string | undefined
 ): Promise<{ email: string } | { error: string }> {
@@ -37,14 +36,6 @@ async function resolveOwnerEmail(
   if (!want || want === mine) return { email: mine };
   if (want.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(want)) {
     return { error: '이메일 형식이 올바르지 않아요.' };
-  }
-  const { data, error } = await supabase.from('allowed_users').select('email');
-  if (error || !data) {
-    console.error('[push] 허용 이메일 목록 조회 실패:', error?.message);
-    return { error: '이메일 목록을 확인하지 못했어요. 잠시 후 다시 시도해주세요.' };
-  }
-  if (!data.some((r: any) => String(r.email).toLowerCase() === want)) {
-    return { error: '이 이메일은 접속이 허용된 계정이 아니에요. 허용된 계정 이메일만 지정할 수 있어요.' };
   }
   return { email: want };
 }
