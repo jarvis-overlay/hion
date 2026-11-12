@@ -27,6 +27,20 @@ function sizeLabel(p: SizePair): string {
   return `${p[0]}x${p[1]}`;
 }
 
+export type MatchStatus = 'match' | 'mismatch' | 'unknown';
+
+// 옵션/상품정보에서 뽑은 사이즈 문구(여러 개)가 내가 원하는 사이즈를 포함하는지.
+// 둘 중 하나라도 해석이 안 되면 unknown.
+export function sizeStatus(userSize: string, text: string): MatchStatus {
+  // mm 표기가 섞이면 cm와 단위가 달라 비교가 틀어지므로 판정하지 않는다
+  if (/mm/i.test(userSize) || /mm/i.test(text)) return 'unknown';
+  const wanted = extractSizes(userSize);
+  const found = extractSizes(text);
+  if (wanted.length === 0 || found.length === 0) return 'unknown';
+  const keys = new Set(wanted.map(sizeLabel));
+  return found.some((p) => keys.has(sizeLabel(p))) ? 'match' : 'mismatch';
+}
+
 // 내가 원하는 사이즈(여러 개 가능: "40x60, 50x80")가 상품명에 없고, 상품명에
 // 다른 사이즈가 적혀 있으면 그 사이즈를 돌려준다. 판정 불가/일치면 null.
 export function sizeMismatch(userSize: string, title: string): string | null {
@@ -70,32 +84,38 @@ function splitTokens(text: string): string[] {
 // 다른 색이 적혀 있으면 그 색 이름을 돌려준다. 판정 불가/일치면 null.
 // 한 상품 페이지가 여러 색을 같이 파는 경우가 많아서(옵션) 상품명에 내 색이
 // 하나라도 들어 있으면 일치로 본다.
-export function colorMismatch(userColor: string, title: string): string | null {
+export function colorStatus(
+  userColor: string,
+  text: string
+): { status: MatchStatus; other: string | null } {
   const tokens = splitTokens(userColor);
-  if (tokens.length === 0) return null;
-  const t = title.toLowerCase();
+  if (tokens.length === 0) return { status: 'unknown', other: null };
+  const t = text.toLowerCase();
 
   const wantedGroups = new Set<number>();
   for (const token of tokens) {
     const gi = COLOR_GROUPS.findIndex((g) => g.some((w) => token.includes(w)));
-    if (gi === -1) {
-      // 사전에 없는 낯선 색 이름은 해석 불가 → 판정하지 않는다.
-      return null;
-    }
+    // 사전에 없는 낯선 색 이름은 해석 불가 → 판정하지 않는다.
+    if (gi === -1) return { status: 'unknown', other: null };
     wantedGroups.add(gi);
   }
 
-  // 내 색 중 하나라도 상품명에 있으면 일치
+  // 내 색 중 하나라도 있으면 일치
   for (const gi of wantedGroups) {
-    if (COLOR_GROUPS[gi].some((w) => t.includes(w))) return null;
+    if (COLOR_GROUPS[gi].some((w) => t.includes(w))) return { status: 'match', other: null };
   }
   // 다른 색이 적혀 있으면 불일치
   for (let gi = 0; gi < COLOR_GROUPS.length; gi++) {
     if (wantedGroups.has(gi)) continue;
     const hit = COLOR_GROUPS[gi].find((w) => t.includes(w));
-    if (hit) return hit;
+    if (hit) return { status: 'mismatch', other: hit };
   }
-  return null;
+  return { status: 'unknown', other: null };
+}
+
+export function colorMismatch(userColor: string, title: string): string | null {
+  const r = colorStatus(userColor, title);
+  return r.status === 'mismatch' ? r.other : null;
 }
 
 // 검색어에 붙일 대표값 하나 (여러 개를 적었으면 첫 번째)

@@ -6,9 +6,10 @@
 // (AI 소싱 추천 쪽에서 실측 확인된 패턴) 절대 throw하지 않고 한국어 에러
 // 문구로 돌려준다 - 실패해도 기존 수동 입력 폼이 같은 섹션에 그대로 있어서
 // 사용자가 계속 작업할 수 있다.
-import { fetchCoupangBestsellers } from '@/lib/brightdata';
+import { fetchCoupangBestsellers, fetchCoupangProductMarkdown, isCoupangProductUrl } from '@/lib/brightdata';
+import { extractProductFacts, extractRelevantText } from '@/lib/coupangDetail';
 import { analyzeCoupangResults, type MarketBadges } from '@/lib/coupangMarket';
-import { firstColorToken, firstSizeToken } from '@/lib/candidateFilter';
+import { colorStatus, firstColorToken, firstSizeToken, sizeStatus, type MatchStatus } from '@/lib/candidateFilter';
 import { classifyByDictionary, classifyMaterialMismatch, type MaterialTierVerdict } from '@/lib/materialClassify';
 
 export interface CoupangResearchCandidate {
@@ -38,6 +39,14 @@ function toThreeTierMarketSize(tier: MarketBadges['marketScaleTier']): 'high' | 
   if (tier === 'very-high' || tier === 'high') return 'high';
   if (tier === 'mid') return 'mid';
   return 'low'; // 'low' | 'very-low'
+}
+
+// 내부 에러 문구(영어 원문, 환경변수 이름 등)가 화면에 그대로 나가지 않게 한다.
+function readableError(e: any, fallback: string): string {
+  const msg: string = typeof e?.message === 'string' ? e.message : '';
+  if (/[가-힣]/.test(msg) && !/[A-Z][A-Z0-9_]{5,}/.test(msg)) return msg;
+  console.error('[researchActions] 원본 오류:', msg || e);
+  return fallback;
 }
 
 export interface ResearchOptions {
@@ -88,9 +97,10 @@ export async function researchCoupangComparisons(
     }
   } catch (e: any) {
     return {
-      error:
-        e?.message ||
-        '쿠팡 조사에 실패했어요. 캡차 차단이거나 일시적인 오류일 수 있어요. 잠시 후 다시 시도해주세요.',
+      error: readableError(
+        e,
+        '쿠팡 조사에 실패했어요. 캡차 차단이거나 일시적인 오류일 수 있어요. 잠시 후 다시 시도해주세요.'
+      ),
     };
   }
 
@@ -152,5 +162,66 @@ export async function researchCoupangComparisons(
     suggestedMarketSize: toThreeTierMarketSize(analysis.badges.marketScaleTier),
     searchedQuery,
     fallbackNote,
+  };
+}
+
+export interface CandidateDetail {
+  material: string | null;
+  sizes: string[];
+  colors: string[];
+  materialVerdict: 'same' | 'different' | 'unknown';
+  sizeStatus: MatchStatus;
+  colorStatus: MatchStatus;
+  colorOther: string | null;
+  evidence: string | null;
+}
+
+// 후보 1개의 쿠팡 상품 페이지를 읽어서 상품정보(소재)·옵션(사이즈/색상)을 확인한다.
+// 후보마다 따로 부르게 만든 이유: 한 번에 여러 개를 묶으면 Bright Data 호출이
+// 느리고 중간 실패 시 전부 날아가는데, 하나씩 부르면 진행 상황을 보여주고
+// 실패한 것만 건너뛸 수 있다. 절대 throw하지 않는다.
+export async function inspectCoupangCandidate(
+  url: string,
+  options: ResearchOptions = {}
+): Promise<{ detail: CandidateDetail } | { error: string }> {
+  if (!isCoupangProductUrl(url)) return { error: '쿠팡 상품 주소가 아니에요.' };
+
+  let markdown: string;
+  try {
+    markdown = await fetchCoupangProductMarkdown(url);
+  } catch (e: any) {
+    return { error: readableError(e, '상품 페이지를 읽지 못했어요. 캡차 차단이라면 잠시 뒤 다시 눌러보세요.') };
+  }
+
+  const page = extractRelevantText(markdown);
+  const r = await extractProductFacts(page.text, options.material?.trim().slice(0, 60) || '');
+  if ('error' in r) return { error: r.error };
+  const f = r.facts;
+
+  // 사이즈/색상은 AI가 아니라 코드가 비교한다(AI는 페이지에 적힌 옵션만 읽어옴)
+  // 읽은 내용이 잘렸을 수 있으면(글자 수 한도/목록 상한) "옵션에 없음"으로
+  // 단정하지 않는다 - 멀쩡한 후보가 일괄 제거되는 걸 막기 위해 unknown 처리.
+  // (일치 match는 잘렸어도 확실하니 유지)
+  const incomplete = page.truncated || f.listsMaybeIncomplete;
+  const sizeText = f.sizes.join(' ');
+  const colorText = f.colors.join(' ');
+  const rawCs = options.color?.trim()
+    ? colorStatus(options.color.slice(0, 60), colorText)
+    : { status: 'unknown' as MatchStatus, other: null };
+  const cs = incomplete && rawCs.status === 'mismatch' ? { status: 'unknown' as MatchStatus, other: null } : rawCs;
+  const rawSize: MatchStatus = options.size?.trim() ? sizeStatus(options.size.slice(0, 60), sizeText) : 'unknown';
+  const sizeResult: MatchStatus = incomplete && rawSize === 'mismatch' ? 'unknown' : rawSize;
+
+  return {
+    detail: {
+      material: f.material,
+      sizes: f.sizes,
+      colors: f.colors,
+      materialVerdict: f.materialVerdict,
+      sizeStatus: sizeResult,
+      colorStatus: cs.status,
+      colorOther: cs.other,
+      evidence: f.evidence,
+    },
   };
 }

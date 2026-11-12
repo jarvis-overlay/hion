@@ -318,3 +318,31 @@ export async function fetchCoupangDetailImageUrls(productUrl: string, limit = 10
   const md = await unlockerMarkdown(productUrl, { country: 'kr', timeoutMs: 45000, retries: 1 });
   return extractCoupangDetailImageUrls(md, limit);
 }
+
+// ---------------------------------------------------------------------------
+// 쿠팡 상품 페이지 원문(마크다운) - 상품정보/옵션 텍스트를 읽기 위해 쓴다
+// ---------------------------------------------------------------------------
+// 화면에서 넘어온 주소를 그대로 Bright Data에 넘기면 임의 사이트를 대신 읽어주는
+// 통로가 되므로, 쿠팡 상품 페이지(/vp/products/...) 주소만 허용한다.
+export function isCoupangProductUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return (
+      u.protocol === 'https:' &&
+      u.hostname === 'www.coupang.com' &&
+      u.port === '' &&
+      !u.username &&
+      !u.password &&
+      u.pathname.startsWith('/vp/products/')
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchCoupangProductMarkdown(productUrl: string): Promise<string> {
+  if (!isCoupangProductUrl(productUrl)) throw new Error('쿠팡 상품 주소가 아니에요.');
+  // 검증한 값(정규화된 href)만 넘긴다. 맥북은 Cloudflare Tunnel 100초 제한이 있어서
+  // 한 후보가 그 안에 끝나도록 요청 타임아웃을 짧게(35초) 둔다.
+  return unlockerMarkdown(new URL(productUrl).href, { country: 'kr', timeoutMs: 35000, retries: 1 });
+}

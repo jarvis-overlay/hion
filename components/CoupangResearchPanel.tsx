@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { analyzeCoupangResults } from '@/lib/coupangMarket';
 import { colorMismatch, sizeMismatch } from '@/lib/candidateFilter';
 import {
   researchCoupangComparisons,
+  inspectCoupangCandidate,
+  type CandidateDetail,
   type CoupangResearchCandidate,
   type CoupangResearchResult,
 } from '@/app/dashboard/sourcing/list/researchActions';
@@ -12,7 +14,17 @@ import { addSourcingComparisons } from '@/app/dashboard/sourcing/list/actions';
 import { Badge, MarketBadgeRow } from '@/components/MarketBadge';
 import { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
 
-type Mismatch = { material: 'dict' | 'ai' | null; size: string | null; color: string | null };
+type DetailState =
+  | { status: 'loading' }
+  | { status: 'done'; detail: CandidateDetail }
+  | { status: 'error'; message: string };
+
+// 한 번 누를 때 읽어볼 후보 수 상한. 동시에 1개씩만 읽는다 - Next.js가 화면에서 부른
+// 서버 액션을 어차피 한 줄로 세워서 하나씩 실행하고, Bright Data 분당 호출 제한도 있다.
+const INSPECT_MAX = 12;
+const INSPECT_CONCURRENCY = 1;
+
+type Mismatch = { material: 'dict' | 'ai' | 'detail' | null; size: string | null; color: string | null };
 
 function candidateKey(c: CoupangResearchCandidate, i: number): string {
   return c.url || String(i);
@@ -51,7 +63,15 @@ export default function CoupangResearchPanel({
   const [userColor, setUserColor] = useState('');
   // 조사하기를 누른 시점의 사이즈/색상 - 조사 후 입력칸을 고쳐도 이미 받은
   // 후보의 배지가 슬쩍 바뀌지 않게 고정해둔다(다시 조사해야 반영).
-  const [applied, setApplied] = useState({ size: '', color: '' });
+  const [applied, setApplied] = useState({ material: '', size: '', color: '' });
+  const [details, setDetails] = useState<Map<string, DetailState>>(new Map());
+  const [inspecting, setInspecting] = useState(false);
+  const [inspectProgress, setInspectProgress] = useState({ done: 0, total: 0 });
+  const [inspectSummary, setInspectSummary] = useState('');
+  // 상세 확인을 중간에 멈추거나, 새로 조사하기를 눌렀을 때 옛 작업의 결과가
+  // 새 목록에 섞이지 않게 하는 번호표(바뀌면 옛 작업은 결과를 버린다)
+  const inspectRun = useRef(0);
+  useEffect(() => () => { inspectRun.current++; }, []);
   const [loading, setLoading] = useState(false);
   const [researchError, setResearchError] = useState<string | null>(null);
   const [result, setResult] = useState<CoupangResearchResult | null>(null);
@@ -95,14 +115,33 @@ export default function CoupangResearchPanel({
     const map = new Map<string, Mismatch>();
     if (!result) return map;
     result.candidates.forEach((c, i) => {
-      map.set(candidateKey(c, i), {
-        material: c.materialBadge ? (c.materialBadge.type === 'dictionary_different' ? 'dict' : 'ai') : null,
-        size: applied.size ? sizeMismatch(applied.size, c.name) : null,
-        color: applied.color ? colorMismatch(applied.color, c.name) : null,
-      });
+      const key = candidateKey(c, i);
+      let material: Mismatch['material'] = c.materialBadge
+        ? c.materialBadge.type === 'dictionary_different'
+          ? 'dict'
+          : 'ai'
+        : null;
+      let size = applied.size ? sizeMismatch(applied.size, c.name) : null;
+      let color = applied.color ? colorMismatch(applied.color, c.name) : null;
+
+      // 상품 페이지를 직접 읽어 확인한 결과가 있으면 상품명만 보고 한 추정보다
+      // 우선한다(옵션에 내 사이즈/색이 있는데 상품명엔 다른 게 적힌 경우 등).
+      const d = details.get(key);
+      if (d?.status === 'done') {
+        const det = d.detail;
+        if (det.materialVerdict === 'different') material = 'detail';
+        // 페이지를 읽은 AI가 "같다"고 해도 사전이 확정한 재질 다름 배지는 지우지 않는다
+        // (제목에 다른 재질 단어가 있는 건 확실한 근거). 제목만 보고 한 AI 추정만 정정한다.
+        else if (det.materialVerdict === 'same' && material === 'ai') material = null;
+        if (det.sizeStatus === 'mismatch') size = `확인된 옵션에 없음(${det.sizes.slice(0, 3).join(', ')})`;
+        else if (det.sizeStatus === 'match') size = null;
+        if (det.colorStatus === 'mismatch') color = `확인된 옵션에 없음(${det.colors.slice(0, 3).join(', ')})`;
+        else if (det.colorStatus === 'match') color = null;
+      }
+      map.set(key, { material, size, color });
     });
     return map;
-  }, [result, applied]);
+  }, [result, applied, details]);
 
   // 아직 안 지운 후보 중 해당 종류로 걸린 것의 key 목록
   function keysWhere(pred: (m: Mismatch) => boolean): string[] {
@@ -133,11 +172,15 @@ export default function CoupangResearchPanel({
   const aiKeys = keysWhere((m) => m.material === 'ai');
   const sizeKeys = keysWhere((m) => !!m.size);
   const colorKeys = keysWhere((m) => !!m.color);
-  const anyMismatchKeys = keysWhere((m) => m.material === 'dict' || !!m.size || !!m.color);
+  const detailMaterialKeys = keysWhere((m) => m.material === 'detail');
+  const anyMismatchKeys = keysWhere(
+    (m) => m.material === 'dict' || !!m.size || !!m.color
+  );
   const visibleKeys = result
     ? result.candidates.map((c, i) => candidateKey(c, i)).filter((k) => !removed.has(k))
     : [];
   const uncheckedKeys = visibleKeys.filter((k) => !selected.has(k));
+  const pendingInspectCount = visibleKeys.filter((k) => details.get(k)?.status !== 'done').length;
 
   // 남은 후보(안 지운 것) 기준으로 시장규모/경쟁강도/가격대를 다시 계산한다.
   // 서버가 준 badges는 "지우기 전 전체 후보" 기준이라, 재질 다른 상품을
@@ -175,6 +218,9 @@ export default function CoupangResearchPanel({
     setSelected(new Set());
     setRemoved(new Set());
     setSaveError(null);
+    inspectRun.current++;
+    setInspecting(false);
+    setDetails(new Map());
     try {
       const res = await researchCoupangComparisons(keyword, {
         material: userMaterial.trim(),
@@ -185,7 +231,7 @@ export default function CoupangResearchPanel({
         setResearchError(res.error);
         return;
       }
-      setApplied({ size: userSize.trim(), color: userColor.trim() });
+      setApplied({ material: userMaterial.trim(), size: userSize.trim(), color: userColor.trim() });
       setResult(res);
       setPriceRange('');
       setPriceRangeTouched(false);
@@ -193,6 +239,79 @@ export default function CoupangResearchPanel({
     } finally {
       setLoading(false);
     }
+  }
+
+  // 남은 후보의 쿠팡 상품 페이지를 읽어서 상품정보(소재)와 옵션(사이즈/색상)을
+  // 확인한다. 후보당 Bright Data 호출 1번 + AI 1번이라 느리고 비용이 들어서,
+  // 눌렀을 때만 / 안 지운 후보만 / 최대 INSPECT_MAX개씩 처리한다.
+  async function handleInspect() {
+    if (!result || inspecting) return;
+    const targets = visibleKeys
+      .filter((k) => details.get(k)?.status !== 'done')
+      .sort((a, b) => Number(selected.has(b)) - Number(selected.has(a)))
+      .slice(0, INSPECT_MAX);
+    if (targets.length === 0) return;
+
+    const byKey = new Map<string, CoupangResearchCandidate>();
+    result.candidates.forEach((c, i) => byKey.set(candidateKey(c, i), c));
+
+    const run = ++inspectRun.current;
+    setInspecting(true);
+    setInspectProgress({ done: 0, total: targets.length });
+    setInspectSummary('');
+    setDetails((prev) => {
+      const next = new Map(prev);
+      targets.forEach((k) => next.set(k, { status: 'loading' }));
+      return next;
+    });
+
+    let cursor = 0;
+    let done = 0;
+    let failed = 0;
+    async function worker() {
+      while (cursor < targets.length && inspectRun.current === run) {
+        const key = targets[cursor++];
+        const c = byKey.get(key);
+        let state: DetailState;
+        try {
+          const res = c
+            ? await inspectCoupangCandidate(c.url, {
+                material: applied.material,
+                size: applied.size,
+                color: applied.color,
+              })
+            : { error: '후보를 찾지 못했어요.' };
+          state = 'error' in res ? { status: 'error', message: res.error } : { status: 'done', detail: res.detail };
+        } catch {
+          state = { status: 'error', message: '확인 중 오류가 났어요. 다시 시도해주세요.' };
+        }
+        if (inspectRun.current !== run) return;
+        done++;
+        if (state.status === 'error') failed++;
+        setInspectProgress({ done, total: targets.length });
+        setDetails((prev) => new Map(prev).set(key, state));
+      }
+    }
+    await Promise.all(Array.from({ length: INSPECT_CONCURRENCY }, worker));
+    if (inspectRun.current === run) {
+      setInspecting(false);
+      setInspectSummary(
+        `${done}개 확인 완료` + (failed > 0 ? ` (실패 ${failed}개 - 후보 옆 문구를 보고 다시 눌러보세요)` : '')
+      );
+    }
+  }
+
+  function handleStopInspect() {
+    inspectRun.current++;
+    setInspecting(false);
+    // 아직 읽는 중이던 항목은 로딩 표시를 풀어준다
+    setDetails((prev) => {
+      const next = new Map(prev);
+      next.forEach((v, k) => {
+        if (v.status === 'loading') next.delete(k);
+      });
+      return next;
+    });
   }
 
   function handleSave() {
@@ -301,6 +420,42 @@ export default function CoupangResearchPanel({
             <p className="text-[11px] text-inkSoft">후보를 모두 제거해서 시장 분석을 표시할 수 없어요.</p>
           )}
 
+          <div className="grid gap-1 rounded-md bg-white ring-1 ring-paperLine px-2 py-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleInspect}
+                disabled={inspecting || visibleKeys.filter((k) => details.get(k)?.status !== 'done').length === 0}
+                className="rounded-full bg-accentBg px-3 py-1 text-[11px] font-semibold text-accent disabled:opacity-50"
+              >
+                {inspecting
+                  ? `상세·옵션 확인 중 ${inspectProgress.done}/${inspectProgress.total}`
+                  : `남은 후보 상세·옵션 확인 (최대 ${INSPECT_MAX}개)`}
+              </button>
+              {inspecting && (
+                <button
+                  type="button"
+                  onClick={handleStopInspect}
+                  className="text-[11px] text-inkSoft underline"
+                >
+                  멈추기
+                </button>
+              )}
+            </div>
+            {inspectSummary && !inspecting && (
+              <p className="text-[11px] text-ink font-semibold">{inspectSummary}</p>
+            )}
+            {!inspecting && pendingInspectCount > INSPECT_MAX && (
+              <p className="text-[11px] text-inkSoft">
+                확인 안 한 후보가 {pendingInspectCount}개예요. 한 번에 {INSPECT_MAX}개씩만 읽으니, 먼저 지운 뒤 누르거나 끝나고 한 번 더 누르면 다음 {INSPECT_MAX}개를 읽어요.
+              </p>
+            )}
+            <p className="text-[11px] text-inkSoft">
+              각 후보의 쿠팡 페이지를 하나씩 열어 소재·사이즈·색상 옵션을 읽어서 비교해요. 후보당 10~40초라 12개면 2~8분쯤 걸리고,
+              먼저 일괄 제거나 ✕로 아닌 것들을 지운 뒤 누르세요. 페이지에 적혀 있지 않은 정보는 판정하지 않아요.
+            </p>
+          </div>
+
           {(anyMismatchKeys.length > 0 || aiKeys.length > 0 || uncheckedKeys.length > 0) && (
             <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-white ring-1 ring-paperLine px-2 py-1.5">
               <span className="text-[11px] text-inkSoft shrink-0">일괄 제거</span>
@@ -311,6 +466,16 @@ export default function CoupangResearchPanel({
                   className="rounded-full bg-paper px-2.5 py-1 text-[11px] font-semibold text-ink hover:text-warn"
                 >
                   재질 다름 {materialKeys.length}개
+                </button>
+              )}
+              {detailMaterialKeys.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => removeMany(detailMaterialKeys)}
+                  title="상품 페이지를 읽고 AI가 판정한 결과예요. 근거 문구를 확인하세요"
+                  className="rounded-full bg-paper px-2.5 py-1 text-[11px] font-semibold text-ink hover:text-warn"
+                >
+                  상세 확인 재질 다름 {detailMaterialKeys.length}개
                 </button>
               )}
               {sizeKeys.length > 0 && (
@@ -398,12 +563,15 @@ export default function CoupangResearchPanel({
                         {c.reviewCount ? ` · 리뷰 ${c.reviewCount}개` : ''}
                       </p>
                       <div className="flex flex-wrap gap-1 mt-0.5 empty:hidden">
-                        {c.materialBadge && (
-                          <Badge tier={c.materialBadge.type === 'ai_different' ? 'ok' : 'bad'}>
-                            {c.materialBadge.type === 'dictionary_different'
-                              ? `재질 다름: ${c.materialBadge.matchedKeyword}`
-                              : 'AI 추정: 다른 방식일 수 있음'}
-                          </Badge>
+                        {/* 재질 배지는 일괄 제거 버튼과 같은 판정(mismatches)을 그려서, 배지와 버튼 숫자가 어긋나지 않게 한다 */}
+                        {mismatches.get(key)?.material === 'dict' && c.materialBadge?.type === 'dictionary_different' && (
+                          <Badge tier="bad">재질 다름: {c.materialBadge.matchedKeyword}</Badge>
+                        )}
+                        {mismatches.get(key)?.material === 'ai' && (
+                          <Badge tier="ok">AI 추정: 다른 방식일 수 있음</Badge>
+                        )}
+                        {mismatches.get(key)?.material === 'detail' && (
+                          <Badge tier="bad">상세 확인: 재질 다름</Badge>
                         )}
                         {mismatches.get(key)?.size && (
                           <Badge tier="bad">사이즈 다름: {mismatches.get(key)?.size}</Badge>
@@ -412,6 +580,25 @@ export default function CoupangResearchPanel({
                           <Badge tier="bad">색상 다름: {mismatches.get(key)?.color}</Badge>
                         )}
                       </div>
+                      {(() => {
+                        const d = details.get(key);
+                        if (!d) return null;
+                        if (d.status === 'loading') return <p className="text-[11px] text-inkSoft">상세 읽는 중...</p>;
+                        if (d.status === 'error')
+                          return <p className="text-[11px] text-warn">상세 확인 실패: {d.message}</p>;
+                        const det = d.detail;
+                        const parts = [
+                          det.material ? `소재 ${det.material}` : null,
+                          det.sizes.length ? `사이즈 ${det.sizes.slice(0, 4).join(', ')}` : null,
+                          det.colors.length ? `색상 ${det.colors.slice(0, 4).join(', ')}` : null,
+                        ].filter(Boolean);
+                        return (
+                          <p className="text-[11px] text-inkSoft">
+                            {parts.length ? `상세: ${parts.join(' · ')}` : '상세: 페이지에서 소재/옵션 정보를 못 찾았어요'}
+                            {det.evidence ? ` (근거: "${det.evidence}")` : ''}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <a
                       href={c.url}
