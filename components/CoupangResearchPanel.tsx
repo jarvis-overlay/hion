@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { analyzeCoupangResults } from '@/lib/coupangMarket';
 import { colorMismatch, sizeMismatch } from '@/lib/candidateFilter';
 import { scoreCandidate, type DimState, type ScoreResult } from '@/lib/candidateScore';
+import type { ImageMatchResult } from '@/lib/candidateImageMatch';
 import {
   researchCoupangComparisons,
   inspectCoupangCandidate,
+  matchCandidateImages,
   type CandidateDetail,
   type CoupangResearchCandidate,
   type CoupangResearchResult,
@@ -38,6 +40,41 @@ function parsePrice(p: string | null): number | null {
 }
 
 type SortMode = 'default' | 'accuracy' | 'review' | 'priceAsc' | 'priceDesc';
+
+// 내 상품 사진을 화면에서 줄여서(긴 변 640px JPEG) 서버로 보낸다 - 사진 원본이 크면
+// 서버 호출 크기 제한에 걸리고 AI 비교에도 이 정도면 충분하다.
+const IMAGE_BATCH = 8;
+const REF_MAX_SIDE = 640;
+
+type RefImage = { dataUrl: string; mimeType: 'image/jpeg'; base64: string };
+
+async function fileToRefImage(file: File): Promise<RefImage> {
+  if (!file.type.startsWith('image/')) throw new Error('이미지 파일(JPG/PNG)만 올릴 수 있어요.');
+  const url = URL.createObjectURL(file);
+  try {
+    const img: HTMLImageElement = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('이 사진을 열 수 없어요. JPG/PNG로 저장해서 다시 올려주세요.'));
+      el.src = url;
+    });
+    const scale = Math.min(1, REF_MAX_SIDE / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('사진을 처리하지 못했어요.');
+    ctx.fillStyle = '#fff'; // 투명 PNG 배경이 검게 나오지 않게
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    return { dataUrl, mimeType: 'image/jpeg', base64: dataUrl.split(',')[1] || '' };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 const DIM_MARK: Record<DimState, string> = { match: '✓', mismatch: '✗', unknown: '?' };
 const DIM_CLS: Record<DimState, string> = {
@@ -96,6 +133,17 @@ export default function CoupangResearchPanel({
   // 새 목록에 섞이지 않게 하는 번호표(바뀌면 옛 작업은 결과를 버린다)
   const inspectRun = useRef(0);
   useEffect(() => () => { inspectRun.current++; }, []);
+
+  // 내 상품 사진 비교(선택): 사진은 이 화면에서만 쓰고 저장하지 않는다.
+  const [refImage, setRefImage] = useState<RefImage | null>(null);
+  const [refError, setRefError] = useState('');
+  const [imageRequested, setImageRequested] = useState(false); // 이번 조사에 사진 비교를 쓰는지
+  const [imageMatches, setImageMatches] = useState<Map<string, ImageMatchResult>>(new Map());
+  const [imageMatching, setImageMatching] = useState(false);
+  const [imageProgress, setImageProgress] = useState({ done: 0, total: 0 });
+  const [imageSummary, setImageSummary] = useState('');
+  const imageRun = useRef(0);
+  useEffect(() => () => { imageRun.current++; }, []);
   const [loading, setLoading] = useState(false);
   const [researchError, setResearchError] = useState<string | null>(null);
   const [result, setResult] = useState<CoupangResearchResult | null>(null);
@@ -194,11 +242,13 @@ export default function CoupangResearchPanel({
                   colorStatus: d.detail.colorStatus,
                 }
               : null,
+          image: imageMatches.get(key) ?? null,
+          imageRequested,
         })
       );
     });
     return map;
-  }, [result, applied, details]);
+  }, [result, applied, details, imageMatches, imageRequested]);
 
   // 아직 안 지운 후보 중 해당 종류로 걸린 것의 key 목록
   function keysWhere(pred: (m: Mismatch) => boolean): string[] {
@@ -230,6 +280,11 @@ export default function CoupangResearchPanel({
   const sizeKeys = keysWhere((m) => !!m.size);
   const colorKeys = keysWhere((m) => !!m.color);
   const detailMaterialKeys = keysWhere((m) => m.material === 'detail');
+  // 사진이 확실히 다른 후보(AI 추정이라 "전부" 버튼엔 넣지 않고 따로 둔다)
+  const imageKeys: string[] = [];
+  scores.forEach((s, key) => {
+    if (!removed.has(key) && s.image === 'mismatch') imageKeys.push(key);
+  });
   const anyMismatchKeys = keysWhere(
     (m) => m.material === 'dict' || !!m.size || !!m.color
   );
@@ -267,10 +322,115 @@ export default function CoupangResearchPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, result]);
 
+  // 사진을 바꾸거나 지우면 이전 사진 기준의 비교 결과는 버린다(새 사진 점수로 오해하지 않게)
+  function resetImageMatches() {
+    imageRun.current++;
+    setImageMatching(false);
+    setImageMatches(new Map());
+    setImageSummary('');
+    setImageRequested(false);
+  }
+
+  async function handleRefFile(file: File | null) {
+    setRefError('');
+    if (!file) return;
+    try {
+      const next = await fileToRefImage(file);
+      resetImageMatches();
+      setRefImage(next);
+    } catch (e: any) {
+      setRefImage(null);
+      setRefError(typeof e?.message === 'string' && /[가-힣]/.test(e.message) ? e.message : '사진을 불러오지 못했어요.');
+    }
+  }
+
+  // 후보 사진을 내 상품 사진과 비교한다. 후보를 IMAGE_BATCH장씩 묶어 순서대로 보낸다.
+  // (한 번에 다 보내면 느리고 중간 실패 시 전부 날아감 / 진행 표시·중단 가능)
+  async function runImageMatch(
+    cands: CoupangResearchCandidate[],
+    ref: RefImage,
+    skipKeys: Set<string>,
+    alreadyDone: Set<string>
+  ) {
+    const run = ++imageRun.current;
+    const items = cands
+      .map((c, i) => ({ key: candidateKey(c, i), url: c.imageUrl }))
+      .filter((x) => !!x.url && !skipKeys.has(x.key) && !alreadyDone.has(x.key));
+    if (items.length === 0) {
+      setImageMatching(false);
+      setImageSummary('새로 비교할 후보가 없어요. (이미 모두 비교했거나, 사진이 없는 후보예요)');
+      return;
+    }
+    setImageMatching(true);
+    setImageSummary('');
+    setImageProgress({ done: 0, total: items.length });
+    let done = 0;
+    let compared = 0;
+    let failedBatches = 0;
+    let lastError = '';
+    for (let s = 0; s < items.length && imageRun.current === run; s += IMAGE_BATCH) {
+      const batch = items.slice(s, s + IMAGE_BATCH);
+      try {
+        const res = await matchCandidateImages(
+          { mimeType: ref.mimeType, base64: ref.base64 },
+          batch.map((b) => b.url)
+        );
+        if (imageRun.current !== run) return;
+        if ('error' in res) {
+          failedBatches++;
+          lastError = res.error;
+        } else {
+          setImageMatches((prev) => {
+            const next = new Map(prev);
+            batch.forEach((b, n) => {
+              const r = res.results[n];
+              if (r) next.set(b.key, r);
+            });
+            return next;
+          });
+          compared += res.results.filter(Boolean).length;
+        }
+      } catch {
+        if (imageRun.current !== run) return;
+        failedBatches++;
+        lastError = '사진 비교 중 오류가 났어요.';
+      }
+      done += batch.length;
+      setImageProgress({ done, total: items.length });
+    }
+    if (imageRun.current === run) {
+      setImageMatching(false);
+      const missed = items.length - compared;
+      setImageSummary(
+        compared === 0
+          ? `사진을 비교하지 못했어요. ${lastError || '후보 사진을 받아오지 못했어요.'} 버튼을 다시 눌러보세요.`
+          : missed > 0
+            ? `${items.length}개 중 ${compared}개를 비교했어요. 나머지 ${missed}개는 사진을 못 받았거나 AI가 판단하지 못했어요${failedBatches > 0 && lastError ? ` (${lastError})` : ''}. 버튼을 다시 누르면 그 후보만 다시 비교해요.`
+            : `사진 비교 완료 (${compared}개)`
+      );
+    }
+  }
+
+  function handleImageMatchClick() {
+    if (!result || !refImage || imageMatching) return;
+    // 이미 비교한 후보와 지운 후보는 건너뛰고, 못 한 후보만 다시 비교한다
+    setImageRequested(true);
+    runImageMatch(result.candidates, refImage, removed, new Set(imageMatches.keys()));
+  }
+
+  function handleStopImageMatch() {
+    imageRun.current++;
+    setImageMatching(false);
+  }
+
   async function handleResearch() {
     if (!keyword.trim() || loading) return;
     setLoading(true);
     setResearchError(null);
+    imageRun.current++;
+    setImageMatching(false);
+    setImageMatches(new Map());
+    setImageSummary('');
     setResult(null);
     setSelected(new Set());
     setRemoved(new Set());
@@ -295,8 +455,13 @@ export default function CoupangResearchPanel({
         color: userColor.trim(),
       });
       // 조건을 적었으면 "내 상품과 가까운 순"으로 먼저 보여준다
-      setSortMode(userMaterial.trim() || userSize.trim() || userColor.trim() ? 'accuracy' : 'default');
+      setSortMode(
+        userMaterial.trim() || userSize.trim() || userColor.trim() || refImage ? 'accuracy' : 'default'
+      );
       setResult(res);
+      // 내 상품 사진이 있으면 조사가 끝나는 대로 후보 사진과 비교를 시작한다(화면은 먼저 보여줌)
+      setImageRequested(!!refImage);
+      if (refImage) runImageMatch(res.candidates, refImage, new Set(), new Set());
       setPriceRange('');
       setPriceRangeTouched(false);
       setMarketSize(res.suggestedMarketSize);
@@ -451,6 +616,41 @@ export default function CoupangResearchPanel({
           className="border border-paperLine bg-white px-2 py-1.5 text-xs min-w-0"
         />
       </div>
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <label className="cursor-pointer rounded-full bg-white px-3 py-1 font-semibold text-accent ring-1 ring-paperLine hover:ring-accent">
+          {refImage ? '내 상품 사진 바꾸기' : '내 상품 사진 올리기 (선택)'}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              handleRefFile(e.target.files?.[0] ?? null);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        {refImage && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={refImage.dataUrl} alt="내 상품 사진" className="w-9 h-9 rounded object-cover ring-1 ring-paperLine" />
+            <button
+              type="button"
+              onClick={() => {
+                resetImageMatches();
+                setRefImage(null);
+                setRefError('');
+              }}
+              className="text-inkSoft underline"
+            >
+              사진 지우기
+            </button>
+          </>
+        )}
+        <span className="text-inkSoft">
+          사진을 올리고 조사하면 후보 사진과 AI로 비교해서 닮은 정도를 점수에 반영해요. 사진은 이 화면에서만 쓰고 저장하지 않아요.
+        </span>
+      </div>
+      {refError && <p className="text-[11px] text-warn">{refError}</p>}
       <p className="text-[11px] text-inkSoft -mt-1.5">
         재질·사이즈·색상은 선택이에요. 적으면 검색어에 같이 넣어서 찾고, 상품명에 다른 값이 적힌 후보엔 배지를 달아줘요(여러 개는 쉼표로).
       </p>
@@ -487,6 +687,33 @@ export default function CoupangResearchPanel({
             </>
           ) : (
             <p className="text-[11px] text-inkSoft">후보를 모두 제거해서 시장 분석을 표시할 수 없어요.</p>
+          )}
+
+          {(refImage || imageRequested) && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md bg-white ring-1 ring-paperLine px-2 py-1.5 text-[11px]">
+              <button
+                type="button"
+                onClick={handleImageMatchClick}
+                disabled={!refImage || imageMatching}
+                className="rounded-full bg-accentBg px-3 py-1 font-semibold text-accent disabled:opacity-50"
+              >
+                {imageMatching
+                  ? `사진 비교 중 ${imageProgress.done}/${imageProgress.total}`
+                  : imageRequested
+                    ? '사진 비교 다시 하기 (못 한 후보만)'
+                    : '내 사진으로 후보 비교하기'}
+              </button>
+              {imageMatching && (
+                <button type="button" onClick={handleStopImageMatch} className="text-inkSoft underline">
+                  멈추기
+                </button>
+              )}
+              {imageSummary && !imageMatching && <span className="font-semibold text-ink">{imageSummary}</span>}
+              {!refImage && imageRequested && (
+                <span className="text-inkSoft">사진을 지워서 다시 비교할 수 없어요. 사진을 올려주세요.</span>
+              )}
+              <span className="text-inkSoft">AI가 사진만 보고 추정한 점수라 틀릴 수 있어요.</span>
+            </div>
           )}
 
           <div className="grid gap-1 rounded-md bg-white ring-1 ring-paperLine px-2 py-1.5">
@@ -563,6 +790,16 @@ export default function CoupangResearchPanel({
                   className="rounded-full bg-paper px-2.5 py-1 text-[11px] font-semibold text-ink hover:text-warn"
                 >
                   색상 다름 {colorKeys.length}개
+                </button>
+              )}
+              {imageKeys.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => removeMany(imageKeys)}
+                  title="AI가 사진을 보고 추정한 것이라 틀릴 수 있어요. 지우기 전에 사진을 확인하세요"
+                  className="rounded-full bg-paper px-2.5 py-1 text-[11px] font-semibold text-ink hover:text-warn"
+                >
+                  사진 많이 다름(AI 추정) {imageKeys.length}개
                 </button>
               )}
               {aiKeys.length > 0 && (
@@ -673,6 +910,7 @@ export default function CoupangResearchPanel({
                           ['재질', s.material],
                           ['사이즈', s.size],
                           ['색상', s.color],
+                          ['사진', s.image],
                         ];
                         const shown = dims.filter((x): x is [string, DimState] => x[1] != null);
                         return (
@@ -688,9 +926,13 @@ export default function CoupangResearchPanel({
                               <span key={label} className={DIM_CLS[st]}>
                                 {label} {DIM_MARK[st]}
                                 {label === '재질' && s.aiGuess ? '(AI추정)' : ''}
+                                {label === '사진' && s.imageScore != null ? ` ${s.imageScore}%` : ''}
+                                {label === '사진' && st === 'mismatch' && imageMatches.get(key)?.note
+                                  ? ` (${imageMatches.get(key)?.note})`
+                                  : ''}
                               </span>
                             ))}
-                            {shown.some(([, st]) => st === 'unknown') && !s.inspected && (
+                            {shown.some(([label, st]) => label !== '사진' && st === 'unknown') && !s.inspected && (
                               <span className="text-inkSoft">· ? = 상품명만으론 몰라요</span>
                             )}
                           </p>

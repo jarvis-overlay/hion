@@ -16,6 +16,10 @@ export interface ScoreInput {
   conditions: { material: string; size: string; color: string };
   // 서버가 상품명으로 판정한 재질 배지: 사전(확정) / AI 추정 / 없음
   materialBadge: 'dict' | 'ai' | null;
+  // 내 상품 사진과 후보 사진을 AI로 비교한 결과(있을 때만)
+  image?: { score: number; sameType: boolean } | null;
+  // 이번 조사에서 사진 비교를 쓰는 중인지(결과가 아직 없거나 실패한 후보는 "모름"으로 채점)
+  imageRequested?: boolean;
   // 상품 페이지를 읽은 결과(있을 때만)
   detail?: {
     materialVerdict: 'same' | 'different' | 'unknown';
@@ -29,12 +33,14 @@ export interface ScoreResult {
   material: DimState | null; // null = 내가 조건을 안 적음
   size: DimState | null;
   color: DimState | null;
+  image: DimState | null; // 사진 비교(null = 사진 비교 안 씀)
+  imageScore: number | null; // 사진이 닮은 정도 0~100(결과 있을 때)
   aiGuess: boolean; // 재질 판정이 AI 추정에 기대고 있는지
   inspected: boolean; // 상품 페이지를 읽어서 확인한 결과가 반영됐는지
 }
 
 // 조건별 가중치(합이 아니라 "입력한 조건끼리" 비율로 환산한다)
-const W = { material: 40, size: 25, color: 15, keyword: 20 };
+const W = { material: 40, size: 25, color: 15, keyword: 20, image: 50 };
 const UNKNOWN_CREDIT = 0.3;
 
 function tokens(s: string): string[] {
@@ -52,7 +58,7 @@ function credit(state: DimState, weak = false): number {
 }
 
 export function scoreCandidate(input: ScoreInput): ScoreResult {
-  const { title, keyword, conditions, materialBadge, detail } = input;
+  const { title, keyword, conditions, materialBadge, detail, image, imageRequested } = input;
   const t = title.toLowerCase();
 
   let earned = 0;
@@ -101,12 +107,36 @@ export function scoreCandidate(input: ScoreInput): ScoreResult {
     max += W.color;
   }
 
+  // 사진 비교: 70점 이상 일치, 40 미만(또는 다른 종류) 불일치, 그 사이는 모름(점수에 비례해 부분 점수)
+  let imageState: DimState | null = null;
+  let imageScore: number | null = null;
+  if (image) {
+    imageScore = image.score;
+    if (!image.sameType || image.score < 40) {
+      imageState = 'mismatch';
+      earned += W.image * (image.sameType ? -0.6 : -1);
+    } else if (image.score >= 70) {
+      imageState = 'match';
+      earned += W.image * (0.7 + ((image.score - 70) / 30) * 0.3);
+    } else {
+      imageState = 'unknown';
+      earned += W.image * (0.3 + ((image.score - 40) / 30) * 0.4);
+    }
+    max += W.image;
+  } else if (imageRequested) {
+    imageState = 'unknown';
+    earned += W.image * UNKNOWN_CREDIT;
+    max += W.image;
+  }
+
   const raw = max > 0 ? (earned / max) * 100 : 0;
   return {
     score: Math.max(0, Math.min(100, Math.round(raw))),
     material,
     size,
     color,
+    image: imageState,
+    imageScore,
     aiGuess,
     inspected: !!detail,
   };

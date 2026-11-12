@@ -11,6 +11,7 @@ import { extractProductFacts, extractRelevantText } from '@/lib/coupangDetail';
 import { analyzeCoupangResults, type MarketBadges } from '@/lib/coupangMarket';
 import { colorStatus, firstColorToken, firstSizeToken, sizeStatus, type MatchStatus } from '@/lib/candidateFilter';
 import { classifyByDictionary, classifyMaterialMismatch, type MaterialTierVerdict } from '@/lib/materialClassify';
+import { compareWithReference, MAX_BATCH, validateReference, type ImageMatchResult } from '@/lib/candidateImageMatch';
 
 export interface CoupangResearchCandidate {
   name: string;
@@ -163,6 +164,19 @@ export async function researchCoupangComparisons(
     searchedQuery,
     fallbackNote,
   };
+}
+
+// 내 상품 사진과 후보 사진(최대 MAX_BATCH장)을 AI로 비교한다. 화면이 후보를 묶음으로
+// 나눠 순서대로 부른다(진행 표시·중단·부분 실패 대응). 절대 throw하지 않는다.
+export async function matchCandidateImages(
+  reference: { mimeType: string; base64: string },
+  imageUrls: (string | null)[]
+): Promise<{ results: (ImageMatchResult | null)[] } | { error: string }> {
+  const ref = validateReference(reference);
+  if (!ref) return { error: '내 상품 사진을 읽을 수 없어요. JPG/PNG 사진으로 다시 올려주세요.' };
+  if (!Array.isArray(imageUrls) || imageUrls.length === 0) return { results: [] };
+  const urls = imageUrls.slice(0, MAX_BATCH).map((u) => (typeof u === 'string' ? u : null));
+  return compareWithReference(ref, urls);
 }
 
 export interface CandidateDetail {
