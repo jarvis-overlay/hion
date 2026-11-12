@@ -4,6 +4,7 @@ import type { JSONContent } from '@tiptap/core';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { sendPushToEmail } from '@/lib/webpush';
 import { NOTE_BODY_CHAR_LIMIT } from '@/lib/notes/editorExtensions';
 
 const EMPTY_DOC: JSONContent = { type: 'doc', content: [] };
@@ -405,11 +406,70 @@ export async function getNoteShares(
   };
 }
 
+export type SetNoteShareSuccess = {
+  success: true;
+  // 공유받은 사람에게 앱 푸시 알림을 실제로 보냈는지
+  notified: boolean;
+  // 알림이 못 갔을 때 공유한 사람에게 보여줄 이유(공유 자체는 성공한 상태)
+  notice: string | null;
+};
+
+// 공유 직후 공유받은 사람의 기기(앱 푸시)로 알림을 보낸다. 알림은 부가
+// 기능이라 어떤 이유로든 실패해도 공유 자체를 실패로 만들지 않고, 대신 왜
+// 못 갔는지를 공유한 사람에게 알려준다(상대가 기기를 등록 안 했는데 "알림
+// 보냈다"고 착각하면 안 되므로).
+async function notifyNoteShared(
+  supabase: ReturnType<typeof createClient>,
+  targetEmail: string,
+  ownerEmail: string,
+  noteId: string,
+  noteTitle: string,
+  permission: 'view' | 'edit'
+): Promise<{ notified: boolean; notice: string | null }> {
+  const title = noteTitle.trim() || '제목 없음';
+  const shortTitle = title.length > 40 ? `${title.slice(0, 40)}…` : title;
+  try {
+    const result = await sendPushToEmail(supabase, targetEmail, {
+      title: '📒 업무수첩이 공유됐어요',
+      body: `${ownerEmail}님이 "${shortTitle}" 수첩을 ${permission === 'edit' ? '편집' : '보기'} 권한으로 공유했어요.`,
+      url: notesPath(noteId),
+    });
+
+    if (result.queryError) {
+      console.error('[work notes] 공유 알림 대상 조회 실패:', result.queryError);
+      return {
+        notified: false,
+        notice: '공유는 됐지만 알림 설정이 아직 준비되지 않아 알림은 보내지 못했어요.',
+      };
+    }
+    if (result.noDevice) {
+      return {
+        notified: false,
+        notice: `공유는 됐어요. 다만 ${targetEmail}님이 아직 이 계정으로 앱 푸시 알림 기기를 등록하지 않아서 알림은 가지 않았어요. (알림 설정 화면에서 "이 기기 등록하기"를 눌러야 해요)`,
+      };
+    }
+    if (result.sent === 0) {
+      console.error('[work notes] 공유 알림 전송 전부 실패:', result.details);
+      return {
+        notified: false,
+        notice: '공유는 됐지만 알림 전송에 실패했어요. 상대방이 알림 설정에서 기기를 다시 등록해야 할 수 있어요.',
+      };
+    }
+    return { notified: true, notice: null };
+  } catch (e) {
+    console.error('[work notes] 공유 알림 전송 오류:', e);
+    return {
+      notified: false,
+      notice: '공유는 됐지만 알림을 보내지 못했어요. (푸시 알림 서버 설정 확인 필요)',
+    };
+  }
+}
+
 export async function setNoteShare(
   noteId: string,
   targetEmail: string,
   permission: 'view' | 'edit' | null
-): Promise<{ error: string } | { success: true }> {
+): Promise<{ error: string } | SetNoteShareSuccess> {
   const supabase = createClient();
   const guard = await getAllowedUser(supabase);
   if ('error' in guard) return { error: guard.error };
@@ -417,7 +477,7 @@ export async function setNoteShare(
 
   const { data: note, error: noteError } = await supabase
     .from('work_notes')
-    .select('id, owner_id')
+    .select('id, owner_id, title')
     .eq('id', noteId)
     .maybeSingle();
   if (noteError) {
@@ -442,7 +502,7 @@ export async function setNoteShare(
       return { error: '공유를 해제하지 못했어요. 잠시 후 다시 시도해주세요.' };
     }
     revalidatePath(notesPath(noteId));
-    return { success: true };
+    return { success: true, notified: false, notice: null };
   }
 
   // 대상 이메일 → auth uuid 변환이 필요해서 service role 클라이언트를
@@ -473,6 +533,17 @@ export async function setNoteShare(
   );
   if (!targetUser) return { error: '해당 이메일로 가입된 계정을 찾지 못했어요.' };
 
+  // 알림은 "새로 공유했거나 권한이 바뀐" 경우에만 보낸다(같은 값을 다시 저장해도
+  // 알림이 또 가면 스팸). 기존 공유 조회가 실패하면 보수적으로 "새 공유"로 보고
+  // 알림을 보낸다.
+  const { data: existingShare } = await supabase
+    .from('work_note_shares')
+    .select('permission')
+    .eq('note_id', noteId)
+    .eq('target_user_id', targetUser.id)
+    .maybeSingle();
+  const shouldNotify = !existingShare || existingShare.permission !== permission;
+
   const { error: upsertError } = await supabase.from('work_note_shares').upsert(
     {
       note_id: noteId,
@@ -489,7 +560,17 @@ export async function setNoteShare(
   }
 
   revalidatePath(notesPath(noteId));
-  return { success: true };
+
+  if (!shouldNotify) return { success: true, notified: false, notice: null };
+  const { notified, notice } = await notifyNoteShared(
+    supabase,
+    targetEmail,
+    user.email,
+    noteId,
+    note.title ?? '',
+    permission
+  );
+  return { success: true, notified, notice };
 }
 
 export async function getNoteHistory(

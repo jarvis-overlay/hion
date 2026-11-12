@@ -14,10 +14,20 @@ export default async function NotificationsPage({
     .eq('connected', true)
     .order('created_at');
 
-  const { data: subscriptions } = await supabase
+  // user_email 컬럼(마이그레이션 20261112120000)이 아직 없으면 이 조회가
+  // 실패하므로, 그 경우엔 예전처럼 컬럼 없이 다시 조회해서 목록이 사라지지 않게
+  // 한다.
+  let { data: subscriptions, error: subsError } = await supabase
     .from('push_subscriptions')
-    .select('id, label, created_at')
+    .select('id, label, created_at, user_email')
     .order('created_at');
+  if (subsError) {
+    const fallback = await supabase
+      .from('push_subscriptions')
+      .select('id, label, created_at')
+      .order('created_at');
+    subscriptions = fallback.data as typeof subscriptions;
+  }
 
   return (
     <div>

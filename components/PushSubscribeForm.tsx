@@ -17,7 +17,7 @@ function urlBase64ToUint8Array(base64String: string) {
 export default function PushSubscribeForm({
   subscriptions,
 }: {
-  subscriptions: { id: string; label: string; created_at: string }[];
+  subscriptions: { id: string; label: string; created_at: string; user_email?: string | null }[];
 }) {
   const [label, setLabel] = useState('');
   const [status, setStatus] = useState<string | null>(null);
@@ -55,8 +55,16 @@ export default function PushSubscribeForm({
       });
 
       startTransition(async () => {
-        await savePushSubscription(label.trim(), subscription.toJSON() as any);
-        setStatus('✅ 이 기기에 등록됐어요.');
+        const res = await savePushSubscription(label.trim(), subscription.toJSON() as any);
+        if (!res || !res.ok) {
+          setStatus(`⚠️ ${res?.error || '등록하지 못했어요. 잠시 후 다시 시도해주세요.'}`);
+          return;
+        }
+        setStatus(
+          res.ownerLinked
+            ? '✅ 이 기기에 등록됐어요. 업무수첩 공유 알림도 이 기기로 와요.'
+            : '✅ 이 기기에 등록됐어요. (다만 기기 주인 정보는 아직 저장하지 못해서, 업무수첩 공유 알림은 관리자가 DB 설정을 마친 뒤 다시 등록해야 와요.)'
+        );
         setLabel('');
       });
     } catch (e: any) {
@@ -79,7 +87,8 @@ export default function PushSubscribeForm({
       <p className="text-xs text-inkSoft mb-3">
         안드로이드는 크롬에서, 아이폰은 Safari로 열어서 "홈 화면에 추가"로
         설치한 다음 여기서 등록하면 그 기기로 진짜 푸시 알림이 와요. 기기마다
-        따로 등록해야 해요.
+        따로 등록해야 해요. 업무수첩을 공유받으면 로그인한 계정으로 등록된
+        기기에만 알림이 가요.
       </p>
       <form onSubmit={handleSubscribe} className="flex gap-2 mb-5">
         <input
@@ -104,7 +113,14 @@ export default function PushSubscribeForm({
               key={s.id}
               className="flex items-center justify-between px-3 py-2 border border-paperLine rounded-lg text-sm"
             >
-              <span>{s.label}</span>
+              <span className="min-w-0">
+                {s.label}
+                <span className="block text-[11px] text-inkSoft truncate">
+                  {s.user_email
+                    ? s.user_email
+                    : '주인 미지정 - 이 기기에서 "이 기기 등록하기"를 다시 누르면 연결돼요'}
+                </span>
+              </span>
               <button
                 onClick={() => startTransition(() => deletePushSubscription(s.id))}
                 disabled={isPending}
