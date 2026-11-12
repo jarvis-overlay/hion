@@ -458,9 +458,12 @@ async function notifyNoteShared(
     return { notified: true, notice: null };
   } catch (e) {
     console.error('[work notes] 공유 알림 전송 오류:', e);
+    const msg = typeof (e as any)?.message === 'string' ? (e as any).message : '';
     return {
       notified: false,
-      notice: '공유는 됐지만 알림을 보내지 못했어요. (푸시 알림 서버 설정 확인 필요)',
+      notice: /VAPID/.test(msg)
+        ? '공유는 됐지만 알림을 보내지 못했어요. 서버에 푸시 알림 키(VAPID)가 없어요 - 서버 .env.local의 NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY를 확인해야 해요.'
+        : '공유는 됐지만 알림을 보내지 못했어요. (푸시 알림 서버 설정 확인 필요)',
     };
   }
 }
