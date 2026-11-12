@@ -465,6 +465,46 @@ async function notifyNoteShared(
   }
 }
 
+// 공유 대상 이메일 → auth uuid 변환 (allowed_users엔 이메일만 있고 uuid가
+// 없다). 1순위는 DB 함수 lookup_allowed_user_id(마이그레이션 20261112130000) -
+// 서버 환경변수 없이 동작한다. 그 함수가 아직 DB에 없거나 호출이 실패하면
+// 예전 방식(service role 키로 auth.admin.listUsers)으로 한 번 더 시도한다.
+// 키가 비어있으면 createClient()가 그 자리에서 예외를 던지는데(supabase-js
+// 자체 동작), 잡지 않으면 Server Action이 죽어서 "Server Components render"
+// 원시 에러 화면이 뜨므로(실제로 맥북 env에 키가 없어서 재현됨) try/catch로
+// 막아 한국어 안내로 바꾼다.
+async function resolveShareTargetUser(
+  supabase: ReturnType<typeof createClient>,
+  targetEmail: string
+): Promise<{ id: string } | { error: string }> {
+  const { data: rpcId, error: rpcError } = await supabase.rpc('lookup_allowed_user_id', {
+    p_email: targetEmail,
+  });
+  if (!rpcError) {
+    if (typeof rpcId === 'string' && rpcId) return { id: rpcId };
+    return { error: '해당 이메일로 가입된 계정을 찾지 못했어요.' };
+  }
+  console.error('[work notes] lookup_allowed_user_id 호출 실패, 관리자 키 방식으로 재시도:', rpcError.message);
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch (e) {
+    console.error('[work notes] 관리자 클라이언트 생성 실패(SUPABASE_SERVICE_ROLE_KEY 확인 필요):', e);
+    return { error: '공유 기능이 아직 설정되지 않았어요. 잠시 후 다시 시도해주세요.' };
+  }
+  const { data: usersPage, error: listError } = await admin.auth.admin.listUsers({
+    perPage: 1000,
+  });
+  if (listError) {
+    console.error('[work notes] 사용자 목록 조회 실패:', listError.message);
+    return { error: '사용자 정보를 확인하지 못했어요. 잠시 후 다시 시도해주세요.' };
+  }
+  const found = usersPage.users.find((u) => u.email?.toLowerCase() === targetEmail.toLowerCase());
+  if (!found) return { error: '해당 이메일로 가입된 계정을 찾지 못했어요.' };
+  return { id: found.id };
+}
+
 export async function setNoteShare(
   noteId: string,
   targetEmail: string,
@@ -505,33 +545,8 @@ export async function setNoteShare(
     return { success: true, notified: false, notice: null };
   }
 
-  // 대상 이메일 → auth uuid 변환이 필요해서 service role 클라이언트를
-  // 쓴다(allowed_users엔 이메일만 있고 uuid가 없음). 2명 규모라 listUsers()
-  // 전체 목록을 받아서 메모리에서 찾아도 괜찮다.
-  // SUPABASE_SERVICE_ROLE_KEY가 비어있으면 createClient()가 그 자리에서
-  // 예외를 던진다(supabase-js 자체 동작) - 잡지 않으면 Server Action이
-  // 그대로 죽어서 사용자에게 "Server Components render" 원시 에러 화면이
-  // 뜬다(실제로 맥북 env에 이 키가 빠져 있어서 재현됨). try/catch로 막아서
-  // 다른 액션들과 같은 한국어 안내로 바꾼다.
-  let admin;
-  try {
-    admin = createAdminClient();
-  } catch (e) {
-    console.error('[work notes] 관리자 클라이언트 생성 실패(SUPABASE_SERVICE_ROLE_KEY 확인 필요):', e);
-    return { error: '공유 기능이 아직 설정되지 않았어요. 잠시 후 다시 시도해주세요.' };
-  }
-  const { data: usersPage, error: listError } = await admin.auth.admin.listUsers({
-    perPage: 1000,
-  });
-  if (listError) {
-    console.error('[work notes] 사용자 목록 조회 실패:', listError.message);
-    return { error: '사용자 정보를 확인하지 못했어요. 잠시 후 다시 시도해주세요.' };
-  }
-
-  const targetUser = usersPage.users.find(
-    (u) => u.email?.toLowerCase() === targetEmail.toLowerCase()
-  );
-  if (!targetUser) return { error: '해당 이메일로 가입된 계정을 찾지 못했어요.' };
+  const targetUser = await resolveShareTargetUser(supabase, targetEmail);
+  if ('error' in targetUser) return { error: targetUser.error };
 
   // 알림은 "새로 공유했거나 권한이 바뀐" 경우에만 보낸다(같은 값을 다시 저장해도
   // 알림이 또 가면 스팸). 기존 공유 조회가 실패하면 보수적으로 "새 공유"로 보고
