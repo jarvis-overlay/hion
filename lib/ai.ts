@@ -12,7 +12,49 @@ function requireEnv(name: string): string {
   return v;
 }
 
+// ANTHROPIC_API_KEY가 서버에 없을 때의 대체 경로 - 다른 AI 기능이 이미 쓰는 Gemini 키로
+// 같은 프롬프트를 처리한다(맥북 서버에 Claude 키를 아직 안 넣은 경우에도 번역 등이 되게).
+// Claude 키가 있으면 항상 Claude를 쓴다.
+async function callGeminiText(prompt: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      '서버에 AI 키(ANTHROPIC_API_KEY 또는 GEMINI_API_KEY)가 설정 안 되어있어요. 서버 .env.local을 확인해주세요.'
+    );
+  }
+  const model = process.env.GEMINI_VISION_MODEL || 'gemini-3.6-flash';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }),
+        signal: controller.signal,
+      }
+    );
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(json?.error?.message || `Gemini API 오류 (HTTP ${res.status})`);
+    }
+    const text = (json?.candidates?.[0]?.content?.parts || [])
+      .filter((p: any) => typeof p?.text === 'string' && !p?.thought)
+      .map((p: any) => p.text)
+      .join('');
+    if (!text.trim()) throw new Error('AI가 빈 응답을 보냈어요. 다시 시도해주세요.');
+    return extractJson(text);
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new Error('AI 응답이 너무 오래 걸려요. 잠시 뒤 다시 시도해주세요.');
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function callClaude(prompt: string): Promise<string> {
+  if (!process.env.ANTHROPIC_API_KEY) return callGeminiText(prompt);
   const apiKey = requireEnv('ANTHROPIC_API_KEY');
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
