@@ -44,6 +44,7 @@ export interface ShippingExtraFeePreset {
 export const SHIPPING_EXTRA_FEE_PRESETS: ShippingExtraFeePreset[] = [
   { label: '기본검수' },
   { label: '포장보완' },
+  { label: '로켓 바코드 스티커' },
   { label: '원산지 표시' },
   { label: '원산지 증명 (C/O)' },
   { label: 'B/L' },
