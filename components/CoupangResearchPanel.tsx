@@ -156,6 +156,119 @@ export default function CoupangResearchPanel({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // 조사 결과 자동 저장/복원 - 패널을 닫았다 다시 열어도(또는 새로고침해도) 마지막에 보던
+  // 화면이 그대로 돌아오게 한다. 이 브라우저(localStorage)에 항목별로 저장하고, 내 상품 사진은
+  // 저장하지 않는다. 저장이 안 되는 환경(프라이빗 창 등)에서는 조용히 건너뛴다.
+  const storageKey = `hion.coupangResearch.v1.${item.id}`;
+  const [hydrated, setHydrated] = useState(false);
+  const [restoredAt, setRestoredAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const s = raw ? JSON.parse(raw) : null;
+      const strs = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+      if (s && s.v === 1 && s.result && Array.isArray(s.result.candidates)) {
+        if (typeof s.keyword === 'string') setKeyword(s.keyword);
+        if (typeof s.userMaterial === 'string') setUserMaterial(s.userMaterial);
+        if (typeof s.userSize === 'string') setUserSize(s.userSize);
+        if (typeof s.userColor === 'string') setUserColor(s.userColor);
+        if (s.applied && typeof s.applied === 'object') {
+          setApplied({
+            keyword: String(s.applied.keyword ?? ''),
+            material: String(s.applied.material ?? ''),
+            size: String(s.applied.size ?? ''),
+            color: String(s.applied.color ?? ''),
+          });
+        }
+        setResult(s.result as CoupangResearchResult);
+        setSelected(new Set(strs(s.selected)));
+        setRemoved(new Set(strs(s.removed)));
+        if (['default', 'accuracy', 'review', 'priceAsc', 'priceDesc'].includes(s.sortMode)) {
+          setSortMode(s.sortMode as SortMode);
+        }
+        if (typeof s.priceRange === 'string') setPriceRange(s.priceRange);
+        if (s.marketSize === 'high' || s.marketSize === 'mid' || s.marketSize === 'low') setMarketSize(s.marketSize);
+        if (Array.isArray(s.details)) {
+          setDetails(
+            new Map(
+              s.details
+                .filter((e: any) => Array.isArray(e) && typeof e[0] === 'string' && e[1] && typeof e[1] === 'object')
+                .map((e: any) => [e[0], { status: 'done', detail: e[1] } as DetailState])
+            )
+          );
+        }
+        if (Array.isArray(s.imageMatches)) {
+          setImageMatches(
+            new Map(
+              s.imageMatches.filter((e: any) => Array.isArray(e) && typeof e[0] === 'string' && e[1] && typeof e[1] === 'object')
+            )
+          );
+        }
+        setImageRequested(s.imageRequested === true);
+        setRestoredAt(typeof s.savedAt === 'number' ? s.savedAt : Date.now());
+      }
+    } catch {
+      // 저장된 값이 깨졌거나 접근 불가 - 복원만 건너뛴다
+    }
+    setHydrated(true);
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!hydrated || !result) return;
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          v: 1,
+          savedAt: Date.now(),
+          keyword,
+          userMaterial,
+          userSize,
+          userColor,
+          applied,
+          result,
+          selected: [...selected],
+          removed: [...removed],
+          sortMode,
+          priceRange,
+          marketSize,
+          details: [...details.entries()]
+            .filter(([, d]) => d.status === 'done')
+            .map(([k, d]) => [k, (d as { status: 'done'; detail: CandidateDetail }).detail]),
+          imageMatches: [...imageMatches.entries()],
+          imageRequested,
+        })
+      );
+    } catch {
+      // 용량 초과 등 - 저장만 건너뛴다
+    }
+  }, [
+    hydrated, storageKey, result, keyword, userMaterial, userSize, userColor, applied,
+    selected, removed, sortMode, priceRange, marketSize, details, imageMatches, imageRequested,
+  ]);
+
+  function clearSavedResearch() {
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      // 무시
+    }
+    imageRun.current++;
+    inspectRun.current++;
+    setImageMatching(false);
+    setInspecting(false);
+    setResult(null);
+    setRestoredAt(null);
+    setSelected(new Set());
+    setRemoved(new Set());
+    setDetails(new Map());
+    setImageMatches(new Map());
+    setImageRequested(false);
+    setImageSummary('');
+  }
+
   function selectedCandidates(): CoupangResearchCandidate[] {
     if (!result) return [];
     return result.candidates.filter((c, i) => selected.has(candidateKey(c, i)));
@@ -440,6 +553,7 @@ export default function CoupangResearchPanel({
     inspectRun.current++;
     setInspecting(false);
     setDetails(new Map());
+    setRestoredAt(null);
     try {
       const res = await researchCoupangComparisons(keyword, {
         material: userMaterial.trim(),
@@ -571,6 +685,19 @@ export default function CoupangResearchPanel({
         setSaveError(res?.error ?? '저장에 실패했어요. 다시 시도해주세요.');
         return;
       }
+      // 저장한 후보는 체크 표시를 풀어둔다(다시 열었을 때 같은 후보를 또 저장하지 않게).
+      // 패널이 곧 닫혀서 자동 저장이 못 돌 수 있으니 저장본도 직접 고친다.
+      setSelected(new Set());
+      try {
+        const raw = localStorage.getItem(storageKey);
+        const s = raw ? JSON.parse(raw) : null;
+        if (s && typeof s === 'object') {
+          s.selected = [];
+          localStorage.setItem(storageKey, JSON.stringify(s));
+        }
+      } catch {
+        // 무시
+      }
       onSaved();
     });
   }
@@ -666,6 +793,17 @@ export default function CoupangResearchPanel({
       {researchError && (
         <p className="text-[11px] text-warn bg-warnBg rounded px-2 py-1.5">
           {researchError} 수동으로 비교 상품을 추가해주세요.
+        </p>
+      )}
+
+      {result && restoredAt && (
+        <p className="text-[11px] text-inkSoft bg-white ring-1 ring-paperLine rounded px-2 py-1.5">
+          마지막으로 보던 조사 결과를 불러왔어요 (
+          {new Date(restoredAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          ). 이 브라우저에만 저장돼요. 새로 찾으려면 &quot;조사하기&quot;를 누르세요.{' '}
+          <button type="button" onClick={clearSavedResearch} className="underline">
+            저장된 결과 지우기
+          </button>
         </p>
       )}
 
