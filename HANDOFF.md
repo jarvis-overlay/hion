@@ -10,6 +10,12 @@
 4. 배송비 계산기 기본값은 브라우저 localStorage라 PC마다 따로 저장해야 함.
 5. 이 PC에만 있는 미추적 파일 `업무수첩_기능정리.md`는 다른 프로젝트(rpa-system) 문서라 커밋하지 않았음.
 
+## -12. 비교 상품군: 사진·가격·리뷰 저장 + 사진 확대 (2026-11-14)
+
+- 쿠팡 조사에서 저장한 비교 상품에 사진 주소(`image_url`, 쿠팡 이미지 서버만 허용)·개별 가격(`item_price`)·리뷰 수(`review_count`)도 저장. 목록 행에 사진 48px + "9,270원 · 리뷰 15,899개" 표시, 사진에 마우스를 올리면 큰 사진(`components/HoverZoomImage.tsx`, 조사 후보 목록에도 적용).
+- 마이그레이션 `supabase/migrations/20261114120000_add_comparison_photo_price_review.sql`. **적용 전에는** 서버가 이 컬럼 없이 예전처럼 저장하는 폴백이 있어 앱은 안 깨지지만 사진·가격·리뷰는 저장되지 않음. 적용은 `npx supabase db push --remote`(에이전트 실행은 사용자 확인 `--yes` 필요). 이 PC는 supabase link 돼 있음(dry-run 확인). **dry-run 기준 미적용 마이그레이션이 3개**: `20261112120000_add_push_subscription_owner`, `20261112130000_add_lookup_allowed_user_id`(위 -4/-9 항목에서 "반드시 필요"로 적어둔 것), 이번 것.
+- 이미 저장해 둔 비교 상품(링크만 있음)에는 사진·가격·리뷰가 없다 - 새로 조사해서 저장한 것부터 채워짐.
+
 ## -11. 쿠팡 조사 결과 자동 저장/복원 + 정확도 점수 보정 (2026-11-14)
 
 - `components/CoupangResearchPanel.tsx`: 조사 결과(후보·체크·제거·정렬·상세확인·사진비교 결과)를 항목별로 브라우저 localStorage(`hion.coupangResearch.v1.<항목id>`)에 자동 저장, 패널을 닫았다 열어도 복원. 내 상품 사진은 저장 안 함. **PC·브라우저마다 따로**(DB 저장 아님) — PC 간 공유가 필요하면 DB 컬럼(jsonb) 마이그레이션이 필요.

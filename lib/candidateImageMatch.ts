@@ -5,6 +5,9 @@
 // AI가 판단을 못 한 후보는 null(=모름)로 돌려주고, 호출한 쪽은 "모름"으로만 취급한다.
 // 결과는 AI 추정이라 화면에서도 그렇게 표시하고, 자동 삭제의 근거로는 쓰지 않는다.
 import { VISION_MODEL, geminiErrorMessage } from '@/lib/imageProcessing';
+import { normalizeCoupangImageUrl } from '@/lib/coupangImageUrl';
+
+export { normalizeCoupangImageUrl };
 
 export interface ReferenceImage {
   mimeType: string;
@@ -29,24 +32,6 @@ export function validateReference(ref: unknown): ReferenceImage | null {
   if (typeof base64 !== 'string' || base64.length < 100 || base64.length > MAX_REF_BASE64) return null;
   if (!/^[A-Za-z0-9+/]+=*$/.test(base64)) return null;
   return { mimeType, base64 };
-}
-
-// 쿠팡 이미지 서버 주소만 허용한다(서버가 임의 주소를 대신 받아오지 않게).
-export function normalizeCoupangImageUrl(raw: string | null): string | null {
-  if (!raw || raw.length > 600) return null;
-  let s = raw.trim();
-  if (s.startsWith('//')) s = `https:${s}`;
-  if (s.startsWith('http://')) s = `https://${s.slice(7)}`;
-  try {
-    const u = new URL(s);
-    if (u.protocol !== 'https:' || u.port || u.username || u.password) return null;
-    const h = u.hostname.toLowerCase();
-    // 쿠팡 이미지 서버(coupangcdn.com)만 허용 - 범위를 좁게 잡아 서버가 엉뚱한 곳을 호출하지 않게 한다
-    if (h === 'coupangcdn.com' || h.endsWith('.coupangcdn.com')) return u.href;
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 async function fetchCandidateImage(url: string): Promise<{ mimeType: string; base64: string } | null> {

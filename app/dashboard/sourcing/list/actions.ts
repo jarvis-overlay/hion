@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { isProcessStep } from '@/lib/sourcingProcess';
+import { normalizeCoupangImageUrl } from '@/lib/coupangImageUrl';
 
 function numOrNull(fd: FormData, key: string): number | null {
   const v = fd.get(key);
@@ -40,6 +41,14 @@ export interface ComparisonInput {
   link: string;
   prices: ComparisonPriceInput[];
   source?: 'manual' | 'coupang_auto';
+  // 쿠팡 실데이터 조사로 저장할 때만 채운다(사진 주소 / 상품 하나의 가격 / 리뷰 수)
+  imageUrl?: string | null;
+  itemPrice?: number | null;
+  reviewCount?: number | null;
+}
+
+function intOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 2_000_000_000 ? Math.round(v) : null;
 }
 
 // title+link 쌍으로 비교 상품을 구분하기 위한 키 - insert 전 입력값과
@@ -70,17 +79,33 @@ async function insertComparisons(
 ): Promise<string | null> {
   if (comparisons.length === 0) return null;
 
-  const { data: inserted, error: compErr } = await supabase
+  const baseRows = comparisons.map((c) => ({
+    sourcing_item_id: sourcingItemId,
+    title: c.title || null,
+    link: c.link || null,
+    source: c.source || 'manual',
+  }));
+  // 사진 주소는 쿠팡 이미지 서버 주소만 저장한다(검증 못 하면 저장 안 함)
+  const richRows = comparisons.map((c, i) => ({
+    ...baseRows[i],
+    image_url: normalizeCoupangImageUrl(c.imageUrl ?? null),
+    item_price: intOrNull(c.itemPrice),
+    review_count: intOrNull(c.reviewCount),
+  }));
+  const hasExtra = richRows.some((r) => r.image_url || r.item_price != null || r.review_count != null);
+
+  let { data: inserted, error: compErr } = await supabase
     .from('sourcing_item_comparisons')
-    .insert(
-      comparisons.map((c) => ({
-        sourcing_item_id: sourcingItemId,
-        title: c.title || null,
-        link: c.link || null,
-        source: c.source || 'manual',
-      }))
-    )
+    .insert(hasExtra ? richRows : baseRows)
     .select('id, title, link');
+  // 사진/가격/리뷰 컬럼 마이그레이션이 원격 DB에 아직 없으면, 이 정보만 빼고 기존처럼 저장한다
+  if (compErr && hasExtra && /(image_url|item_price|review_count)/i.test(compErr.message)) {
+    console.error('[sourcing] 비교 상품 사진/가격/리뷰 컬럼 없음 - 이 정보 없이 저장:', compErr.message);
+    ({ data: inserted, error: compErr } = await supabase
+      .from('sourcing_item_comparisons')
+      .insert(baseRows)
+      .select('id, title, link'));
+  }
   if (compErr) {
     // source 컬럼 마이그레이션(supabase/migrations/..._add_comparison_source.sql)이
     // 원격 DB에 아직 적용 안 됐으면 기존 수동 "비교 상품 추가"까지 전부

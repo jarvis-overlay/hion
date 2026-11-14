@@ -15,6 +15,7 @@ import {
 } from '@/app/dashboard/sourcing/list/researchActions';
 import { addSourcingComparisons } from '@/app/dashboard/sourcing/list/actions';
 import { Badge, MarketBadgeRow } from '@/components/MarketBadge';
+import HoverZoomImage from '@/components/HoverZoomImage';
 import { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
 
 type DetailState =
@@ -693,6 +694,9 @@ export default function CoupangResearchPanel({
           link: c.url,
           prices: [{ platform: 'coupang' as const, priceRange, marketSize }],
           source: 'coupang_auto' as const,
+          imageUrl: c.imageUrl,
+          itemPrice: parsePrice(c.price),
+          reviewCount: parseCount(c.reviewCount),
         }))
       );
       if (!res || 'error' in res) {
@@ -1041,16 +1045,7 @@ export default function CoupangResearchPanel({
                       onChange={() => handleToggle(key)}
                       className="shrink-0"
                     />
-                    {c.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={c.imageUrl}
-                        alt={c.name}
-                        className="w-10 h-10 rounded object-cover shrink-0 bg-paperLine"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded shrink-0 bg-paperLine" />
-                    )}
+                    <HoverZoomImage src={c.imageUrl} alt={c.name} size={40} />
                     <div className="min-w-0 flex-1">
                       <p className="text-ink line-clamp-2 leading-snug">{c.name}</p>
                       <p className="text-inkSoft">

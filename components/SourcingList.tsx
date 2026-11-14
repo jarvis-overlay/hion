@@ -38,6 +38,7 @@ import { MarginDetailFields } from '@/components/MarginDetailFields';
 import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/ComparisonEntryEditor';
 import CoupangResearchPanel from '@/components/CoupangResearchPanel';
+import HoverZoomImage from '@/components/HoverZoomImage';
 import MarginReverseCalc from '@/components/MarginReverseCalc';
 import NoteTimeline from '@/components/NoteTimeline';
 import CollapsibleText from '@/components/CollapsibleText';
@@ -1359,7 +1360,8 @@ function ComparisonsSection({ item }: { item: any }) {
 
             return (
               <div key={c.id} className="flex items-start justify-between gap-2 text-xs bg-paper rounded px-2 py-1.5">
-                <div className="min-w-0">
+                {c.image_url && <HoverZoomImage src={c.image_url} alt={c.title || '비교 상품'} size={48} />}
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-ink truncate">{c.title || '(이름 없음)'}</span>
                     {c.link && (
@@ -1373,6 +1375,12 @@ function ComparisonsSection({ item }: { item: any }) {
                       </a>
                     )}
                   </div>
+                  {(c.item_price != null || c.review_count != null) && (
+                    <p className="text-ink font-semibold mt-0.5">
+                      {c.item_price != null ? `${Number(c.item_price).toLocaleString('ko-KR')}원` : '가격 미상'}
+                      {c.review_count != null ? ` · 리뷰 ${Number(c.review_count).toLocaleString('ko-KR')}개` : ''}
+                    </p>
+                  )}
                   {prices.length > 0 && (
                     <p className="text-inkSoft mt-0.5">
                       {prices
