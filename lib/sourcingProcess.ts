@@ -11,6 +11,7 @@
 
 export type ProcessStep =
   | 'before_review'
+  | 'needs_review'
   | 'reviewed'
   | 'sourcing'
   | 'on_sale'
@@ -19,6 +20,7 @@ export type ProcessStep =
 
 export const PROCESS_STEPS: { value: ProcessStep; label: string }[] = [
   { value: 'before_review', label: '검수전' },
+  { value: 'needs_review', label: '추가 검토 필요' },
   { value: 'reviewed', label: '검수 완료' },
   { value: 'sourcing', label: '소싱 진행 중' },
   { value: 'on_sale', label: '판매중' },
@@ -33,6 +35,7 @@ export const PROCESS_LABEL: Record<ProcessStep, string> = Object.fromEntries(
 // 칩/배지 색 (Tailwind 토큰은 기존 SourcingList가 쓰던 것과 같은 계열)
 export const PROCESS_STYLE: Record<ProcessStep, string> = {
   before_review: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
+  needs_review: 'bg-red-50 text-red-700',
   reviewed: 'bg-accentBg text-accent ring-1 ring-inset ring-accent/20',
   sourcing: 'bg-warnBg text-warn',
   on_sale: 'bg-profitBg text-profit',

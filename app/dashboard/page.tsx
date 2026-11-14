@@ -98,12 +98,18 @@ export default async function DashboardHome() {
       <div className="grid gap-4 lg:grid-cols-2 mb-8">
         <div className="card p-5">
           <h2 className="font-display font-bold mb-4">소싱 리스트 현황</h2>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
             <div className="text-center py-3 rounded-lg bg-[#F3F4F6]">
               <div className="text-xl font-bold text-inkSoft font-mono">
                 {statusCount.before_review}
               </div>
               <div className="text-xs text-inkSoft mt-1">검수전</div>
+            </div>
+            <div className="text-center py-3 rounded-lg bg-red-50">
+              <div className="text-xl font-bold text-red-700 font-mono">
+                {statusCount.needs_review}
+              </div>
+              <div className="text-xs text-inkSoft mt-1">추가 검토 필요</div>
             </div>
             <div className="text-center py-3 rounded-lg bg-accentBg">
               <div className="text-xl font-bold text-accent font-mono">
