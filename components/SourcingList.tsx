@@ -3,8 +3,6 @@
 import { useMemo, useRef, useState, useTransition } from 'react';
 import {
   updateSourcingStatus,
-  updateSourcingPriority,
-  updateSourcingInputStatus,
   updateSourcingItem,
   deleteSourcingItem,
   archiveSourcingItem,
@@ -50,7 +48,6 @@ import {
   PROCESS_LABEL,
   PROCESS_STYLE,
   resolveProcess,
-  normalizePriority,
   type ProcessStep,
 } from '@/lib/sourcingProcess';
 
@@ -58,17 +55,6 @@ const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네�
 
 // 진행 단계(검수전/검수 완료/소싱 진행 중/판매중/판매중지/보류)는 lib/sourcingProcess.ts
 
-const PRIORITY_LABEL: Record<string, string> = {
-  '1': '1순위',
-  '2': '2순위',
-  '3': '3순위',
-};
-
-const PRIORITY_STYLE: Record<string, string> = {
-  '1': 'bg-red-50 text-red-700',
-  '2': 'bg-warnBg text-warn',
-  '3': 'bg-paperLine text-inkSoft',
-};
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
@@ -1461,11 +1447,7 @@ export default function SourcingList({
   const [search, setSearch] = useState('');
   // 진행 단계 필터 ('all' 또는 ProcessStep)
   const [processFilter, setProcessFilter] = useState<'all' | ProcessStep>('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
-  const [showMoreFilters, setShowMoreFilters] = useState(false);
-  const [priorityError, setPriorityError] = useState<string | null>(null);
   const [archiveError, setArchiveError] = useState<string | null>(null);
-  const [enteredFilter, setEnteredFilter] = useState('all');
   // 더 이상 소싱 안 하기로 한 항목을 메인 목록에서 숨기고 "보관함"
   // 으로만 따로 볼 수 있게 - 지우는 게 아니라 숨기기만 하는 거라 토글로
   // 전환한다 (기본값 = 보관 안 한 것만 보임).
@@ -1493,12 +1475,10 @@ export default function SourcingList({
     });
   }
 
-  // 진행 단계 칩의 개수 - 단계 필터만 빼고 나머지 조건(검색/우선순위/입력/보관함)은 그대로 적용
+  // 진행 단계 칩의 개수 - 단계 필터만 빼고 나머지 조건(검색/보관함)은 그대로 적용
   const matchesBase = (it: any) => {
     const q = search.trim().toLowerCase();
     if (showArchived ? !it.archived_at : !!it.archived_at) return false;
-    if (priorityFilter !== 'all' && (normalizePriority(it.priority) || 'none') !== priorityFilter) return false;
-    if (enteredFilter !== 'all' && (it.input_status || 'not_entered') !== enteredFilter) return false;
     if (!q) return true;
     return (
       it.title?.toLowerCase().includes(q) ||
@@ -1517,7 +1497,7 @@ export default function SourcingList({
     }
     return counts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, search, priorityFilter, enteredFilter, showArchived]);
+  }, [items, search, showArchived]);
 
   const rows = useMemo(() => {
     const withMargin = items.map((it) => ({
@@ -1560,7 +1540,7 @@ export default function SourcingList({
 
     return sorted;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, search, processFilter, priorityFilter, enteredFilter, showArchived, sortKey]);
+  }, [items, search, processFilter, showArchived, sortKey]);
 
   const archivedCount = useMemo(() => items.filter((it) => !!it.archived_at).length, [items]);
 
@@ -1573,17 +1553,6 @@ export default function SourcingList({
           placeholder="상품명 · 메모 · 링크 검색"
           className="border border-paperLine bg-white px-3 py-2 text-sm flex-1 min-w-[180px]"
         />
-        <select
-          value={priorityFilter}
-          onChange={(e) => setPriorityFilter(e.target.value)}
-          className="border border-paperLine bg-white px-2 py-2 text-sm"
-        >
-          <option value="all">우선순위 전체</option>
-          <option value="1">1순위</option>
-          <option value="2">2순위</option>
-          <option value="3">3순위</option>
-          <option value="none">미지정</option>
-        </select>
         <select
           value={sortKey}
           onChange={(e) => setSortKey(e.target.value as SortKey)}
@@ -1604,30 +1573,7 @@ export default function SourcingList({
         >
           {showArchived ? '목록으로 돌아가기' : `보관함${archivedCount > 0 ? ` (${archivedCount})` : ''}`}
         </button>
-        <button
-          type="button"
-          onClick={() => setShowMoreFilters((v) => !v)}
-          className={`text-sm px-3 py-2 rounded-md ${
-            enteredFilter !== 'all' ? 'ring-1 ring-accent text-accent font-semibold' : 'ring-1 ring-paperLine text-inkSoft hover:text-ink'
-          }`}
-        >
-          더보기 {showMoreFilters ? '▲' : '▼'}
-        </button>
       </div>
-
-      {showMoreFilters && (
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <select
-            value={enteredFilter}
-            onChange={(e) => setEnteredFilter(e.target.value)}
-            className="border border-paperLine bg-white px-2 py-2 text-sm"
-          >
-            <option value="all">입력/미입력 전체</option>
-            <option value="entered">입력 (판매가·원가 입력됨)</option>
-            <option value="not_entered">미입력</option>
-          </select>
-        </div>
-      )}
 
       {/* 진행 단계 - 검수전 → 검수 완료 → 소싱 진행 중 → 판매중 (한 방향 흐름) | 판매중지 · 보류 (흐름 밖) */}
       <div className="flex flex-wrap items-center gap-1.5 mb-4">
@@ -1656,11 +1602,6 @@ export default function SourcingList({
         ))}
       </div>
 
-      {priorityError && (
-        <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2 mb-3">
-          우선순위 저장 실패: {priorityError}
-        </p>
-      )}
       {archiveError && (
         <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2 mb-3">보관함 처리 실패: {archiveError}</p>
       )}
@@ -1683,12 +1624,6 @@ export default function SourcingList({
         <div className="grid gap-3">
           {rows.map((it) => {
             const process = resolveProcess(it);
-            const priority: string | null = normalizePriority(it.priority);
-            // 등록 시점엔 판매가·원가가 둘 다 있으면 "입력"으로
-            // 시작하지만, 그 뒤로는 카드에서 직접 바꿀 수 있는 독립적인
-            // 값이다 (input_status 컬럼 - 가격을 나중에 고쳐도 자동으로
-            // 안 바뀜).
-            const entered = (it.input_status || 'not_entered') === 'entered';
             const m = it.margin;
             const isEditing = editingId === it.id;
             const isMarginExpanded = expandedMarginId === it.id;
@@ -1720,25 +1655,9 @@ export default function SourcingList({
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <h3 className="font-semibold text-sm">{it.title}</h3>
                       <span
-                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
-                          priority
-                            ? PRIORITY_STYLE[priority]
-                            : 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine'
-                        }`}
-                      >
-                        {priority ? PRIORITY_LABEL[priority] : '우선순위 미지정'}
-                      </span>
-                      <span
                         className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${PROCESS_STYLE[process]}`}
                       >
                         {PROCESS_LABEL[process]}
-                      </span>
-                      <span
-                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
-                          entered ? 'bg-profitBg text-profit' : 'bg-warnBg text-warn'
-                        }`}
-                      >
-                        {entered ? '입력' : '미입력'}
                       </span>
                       {it.marketSize && (
                         <span
@@ -1887,35 +1806,6 @@ export default function SourcingList({
                     {new Date(it.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
                   </span>
                   <div className="flex gap-2 text-xs items-center">
-                    <select
-                      value={entered ? 'entered' : 'not_entered'}
-                      disabled={isPending}
-                      onChange={(e) =>
-                        startTransition(() => updateSourcingInputStatus(it.id, e.target.value))
-                      }
-                      className="border border-paperLine bg-white text-xs px-1 py-0.5"
-                    >
-                      <option value="not_entered">미입력</option>
-                      <option value="entered">입력</option>
-                    </select>
-                    <select
-                      value={priority ?? ''}
-                      disabled={isPending}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setPriorityError(null);
-                        startTransition(async () => {
-                          const res = await updateSourcingPriority(it.id, next);
-                          if (res && 'error' in res) setPriorityError(res.error);
-                        });
-                      }}
-                      className="border border-paperLine bg-white text-xs px-1 py-0.5"
-                    >
-                      <option value="">우선순위 미지정</option>
-                      <option value="1">1순위</option>
-                      <option value="2">2순위</option>
-                      <option value="3">3순위</option>
-                    </select>
                     <select
                       value={process}
                       disabled={isPending}
