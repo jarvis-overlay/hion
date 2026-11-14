@@ -169,7 +169,7 @@ export default function CoupangResearchPanel({
       const s = raw ? JSON.parse(raw) : null;
       const strs = (v: unknown): string[] =>
         Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
-      if (s && s.v === 1 && s.result && Array.isArray(s.result.candidates)) {
+      if (s && s.v === 1) {
         if (typeof s.keyword === 'string') setKeyword(s.keyword);
         if (typeof s.userMaterial === 'string') setUserMaterial(s.userMaterial);
         if (typeof s.userSize === 'string') setUserSize(s.userSize);
@@ -181,6 +181,11 @@ export default function CoupangResearchPanel({
             size: String(s.applied.size ?? ''),
             color: String(s.applied.color ?? ''),
           });
+        }
+        // 조사 결과가 없는 저장본(입력칸만 저장됨)이면 입력칸만 복원한다
+        if (!(s.result && Array.isArray(s.result.candidates))) {
+          setHydrated(true);
+          return;
         }
         setResult(s.result as CoupangResearchResult);
         setSelected(new Set(strs(s.selected)));
@@ -216,8 +221,17 @@ export default function CoupangResearchPanel({
   }, [storageKey]);
 
   useEffect(() => {
-    if (!hydrated || !result) return;
+    if (!hydrated || loading) return;
     try {
+      if (!result) {
+        // 아직 조사 전이라도 입력칸(검색어·재질·사이즈·색상)은 남겨둔다. 단, 이미 저장된 조사 결과가
+        // 있으면(조사 실패 등으로 화면이 잠깐 비었을 때) 그걸 지우지 않는다.
+        const dirty = keyword !== (item.title || '') || !!userMaterial || !!userSize || !!userColor;
+        if (!dirty) return;
+        const prevRaw = localStorage.getItem(storageKey);
+        const prev = prevRaw ? JSON.parse(prevRaw) : null;
+        if (prev && prev.result) return;
+      }
       localStorage.setItem(
         storageKey,
         JSON.stringify({
@@ -245,7 +259,7 @@ export default function CoupangResearchPanel({
       // 용량 초과 등 - 저장만 건너뛴다
     }
   }, [
-    hydrated, storageKey, result, keyword, userMaterial, userSize, userColor, applied,
+    hydrated, loading, item.title, storageKey, result, keyword, userMaterial, userSize, userColor, applied,
     selected, removed, sortMode, priceRange, marketSize, details, imageMatches, imageRequested,
   ]);
 
