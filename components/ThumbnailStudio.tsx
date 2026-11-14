@@ -72,11 +72,106 @@ function UrlWarning({ url }: { url: string }) {
   );
 }
 
+// 예전에 올려서 이미 저장돼 있는 상품 사진 한 장 (메인 썸네일 행의 원본 사진)
+interface LibraryPhoto {
+  id: string; // thumbnail_images 행 id (서버가 이 id로 사진을 다시 받아온다)
+  url: string;
+  colorLabel: string;
+  projectId: string;
+  projectTitle: string;
+}
+
+// "이전에 올린 사진에서 선택" - 사진을 매번 새로 올리지 않고, 예전에 올렸던 사진을 눌러서 다시 쓴다.
+// 이 프로젝트에서 올린 사진을 먼저, 다른 프로젝트 사진은 한 번 더 눌러서 펼친다.
+function SavedPhotoPicker({
+  photos,
+  currentProjectId,
+  pickedIds = [],
+  onPick,
+}: {
+  photos: LibraryPhoto[];
+  currentProjectId: string;
+  pickedIds?: string[];
+  onPick: (photo: LibraryPhoto) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [showOthers, setShowOthers] = useState(false);
+  if (photos.length === 0) {
+    return (
+      <p className="text-[11px] text-inkSoft">
+        이전에 올린 사진: 아직 없어요 (한 번 만들고 나면 여기서 바로 골라 다시 쓸 수 있어요).
+      </p>
+    );
+  }
+  const mine = photos.filter((p) => p.projectId === currentProjectId);
+  const others = photos.filter((p) => p.projectId !== currentProjectId).slice(0, 60);
+  const tile = (p: LibraryPhoto, showProject: boolean) => {
+    const picked = pickedIds.includes(p.id);
+    return (
+      <button
+        key={p.id}
+        type="button"
+        disabled={picked}
+        onClick={() => onPick(p)}
+        title={`${p.projectTitle || '제목 없는 프로젝트'}${p.colorLabel ? ` · ${p.colorLabel}` : ''}`}
+        className={`w-[72px] text-left rounded border p-1 bg-white ${
+          picked ? 'border-accent opacity-60' : 'border-paperLine hover:border-accent'
+        }`}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={p.url} alt="" className="w-16 h-16 object-cover rounded bg-paper" loading="lazy" />
+        <span className="block text-[10px] text-inkSoft truncate mt-0.5">
+          {picked ? '✓ 선택됨' : showProject ? p.projectTitle || '제목 없음' : p.colorLabel || '색상 없음'}
+        </span>
+        {showProject && !picked && <span className="block text-[10px] text-accent truncate">{p.colorLabel || ''}</span>}
+      </button>
+    );
+  };
+  return (
+    <div className="grid gap-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs text-accent font-semibold justify-self-start"
+      >
+        {open ? '이전에 올린 사진 닫기' : `이전에 올린 사진에서 선택 (${photos.length}장)`}
+      </button>
+      {open && (
+        <div className="grid gap-2 bg-paper rounded p-2.5">
+          <p className="text-[11px] text-inkSoft">
+            눌러서 고르면 사진을 새로 올리지 않고 그대로 다시 써요. 색상 이름도 함께 가져와요.
+          </p>
+          {mine.length > 0 ? (
+            <div className="flex flex-wrap gap-2">{mine.map((p) => tile(p, false))}</div>
+          ) : (
+            <p className="text-[11px] text-inkSoft">이 프로젝트에서 올린 사진은 아직 없어요.</p>
+          )}
+          {others.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowOthers((v) => !v)}
+                className="text-[11px] text-accent font-semibold justify-self-start"
+              >
+                {showOthers ? '다른 프로젝트 사진 접기' : `다른 프로젝트의 사진 보기 (${others.length}장)`}
+              </button>
+              {showOthers && <div className="flex flex-wrap gap-2">{others.map((p) => tile(p, true))}</div>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ImageDraft {
   id: string;
   file: File | null;
   previewUrl: string | null;
   imageUrl: string;
+  // 이전에 올린 사진을 골랐을 때(새로 올리지 않음): 그 행 id와 미리보기 주소
+  savedId: string | null;
+  savedUrl: string | null;
   position: ThumbnailPosition;
   effectPrompt: string;
   generating: boolean;
@@ -88,11 +183,15 @@ function newImageDraft(): ImageDraft {
     file: null,
     previewUrl: null,
     imageUrl: '',
+    savedId: null,
+    savedUrl: null,
     position: 'center',
     effectPrompt: '',
     generating: false,
   };
 }
+
+const draftHasPhoto = (d: ImageDraft) => !!d.file || !!d.imageUrl.trim() || !!d.savedId;
 
 function DraftForm({
   draft,
@@ -100,19 +199,24 @@ function DraftForm({
   onGenerate,
   busy,
   label,
+  library = [],
+  currentProjectId = '',
 }: {
   draft: ImageDraft;
   onChange: (patch: Partial<ImageDraft>) => void;
   onGenerate: () => void;
   busy: boolean;
   label: string;
+  library?: LibraryPhoto[];
+  currentProjectId?: string;
 }) {
+  const shownPreview = draft.previewUrl || draft.savedUrl;
   return (
     <div className="card p-3 grid gap-2 sm:grid-cols-[160px_1fr] items-start">
       <label className="cursor-pointer block">
-        {draft.previewUrl ? (
+        {shownPreview ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={draft.previewUrl} alt="" className="w-40 h-40 object-cover rounded bg-paper" />
+          <img src={shownPreview} alt="" className="w-40 h-40 object-cover rounded bg-paper" />
         ) : (
           <div className="w-40 h-40 rounded bg-paper flex items-center justify-center text-[11px] text-inkSoft text-center px-2 hover:bg-paperLine transition">
             클릭해서 상품 사진 첨부
@@ -125,14 +229,43 @@ function DraftForm({
           onChange={async (e) => {
             const raw = e.target.files?.[0] || null;
             const f = raw ? await shrinkImageForUpload(raw) : null;
-            onChange({ file: f, previewUrl: f ? URL.createObjectURL(f) : null, imageUrl: f ? '' : draft.imageUrl });
+            onChange({
+              file: f,
+              previewUrl: f ? URL.createObjectURL(f) : null,
+              imageUrl: f ? '' : draft.imageUrl,
+              // 새로 올리면 골라둔 저장 사진은 해제
+              ...(f ? { savedId: null, savedUrl: null } : {}),
+            });
           }}
         />
       </label>
       <div className="grid gap-1.5">
+        {library.length > 0 && (
+          <SavedPhotoPicker
+            photos={library}
+            currentProjectId={currentProjectId}
+            pickedIds={draft.savedId ? [draft.savedId] : []}
+            onPick={(p) => onChange({ savedId: p.id, savedUrl: p.url, file: null, previewUrl: null, imageUrl: '' })}
+          />
+        )}
+        {draft.savedId && (
+          <p className="text-[11px] text-accent">
+            이전에 올린 사진을 쓰고 있어요.{' '}
+            <button type="button" className="underline" onClick={() => onChange({ savedId: null, savedUrl: null })}>
+              선택 해제
+            </button>
+          </p>
+        )}
         <input
           value={draft.imageUrl}
-          onChange={(e) => onChange({ imageUrl: e.target.value, file: e.target.value ? null : draft.file, previewUrl: e.target.value ? null : draft.previewUrl })}
+          onChange={(e) =>
+            onChange({
+              imageUrl: e.target.value,
+              file: e.target.value ? null : draft.file,
+              previewUrl: e.target.value ? null : draft.previewUrl,
+              ...(e.target.value ? { savedId: null, savedUrl: null } : {}),
+            })
+          }
           placeholder="또는 이미지 URL 붙여넣기 (예: 1688에서 복사한 사진 주소)"
           className="border border-paperLine bg-white px-2 py-1.5 text-xs w-full"
         />
@@ -157,7 +290,7 @@ function DraftForm({
         />
         <button
           onClick={onGenerate}
-          disabled={busy || (!draft.file && !draft.imageUrl.trim())}
+          disabled={busy || !draftHasPhoto(draft)}
           className="btn-primary px-4 py-1.5 text-xs font-semibold disabled:opacity-50 justify-self-start"
         >
           {busy ? '생성 중... (누끼+배치)' : label}
@@ -181,7 +314,7 @@ function ImageCard({
 }: {
   img: any;
   size: string;
-  onRetry: () => void;
+  onRetry: (extraPrompt?: string) => void; // 다시 만들 때 덧붙일 요청(선택)
   onDelete: () => void;
   busy: boolean;
   // 여러 장을 골라 한 번에 지우기 위한 선택 상태 (안 넘기면 체크박스 없음)
@@ -198,6 +331,8 @@ function ImageCard({
   const [editPrompt, setEditPrompt] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
   const [isEditPending, startEditTransition] = useTransition();
+  // 실패한 카드를 "다시 생성"할 때 덧붙일 요청(선택)
+  const [retryPrompt, setRetryPrompt] = useState('');
 
   // 효과 프롬프트(AI)로는 "똑같은 띠를 하나 더 반복해달라" 같은 요청이
   // 잘 안 먹혀서, 이미지 안의 한 구간을 그대로 복사해 다른 위치에
@@ -307,7 +442,7 @@ function ImageCard({
         </div>
       ) : img.error ? (
         <button
-          onClick={onRetry}
+          onClick={() => onRetry(retryPrompt.trim() || undefined)}
           disabled={busy}
           className={`${size} rounded bg-warnBg flex items-center justify-center text-xs text-warn font-semibold text-center px-2 disabled:opacity-50`}
         >
@@ -317,6 +452,15 @@ function ImageCard({
         <div className={`${size} rounded bg-paper flex items-center justify-center text-xs text-inkSoft`}>생성 중...</div>
       )}
       {img.error && <p className="text-[10px] text-warn text-center px-1 max-w-[16rem]">{img.error}</p>}
+      {img.error && !img.output_image_url && (
+        <textarea
+          value={retryPrompt}
+          onChange={(e) => setRetryPrompt(e.target.value)}
+          rows={2}
+          placeholder="다시 생성할 때 요청할 내용 (선택, 예: 배경을 더 밝게, 상품을 크게)"
+          className="border border-paperLine bg-white px-2 py-1.5 text-[11px] w-full"
+        />
+      )}
       {img.style_spec?.shot ? (
         <p className="text-[11px] text-inkSoft text-center px-1 max-w-[16rem]">
           컷: {img.style_spec.shot.title}
@@ -464,10 +608,12 @@ function ProjectEditor({
   project,
   styleBrief,
   onClose,
+  library = [],
 }: {
   project: any;
   styleBrief?: any; // category_style_briefs 행 (이 프로젝트 카테고리에 학습된 스타일)
   onClose: () => void;
+  library?: LibraryPhoto[]; // 이전에 올려서 저장돼 있는 상품 사진들 (모든 프로젝트)
 }) {
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -489,6 +635,9 @@ function ProjectEditor({
   // 생성해달라"는 요청) - 같은 색상 중 먼저 선택한 사진이 그 색상의
   // 메인이 된다. 비워두면(태그 없음) 기존처럼 전체가 한 세트로 묶인다.
   const [batchColorLabels, setBatchColorLabels] = useState<string[]>([]);
+  // 이전에 올린 사진을 골라 넣은 칸이면 그 사진의 행 id(아니면 null). batchFiles/batchPreviews와
+  // 같은 순서의 칸이고, 이 칸의 batchFiles 항목은 자리만 채우는 빈 파일이다(서버엔 id만 보낸다).
+  const [batchSavedIds, setBatchSavedIds] = useState<(string | null)[]>([]);
   const [batchUrl, setBatchUrl] = useState('');
   // 색상(묶음)마다 만들 추가 이미지 개수. 키는 색상 라벨('' = 색상 미지정/URL 입력).
   // 아직 안 건드린 색상은 기본 5장.
@@ -497,6 +646,8 @@ function ProjectEditor({
   const [packages, setPackages] = useState<{ id: string; items: { color: string; qty: number }[]; additional: number; template?: TemplateChoice; flip?: boolean; badge?: boolean; badgeShape?: BadgeShape; badgeColor?: BadgeColor }[]>([]);
   const [packageOnly, setPackageOnly] = useState(false);
   const [productNote, setProductNote] = useState('');
+  // 메인 썸네일에 적용할 요청(선택). 메인은 쿠팡 규정대로 흰 배경이라 기본은 비워둔다.
+  const [mainPrompt, setMainPrompt] = useState('');
   // 장면을 AI가 학습한 스타일/기본 구성에 맡기지 않고 직접 입력하고 싶을 때
   // ("추가 이미지에다가 프롬프트를 내가 입력할 수 있어야해"라는 요청으로 추가) -
   // 입력하면 모든 추가 이미지가 이 장면 하나로 만들어진다.
@@ -505,8 +656,9 @@ function ProjectEditor({
   // 적어둔 입력(URL·수량·패키지·메모)은 만들기를 돌린 뒤에도 남기고, 돌릴 때마다 기록해서 이전 입력으로 되돌릴 수 있게 한다
   const savedForm = useSavedForm(
     `thumb:${project.id}`,
-    { batchUrl, batchCounts, packages, packageOnly, productNote, customScenePrompt },
+    { batchUrl, batchCounts, packages, packageOnly, productNote, mainPrompt, customScenePrompt },
     (v) => {
+      if (typeof v.mainPrompt === 'string') setMainPrompt(v.mainPrompt);
       if (typeof v.batchUrl === 'string') setBatchUrl(v.batchUrl);
       if (v.batchCounts && typeof v.batchCounts === 'object') setBatchCounts(v.batchCounts as Record<string, number>);
       if (Array.isArray(v.packages)) {
@@ -598,10 +750,11 @@ function ProjectEditor({
   ).sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)));
 
   function handleGenerateMain() {
-    if (!mainDraft.file && !mainDraft.imageUrl.trim()) return;
+    if (!draftHasPhoto(mainDraft)) return;
     setError(null);
     const fd = new FormData();
     if (mainDraft.file) fd.set('image', mainDraft.file);
+    else if (mainDraft.savedId) fd.set('savedPhotoId', mainDraft.savedId);
     else fd.set('imageUrl', mainDraft.imageUrl.trim());
     fd.set('productPosition', mainDraft.position);
     fd.set('effectPrompt', mainDraft.effectPrompt);
@@ -618,10 +771,11 @@ function ProjectEditor({
   }
 
   function handleGenerateAdditional(draft: ImageDraft) {
-    if (!draft.file && !draft.imageUrl.trim()) return;
+    if (!draftHasPhoto(draft)) return;
     setError(null);
     const fd = new FormData();
     if (draft.file) fd.set('image', draft.file);
+    else if (draft.savedId) fd.set('savedPhotoId', draft.savedId);
     else fd.set('imageUrl', draft.imageUrl.trim());
     fd.set('productPosition', draft.position);
     fd.set('effectPrompt', draft.effectPrompt);
@@ -647,16 +801,29 @@ function ProjectEditor({
     const fd = new FormData();
     if (batchFiles.length > 0) {
       // 색상 라벨이 같은 사진끼리 서버에서 그룹으로 묶여서, 같은 라벨
-      // 중 먼저 온 사진이 그 색상의 메인이 된다.
+      // 중 먼저 온 사진이 그 색상의 메인이 된다. 새로 올린 사진은 파일로, 이전에 올린 사진을
+      // 고른 칸은 행 id로 보내고, 고른 순서는 photoOrder('f'=파일, 's'=저장된 사진)로 알려준다.
+      const order: ('f' | 's')[] = [];
+      const savedPhotos: { id: string; colorLabel: string }[] = [];
       batchFiles.forEach((f, i) => {
-        fd.append('images', f);
-        fd.append('colorLabels', batchColorLabels[i] || '');
+        const savedId = batchSavedIds[i];
+        if (savedId) {
+          order.push('s');
+          savedPhotos.push({ id: savedId, colorLabel: (batchColorLabels[i] || '').trim() });
+        } else {
+          order.push('f');
+          fd.append('images', f);
+          fd.append('colorLabels', batchColorLabels[i] || '');
+        }
       });
+      fd.set('photoOrder', JSON.stringify(order));
+      fd.set('savedPhotos', JSON.stringify(savedPhotos));
     } else {
       fd.set('imageUrl', batchUrl.trim());
     }
     fd.set('category', batchCategory.trim());
     fd.set('productNote', productNote.trim());
+    fd.set('mainPrompt', mainPrompt.trim());
     fd.set('customPrompt', customScenePrompt.trim());
     fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional, template: p.template, flip: p.flip, badge: p.badge, badgeShape: p.badgeShape, badgeColor: p.badgeColor }))));
     if (usePackageOnly) fd.set('packageOnly', '1');
@@ -688,6 +855,7 @@ function ProjectEditor({
       setBatchFiles([]);
       setBatchPreviews([]);
       setBatchColorLabels([]);
+      setBatchSavedIds([]);
       setBatchCounts({});
       setPackages([]);
       setPackageOnly(false);
@@ -824,13 +992,25 @@ function ProjectEditor({
     setBatchFiles((prev) => prev.filter((_, i) => i !== index));
     setBatchPreviews((prev) => prev.filter((_, i) => i !== index));
     setBatchColorLabels((prev) => prev.filter((_, i) => i !== index));
+    setBatchSavedIds((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function handleRetry(imageId: string) {
+  // 이전에 올린 사진을 일괄 생성 목록에 한 칸으로 추가 (색상 이름도 같이 가져온다)
+  function handleBatchPickSaved(photo: LibraryPhoto) {
+    setBatchFiles((prev) => [...prev, new File([], `saved-${photo.id}`)]);
+    setBatchPreviews((prev) => [...prev, photo.url]);
+    setBatchColorLabels((prev) => [...prev, photo.colorLabel || '']);
+    setBatchSavedIds((prev) => [...prev, photo.id]);
+    setBatchUrl('');
+  }
+
+  function handleRetry(imageId: string, extraPrompt?: string) {
     setBusyId(imageId);
+    setError(null);
     startTransition(async () => {
-      await retryThumbnailImage(imageId);
+      const res = await retryThumbnailImage(imageId, extraPrompt || '');
       setBusyId(null);
+      if (res && 'error' in res) setError(res.error);
     });
   }
 
@@ -1020,9 +1200,18 @@ function ProjectEditor({
             setBatchFiles((prev) => [...prev, ...shrunk]);
             setBatchPreviews((prev) => [...prev, ...shrunk.map((f) => URL.createObjectURL(f))]);
             setBatchColorLabels((prev) => [...prev, ...shrunk.map(() => '')]);
+            setBatchSavedIds((prev) => [...prev, ...shrunk.map(() => null)]);
             setBatchUrl('');
             e.target.value = '';
           }}
+        />
+
+        {/* 매번 새로 올리지 않도록, 예전에 올렸던 사진을 바로 골라서 쓴다 */}
+        <SavedPhotoPicker
+          photos={library}
+          currentProjectId={project.id}
+          pickedIds={batchSavedIds.filter((x): x is string => !!x)}
+          onPick={handleBatchPickSaved}
         />
 
         <FormHistoryPicker
@@ -1042,6 +1231,7 @@ function ProjectEditor({
                 setBatchFiles([]);
                 setBatchPreviews([]);
                 setBatchColorLabels([]);
+                setBatchSavedIds([]);
               }
             }}
             disabled={batchFiles.length > 1}
@@ -1099,6 +1289,18 @@ function ProjectEditor({
                 </p>
               )}
             </div>
+          )}
+          {(batchFiles.length > 0 || batchUrl.trim()) && (
+            <label className="grid gap-1 text-[11px] font-semibold text-inkSoft">
+              메인 썸네일 프롬프트 (선택 - 메인 썸네일 전체에 적용. 메인은 쿠팡 규정상 흰 배경이라 배경을 바꾸는 요청은 피하세요)
+              <textarea
+                value={mainPrompt}
+                onChange={(e) => setMainPrompt(e.target.value)}
+                rows={2}
+                placeholder="예: 그림자를 연하게, 상품을 조금 더 크게 (비우면 규정대로 흰 배경 메인만 만들어요)"
+                className="border border-paperLine bg-white px-2 py-1.5 text-xs font-normal text-ink"
+              />
+            </label>
           )}
           {(batchFiles.length > 0 || batchUrl.trim()) && (
             <label className="grid gap-1 text-[11px] font-semibold text-inkSoft">
@@ -1476,7 +1678,7 @@ function ProjectEditor({
               <ImageCard
                 img={mainImages[0]}
                 size={LARGE}
-                onRetry={() => handleRetry(mainImages[0].id)}
+                onRetry={(p) => handleRetry(mainImages[0].id, p)}
                 onDelete={() => startTransition(() => deleteThumbnailImage(mainImages[0].id))}
                 busy={isPending && busyId === mainImages[0].id}
                 selected={selectedIds.has(mainImages[0].id)}
@@ -1494,6 +1696,8 @@ function ProjectEditor({
                     onGenerate={handleGenerateMain}
                     busy={isPending && busyId === 'main-draft'}
                     label="메인 썸네일 교체"
+                    library={library}
+                    currentProjectId={project.id}
                   />
                 </div>
               </div>
@@ -1505,6 +1709,8 @@ function ProjectEditor({
               onGenerate={handleGenerateMain}
               busy={isPending && busyId === 'main-draft'}
               label="메인 썸네일 만들기"
+              library={library}
+              currentProjectId={project.id}
             />
           )
         ) : (
@@ -1518,7 +1724,7 @@ function ProjectEditor({
                     <ImageCard
                       img={groupMain}
                       size={MEDIUM}
-                      onRetry={() => handleRetry(groupMain.id)}
+                      onRetry={(p) => handleRetry(groupMain.id, p)}
                       onDelete={() => startTransition(() => deleteThumbnailImage(groupMain.id))}
                       busy={isPending && busyId === groupMain.id}
                       selected={selectedIds.has(groupMain.id)}
@@ -1572,7 +1778,7 @@ function ProjectEditor({
                     key={img.id}
                     img={img}
                     size={MEDIUM}
-                    onRetry={() => handleRetry(img.id)}
+                    onRetry={(p) => handleRetry(img.id, p)}
                     onDelete={() => startTransition(() => deleteThumbnailImage(img.id))}
                     busy={isPending && busyId === img.id}
                     selected={selectedIds.has(img.id)}
@@ -1608,7 +1814,7 @@ function ProjectEditor({
                         key={img.id}
                         img={img}
                         size={MEDIUM}
-                        onRetry={() => handleRetry(img.id)}
+                        onRetry={(p) => handleRetry(img.id, p)}
                         onDelete={() => startTransition(() => deleteThumbnailImage(img.id))}
                         busy={isPending && busyId === img.id}
                         selected={selectedIds.has(img.id)}
@@ -1634,6 +1840,8 @@ function ProjectEditor({
               onGenerate={() => handleGenerateAdditional(d)}
               busy={isPending && busyId === d.id}
               label="추가 이미지 생성"
+              library={library}
+              currentProjectId={project.id}
             />
           ))}
           <button
@@ -1708,12 +1916,34 @@ export default function ThumbnailStudio({
 
   const active = projects.find((p) => p.id === activeId);
 
+  // 이전에 올린 상품 사진 목록: 메인 썸네일 행이 갖고 있는 원본 사진. 패키지 메인의 입력은 여러
+  // 사진을 합성한 이미지(원본 사진이 아님)라 뺀다. 같은 사진 주소는 한 번만.
+  const library: LibraryPhoto[] = [];
+  const seenUrls = new Set<string>();
+  for (const p of projects) {
+    const mains = ((p.thumbnail_images || []) as any[])
+      .filter((i) => i.kind === 'main' && i.input_image_url && !String(i.color_label || '').startsWith('패키지 '))
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    for (const i of mains) {
+      if (seenUrls.has(i.input_image_url)) continue;
+      seenUrls.add(i.input_image_url);
+      library.push({
+        id: i.id,
+        url: i.input_image_url,
+        colorLabel: i.color_label || '',
+        projectId: p.id,
+        projectTitle: p.title || '',
+      });
+    }
+  }
+
   if (active) {
     return (
       <ProjectEditor
         project={active}
         styleBrief={styleBriefs[(active.category || '').trim()]}
         onClose={() => setActiveId(null)}
+        library={library}
       />
     );
   }

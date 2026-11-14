@@ -93,20 +93,27 @@ export async function addThumbnailImage(
   const supabase = createClient();
   const file = formData.get('image') as File | null;
   const imageUrl = String(formData.get('imageUrl') || '').trim();
-  if ((!file || file.size === 0) && !imageUrl) return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
+  // 이전에 올려 저장돼 있는 사진을 골랐으면 그 행의 id (새로 올리지 않고 재사용)
+  const savedPhotoId = String(formData.get('savedPhotoId') || '').trim();
+  if ((!file || file.size === 0) && !imageUrl && !savedPhotoId) {
+    return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
+  }
 
   const productPosition = (String(formData.get('productPosition') || 'center') as ThumbnailPosition) || 'center';
   const effectPrompt = String(formData.get('effectPrompt') || '').trim();
 
-  if (kind === 'main') {
-    await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
-  }
-
+  // 사진부터 확보한다 - 메인을 교체할 때 기존 메인 행을 지우는데, 고른 저장 사진이 바로 그 행의
+  // 사진일 수 있어서 지우기 전에 받아둬야 한다(받기에 실패하면 기존 메인도 그대로 남는다).
   let buffer: Buffer;
   let mimeType: string;
   if (file && file.size > 0) {
     buffer = Buffer.from(await file.arrayBuffer());
     mimeType = file.type || 'image/jpeg';
+  } else if (savedPhotoId) {
+    const saved = (await loadSavedPhotoSources(supabase, [savedPhotoId])).get(savedPhotoId);
+    if (!saved) return { error: '저장된 사진을 불러오지 못했어요 (삭제됐거나 저장소에 접속하지 못했어요). 사진을 다시 골라주세요.' };
+    buffer = saved.buffer;
+    mimeType = saved.mimeType;
   } else {
     try {
       const fetched = await fetchImageFromUrl(imageUrl);
@@ -115,6 +122,10 @@ export async function addThumbnailImage(
     } catch (e: any) {
       return { error: e?.message || String(e) };
     }
+  }
+
+  if (kind === 'main') {
+    await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
   }
   const imageId = randomUUID();
   const inputPath = `thumbnails/${projectId}/${imageId}-input.${extFromContentType(mimeType)}`;
@@ -472,6 +483,102 @@ const clampCount = (v: unknown, fallback: number) => {
   return Math.max(0, Math.min(MAX_ADDITIONAL, Math.round(n)));
 };
 
+// ---------------------------------------------------------------------------
+// 이전에 올린 사진 재사용 ("사진을 매번 새로 올리지 않고 저장된 사진을 골라서 다시 만들기")
+// ---------------------------------------------------------------------------
+// 따로 저장소를 만들지 않고, 예전에 만든 메인 썸네일 행(thumbnail_images)이 이미 갖고 있는
+// 원본 사진(input_image_url)을 그대로 쓴다. 화면은 행의 id만 보내고, 서버가 DB에서 주소를
+// 읽어 사진을 받아오므로 화면에서 임의 주소를 넣어 서버가 대신 접속하게 할 수 없다.
+const MAX_SAVED_PHOTOS = 12;
+
+interface SavedPhotoRef {
+  id: string;
+  colorLabel: string | null;
+}
+
+function parseSavedPhotoRefs(raw: FormDataEntryValue | null): SavedPhotoRef[] {
+  if (typeof raw !== 'string' || !raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const out: SavedPhotoRef[] = [];
+    for (const p of parsed) {
+      const id = typeof p?.id === 'string' ? p.id.trim() : '';
+      if (!id || id.length > 64) continue;
+      out.push({ id, colorLabel: String(p?.colorLabel ?? '').trim().slice(0, 20) || null });
+      if (out.length >= MAX_SAVED_PHOTOS) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// 저장된 사진(행 id) -> 사진 데이터. 못 불러온 것은 결과에서 빠진다(호출한 쪽이 개수로 알림).
+async function loadSavedPhotoSources(
+  supabase: ReturnType<typeof createClient>,
+  ids: string[]
+): Promise<Map<string, BatchSource>> {
+  const out = new Map<string, BatchSource>();
+  const unique = Array.from(new Set(ids));
+  if (unique.length === 0) return out;
+  const { data, error } = await supabase.from('thumbnail_images').select('id, input_image_url').in('id', unique);
+  if (error) {
+    console.error('[thumbnails] 저장된 사진 조회 실패:', error.message);
+    return out;
+  }
+  await Promise.all(
+    (data || []).map(async (row: { id: string; input_image_url: string | null }) => {
+      if (!row.input_image_url) return;
+      try {
+        out.set(row.id, await fetchImageFromUrl(row.input_image_url));
+      } catch (e) {
+        console.error('[thumbnails] 저장된 사진 받기 실패:', e);
+      }
+    })
+  );
+  return out;
+}
+
+type PhotoEntry =
+  | { kind: 'file'; file: File; colorLabel: string | null }
+  | { kind: 'saved'; id: string; colorLabel: string | null };
+
+// 새로 올린 사진과 저장된 사진을 화면에서 고른 순서대로 한 줄로 합친다. 순서 정보가
+// 없거나 개수가 안 맞으면 새로 올린 사진 -> 저장된 사진 순서로 둔다.
+function orderPhotoEntries(
+  files: { file: File; colorLabel: string | null }[],
+  saved: SavedPhotoRef[],
+  orderRaw: FormDataEntryValue | null
+): PhotoEntry[] {
+  let order: unknown = null;
+  if (typeof orderRaw === 'string' && orderRaw) {
+    try {
+      order = JSON.parse(orderRaw);
+    } catch {
+      order = null;
+    }
+  }
+  const valid =
+    Array.isArray(order) &&
+    order.length === files.length + saved.length &&
+    order.filter((x) => x === 'f').length === files.length &&
+    order.filter((x) => x === 's').length === saved.length;
+  const seq: ('f' | 's')[] = valid
+    ? (order as ('f' | 's')[])
+    : [...files.map(() => 'f' as const), ...saved.map(() => 's' as const)];
+  let fi = 0;
+  let si = 0;
+  return seq.map((t): PhotoEntry => {
+    if (t === 'f') {
+      const f = files[fi++];
+      return { kind: 'file', file: f.file, colorLabel: f.colorLabel };
+    }
+    const s = saved[si++];
+    return { kind: 'saved', id: s.id, colorLabel: s.colorLabel };
+  });
+}
+
 export async function generateThumbnailBatch(
   projectId: string,
   formData: FormData
@@ -504,18 +611,37 @@ export async function generateThumbnailBatch(
   const filePairs = rawFiles
     .map((f, i) => ({ file: f, colorLabel: String(rawLabels[i] || '').trim() || null }))
     .filter((p): p is { file: File; colorLabel: string | null } => p.file instanceof File && p.file.size > 0);
+  // 이전에 올려서 저장돼 있는 사진을 다시 고른 경우(사진을 새로 올리지 않고 재사용)
+  const savedRefs = parseSavedPhotoRefs(formData.get('savedPhotos'));
   const imageUrl = String(formData.get('imageUrl') || '').trim();
-  if (filePairs.length === 0 && !imageUrl) return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
+  if (filePairs.length === 0 && savedRefs.length === 0 && !imageUrl) {
+    return { error: '이미지를 첨부하거나 이미지 URL을 입력해주세요.' };
+  }
 
+  const notes: string[] = [];
   const groups = new Map<string | null, BatchSource[]>();
-  if (filePairs.length > 0) {
-    for (const p of filePairs) {
-      const src: BatchSource = {
-        buffer: Buffer.from(await p.file.arrayBuffer()),
-        mimeType: p.file.type || 'image/jpeg',
-      };
-      if (!groups.has(p.colorLabel)) groups.set(p.colorLabel, []);
-      groups.get(p.colorLabel)!.push(src);
+  if (filePairs.length > 0 || savedRefs.length > 0) {
+    const savedSources = await loadSavedPhotoSources(supabase, savedRefs.map((r) => r.id));
+    // 화면에서 고른 순서 그대로(같은 색상 중 먼저 고른 사진이 그 색상의 메인)
+    const ordered = orderPhotoEntries(filePairs, savedRefs, formData.get('photoOrder'));
+    let savedMissing = 0;
+    for (const entry of ordered) {
+      let src: BatchSource | null = null;
+      if (entry.kind === 'file') {
+        src = { buffer: Buffer.from(await entry.file.arrayBuffer()), mimeType: entry.file.type || 'image/jpeg' };
+      } else {
+        src = savedSources.get(entry.id) ?? null;
+        if (!src) savedMissing++;
+      }
+      if (!src) continue;
+      if (!groups.has(entry.colorLabel)) groups.set(entry.colorLabel, []);
+      groups.get(entry.colorLabel)!.push(src);
+    }
+    if (savedMissing > 0) {
+      notes.push(`⚠ 저장된 사진 ${savedMissing}장을 불러오지 못해서 빼고 만들었어요 (삭제됐거나 저장소에 접속하지 못했어요).`);
+    }
+    if (groups.size === 0) {
+      return { error: '선택한 사진을 불러오지 못했어요. 사진을 다시 첨부하거나 다시 골라주세요.' };
     }
   } else {
     try {
@@ -555,7 +681,8 @@ export async function generateThumbnailBatch(
   const productNote = String(formData.get('productNote') || '').trim().slice(0, 400);
   // 장면을 직접 입력하면 학습된/기본 컷 대신 이 장면으로만 추가 이미지를 만든다
   const customPrompt = String(formData.get('customPrompt') || '').trim().slice(0, 400);
-  const notes: string[] = [];
+  // 메인 썸네일에 적용할 요청(예: 그림자를 연하게). 비우면 지금처럼 규정대로 흰 배경 메인만 만든다
+  const mainPrompt = String(formData.get('mainPrompt') || '').trim().slice(0, 400);
   // 패키지(세트) 구성: 예) 검정 1 + 회색 1. 색상별 개별 이미지 대신(또는 함께) 그 구성 그대로 담은 이미지를 만든다.
   const parsedPackages = parsePackages(String(formData.get('packages') || '[]'));
   const packages = parsedPackages.packages;
@@ -600,7 +727,7 @@ export async function generateThumbnailBatch(
     let del = supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
     del = label ? del.eq('color_label', label) : del.is('color_label', null);
     await del;
-    return insertAndGenerateImage(supabase, projectId, 'main', 0, sources[0], 'center', '', label);
+    return insertAndGenerateImage(supabase, projectId, 'main', 0, sources[0], 'center', mainPrompt, label);
   });
   const mainOk = mainResults.filter((r) => !('error' in r)).length;
   const mainErr = mainResults.find((r): r is { error: string } => 'error' in r);
@@ -857,12 +984,15 @@ async function savePackageMain(
   return { success: true, url };
 }
 
+// extraPrompt: 다시 만들 때 덧붙일 요청(선택). 비우면 예전과 똑같이 만든다.
 export async function retryThumbnailImage(
-  imageId: string
+  imageId: string,
+  extraPrompt: string = ''
 ): Promise<{ error: string } | { success: true; url: string }> {
   const supabase = createClient();
   const { data: img, error } = await supabase.from('thumbnail_images').select('*').eq('id', imageId).single();
   if (error || !img) return { error: error?.message || '이미지를 찾을 수 없어요.' };
+  const extra = (typeof extraPrompt === 'string' ? extraPrompt : '').trim().slice(0, 400);
 
   const res = await fetch(img.input_image_url);
   if (!res.ok) return { error: `원본 이미지를 다시 불러오지 못했어요 (HTTP ${res.status})` };
@@ -870,24 +1000,28 @@ export async function retryThumbnailImage(
   const mimeType = res.headers.get('content-type') || 'image/jpeg';
 
   // 스타일 적용으로 만들었던 이미지는 같은 컷/문구로 다시 만든다 (누끼 방식으로
-  // 돌아가면 결과가 완전히 달라져 버리므로)
+  // 돌아가면 결과가 완전히 달라져 버리므로). 요청을 적었으면 수정과 같은 방식으로 메모에 덧붙인다.
   if (img.style_spec?.shot) {
-    return runStyledGeneration(
-      supabase,
-      imageId,
-      img.project_id,
-      { buffer, mimeType },
-      img.style_spec as StyledSpec
-    );
+    let spec = img.style_spec as StyledSpec;
+    if (extra) {
+      spec = { ...spec, note: [spec.note, extra].filter(Boolean).join('\n') };
+      await supabase.from('thumbnail_images').update({ style_spec: spec, effect_prompt: extra }).eq('id', imageId);
+    }
+    return runStyledGeneration(supabase, imageId, img.project_id, { buffer, mimeType }, spec);
   }
 
+  let effectPrompt: string = img.effect_prompt || '';
+  if (extra) {
+    effectPrompt = extra;
+    await supabase.from('thumbnail_images').update({ effect_prompt: extra }).eq('id', imageId);
+  }
   return runGeneration(
     supabase,
     imageId,
     img.project_id,
     { buffer, mimeType },
     (img.product_position as ThumbnailPosition) || 'center',
-    img.effect_prompt || ''
+    effectPrompt
   );
 }
 
