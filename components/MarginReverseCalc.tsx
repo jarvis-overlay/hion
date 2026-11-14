@@ -200,6 +200,16 @@ export default function MarginReverseCalc({ item, comparisons }: { item: any; co
         </label>
       </div>
 
+      {(parseFloat(intlShipping) || 0) > 0 &&
+        (parseFloat(cost) || 0) > 0 &&
+        (parseFloat(intlShipping) || 0) > (parseFloat(cost) || 0) * 10 && (
+          <p className="text-[11px] text-warn bg-warnBg rounded-md px-2 py-1.5 mb-2">
+            해외배송비({fmt(parseFloat(intlShipping) || 0)})가 매입 원가({fmt(parseFloat(cost) || 0)})의 10배가 넘어요.
+            이 칸은 <b>상품 1개당</b> 금액이에요. 전체 화물 운임을 넣었다면 배송비 계산기에서 수량(총 몇 개)을 입력한 뒤
+            &quot;개당 금액&quot;을 채워주세요.
+          </p>
+        )}
+
       {result.feasible && result.price != null ? (
         <div className="rounded-md bg-paper px-3 py-2 text-sm mb-2 flex items-center justify-between">
           <span className="text-inkSoft">최소 판매가</span>
