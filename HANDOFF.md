@@ -13,7 +13,7 @@
 ## -12. 비교 상품군: 사진·가격·리뷰 저장 + 사진 확대 (2026-11-14)
 
 - 쿠팡 조사에서 저장한 비교 상품에 사진 주소(`image_url`, 쿠팡 이미지 서버만 허용)·개별 가격(`item_price`)·리뷰 수(`review_count`)도 저장. 목록 행에 사진 48px + "9,270원 · 리뷰 15,899개" 표시, 사진에 마우스를 올리면 큰 사진(`components/HoverZoomImage.tsx`, 조사 후보 목록에도 적용).
-- 마이그레이션 `supabase/migrations/20261114120000_add_comparison_photo_price_review.sql`. **적용 전에는** 서버가 이 컬럼 없이 예전처럼 저장하는 폴백이 있어 앱은 안 깨지지만 사진·가격·리뷰는 저장되지 않음. 적용은 `npx supabase db push --remote`(에이전트 실행은 사용자 확인 `--yes` 필요). 이 PC는 supabase link 돼 있음(dry-run 확인). **dry-run 기준 미적용 마이그레이션이 3개**: `20261112120000_add_push_subscription_owner`, `20261112130000_add_lookup_allowed_user_id`(위 -4/-9 항목에서 "반드시 필요"로 적어둔 것), 이번 것.
+- 마이그레이션 `supabase/migrations/20261114120000_add_comparison_photo_price_review.sql`. **적용 전에는** 서버가 이 컬럼 없이 예전처럼 저장하는 폴백이 있어 앱은 안 깨지지만 사진·가격·리뷰는 저장되지 않음. 적용은 `npx supabase db push --remote`(에이전트 실행은 사용자 확인 `--yes` 필요). 이 PC는 supabase link 돼 있음(dry-run 확인). **2026-11-14에 운영 DB에 3개 모두 적용 완료**(사용자 승인 후 `db push --remote --yes`): 알림 이메일(`20261112120000`), 공유용 조회 함수(`20261112130000`), 이번 것. 아래 "미실행 SQL" 문구는 이제 해당 없음. 적용 전 dry-run 기준 미적용이 3개: `20261112120000_add_push_subscription_owner`, `20261112130000_add_lookup_allowed_user_id`(위 -4/-9 항목에서 "반드시 필요"로 적어둔 것), 이번 것.
 - 이미 저장해 둔 비교 상품(링크만 있음)에는 사진·가격·리뷰가 없다 - 새로 조사해서 저장한 것부터 채워짐.
 
 ## -11. 쿠팡 조사 결과 자동 저장/복원 + 정확도 점수 보정 (2026-11-14)
