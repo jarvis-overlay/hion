@@ -1654,11 +1654,23 @@ export default function SourcingList({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <h3 className="font-semibold text-sm">{it.title}</h3>
-                      <span
-                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${PROCESS_STYLE[process]}`}
+                      {/* 진행 단계: 위쪽 단계 칩과 같은 값. 배지를 눌러 바로 바꾼다 */}
+                      <select
+                        value={process}
+                        disabled={isPending}
+                        title="진행 단계 바꾸기"
+                        aria-label="진행 단계"
+                        onChange={(e) =>
+                          startTransition(() => updateSourcingStatus(it.id, e.target.value))
+                        }
+                        className={`text-[11px] font-semibold pl-2 pr-1 py-0.5 rounded-full cursor-pointer border-0 ${PROCESS_STYLE[process]}`}
                       >
-                        {PROCESS_LABEL[process]}
-                      </span>
+                        {PROCESS_STEPS.map((s) => (
+                          <option key={s.value} value={s.value}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
                       {it.marketSize && (
                         <span
                           title="비교 상품군에 입력한 시장규모 중 가장 큰 등급"
@@ -1806,20 +1818,6 @@ export default function SourcingList({
                     {new Date(it.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
                   </span>
                   <div className="flex gap-2 text-xs items-center">
-                    <select
-                      value={process}
-                      disabled={isPending}
-                      onChange={(e) =>
-                        startTransition(() => updateSourcingStatus(it.id, e.target.value))
-                      }
-                      className="border border-paperLine bg-white text-xs px-1 py-0.5"
-                    >
-                      {PROCESS_STEPS.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
                     <button onClick={() => setEditingId(it.id)} className="text-inkSoft hover:text-ink">
                       수정
                     </button>
