@@ -51,6 +51,24 @@ function tokens(s: string): string[] {
     .filter((t) => t.length >= 2);
 }
 
+// 공백·기호를 뺀 소문자 문자열
+function compactText(s: string): string {
+  return s.toLowerCase().replace(/[^0-9a-z가-힣]/g, '');
+}
+
+// 검색어 조각이 상품명에 들어 있는 정도 0~1: 통째로 있으면 1, 아니면 두 글자 조각이 겹치는 비율의 80%
+function tokenSimilarity(token: string, compactTitle: string): number {
+  if (!token) return 0;
+  if (compactTitle.includes(token)) return 1;
+  if (token.length < 2) return 0;
+  let hit = 0;
+  const total = token.length - 1;
+  for (let i = 0; i < total; i++) {
+    if (compactTitle.includes(token.slice(i, i + 2))) hit++;
+  }
+  return 0.8 * (hit / total);
+}
+
 function credit(state: DimState, weak = false): number {
   if (state === 'match') return 1;
   if (state === 'unknown') return UNKNOWN_CREDIT;
@@ -65,10 +83,13 @@ export function scoreCandidate(input: ScoreInput): ScoreResult {
   let max = 0;
 
   // 검색 키워드가 상품명에 얼마나 들어 있나(항상 채점)
+  // 띄어쓰기를 무시하고 비교한다("경추 베개" ↔ "경추베개"). 통째로 안 들어 있어도
+  // 글자 두 개씩 끊어 얼마나 겹치는지로 부분 점수를 준다(복합어 때문에 전부 0점이 되지 않게).
   const kw = tokens(keyword);
   if (kw.length > 0) {
-    const hit = kw.filter((k) => t.includes(k)).length;
-    earned += W.keyword * (hit / kw.length);
+    const compact = compactText(title);
+    const sim = kw.reduce((sum, k) => sum + tokenSimilarity(compactText(k), compact), 0) / kw.length;
+    earned += W.keyword * sim;
     max += W.keyword;
   }
 

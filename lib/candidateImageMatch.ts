@@ -109,14 +109,35 @@ export async function compareWithReference(
     if (!apiKey) return { error: 'AI 키가 설정되지 않아 사진을 비교하지 못했어요.' };
 
     // 후보 사진 받기(병렬). 못 받은 후보는 null로 남긴다.
+    let rejected = 0; // 쿠팡 이미지 서버 주소가 아니라서 받지 않은 것
+    let rejectedHost = '';
     const fetched = await Promise.all(
       urls.map((u) => {
         const safe = normalizeCoupangImageUrl(u);
-        return safe ? fetchCandidateImage(safe) : Promise.resolve(null);
+        if (!safe) {
+          rejected++;
+          if (!rejectedHost && u) {
+            try {
+              rejectedHost = new URL(u.startsWith('//') ? `https:${u}` : u).hostname.slice(0, 60);
+            } catch {
+              rejectedHost = '(주소 형식 이상)';
+            }
+          }
+          return Promise.resolve(null);
+        }
+        return fetchCandidateImage(safe);
       })
     );
     const usable = fetched.map((f, i) => ({ f, i })).filter((x): x is { f: { mimeType: string; base64: string }; i: number } => !!x.f);
-    if (usable.length === 0) return { results };
+    if (usable.length === 0) {
+      // 전부 못 받았으면 이유를 알려준다(호스트 이름만 - 어느 쪽이 문제인지 구분하려고)
+      if (rejected === urls.length && urls.length > 0) {
+        return {
+          error: `후보 사진 주소가 허용 목록(coupangcdn.com) 밖이라 받지 않았어요${rejectedHost ? ` (예: ${rejectedHost})` : ''}.`,
+        };
+      }
+      return { error: '후보 사진을 받아오지 못했어요 (쿠팡 이미지 서버가 응답하지 않았거나 크기·형식이 맞지 않아요).' };
+    }
 
     const prompt = `첫 번째 사진은 내가 팔려는 상품(기준 사진)입니다. 이어지는 "후보 N" 사진들은 쿠팡에 올라온 다른 상품입니다.
 각 후보가 기준 사진의 상품과 같은 종류이면서 생김새가 얼마나 닮았는지(직접 경쟁 상품인지) 0~100점으로 평가하세요.

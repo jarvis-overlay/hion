@@ -243,7 +243,9 @@ export default function CoupangResearchPanel({
                 }
               : null,
           image: imageMatches.get(key) ?? null,
-          imageRequested,
+          // 사진 비교 결과가 하나도 없으면(전부 실패) 점수에 넣지 않는다 - 안 그러면 모든 후보가
+          // 똑같이 "사진 모름"으로 같은 점수가 되어 정확도순 정렬이 의미가 없어진다
+          imageRequested: imageRequested && imageMatches.size > 0,
         })
       );
     });
