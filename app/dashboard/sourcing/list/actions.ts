@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { isProcessStep } from '@/lib/sourcingProcess';
 
 function numOrNull(fd: FormData, key: string): number | null {
   const v = fd.get(key);
@@ -302,7 +303,12 @@ export async function updateSourcingItem(
   return { success: true };
 }
 
+// status에는 진행 단계(lib/sourcingProcess.ts의 6단계 값)를 저장한다.
 export async function updateSourcingStatus(id: string, status: string) {
+  if (!isProcessStep(status)) {
+    console.error('[sourcing] updateSourcingStatus: 알 수 없는 단계 값', status);
+    return;
+  }
   const supabase = createClient();
   const { error } = await supabase.from('sourcing_items').update({ status }).eq('id', id);
   if (error) console.error('[sourcing] updateSourcingStatus 실패:', error.message);

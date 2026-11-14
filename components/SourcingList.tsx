@@ -3,7 +3,6 @@
 import { useMemo, useRef, useState, useTransition } from 'react';
 import {
   updateSourcingStatus,
-  updateSourcingStage,
   updateSourcingPriority,
   updateSourcingInputStatus,
   updateSourcingItem,
@@ -46,53 +45,29 @@ import NoteTimeline from '@/components/NoteTimeline';
 import CollapsibleText from '@/components/CollapsibleText';
 import { useDraft } from '@/lib/useDraft';
 import type { SourcingZhTranslation } from '@/lib/ai';
+import {
+  PROCESS_STEPS,
+  PROCESS_LABEL,
+  PROCESS_STYLE,
+  resolveProcess,
+  normalizePriority,
+  type ProcessStep,
+} from '@/lib/sourcingProcess';
 
 const PLATFORM_LABEL: Record<string, string> = { coupang: '쿠팡', naver: '네이버' };
 
-const STATUS_LABEL: Record<string, string> = {
-  not_set: '미입력',
-  checking: '검토중',
-  ordered: '발주완료',
-  hold: '보류',
-  on_sale: '판매중',
-  stopped: '판매중지',
-};
-
-const STATUS_STYLE: Record<string, string> = {
-  not_set: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
-  checking: 'bg-warnBg text-warn',
-  ordered: 'bg-profitBg text-profit',
-  hold: 'bg-paperLine text-inkSoft',
-  on_sale: 'bg-profitBg text-profit',
-  stopped: 'bg-paperLine text-inkSoft',
-};
-
-const STAGE_LABEL: Record<string, string> = {
-  candidate: '후보',
-  confirmed: '확정',
-};
-
-const STAGE_STYLE: Record<string, string> = {
-  candidate: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
-  confirmed: 'bg-accentBg text-accent ring-1 ring-inset ring-accent/20',
-};
+// 진행 단계(검수전/검수 완료/소싱 진행 중/판매중/판매중지/보류)는 lib/sourcingProcess.ts
 
 const PRIORITY_LABEL: Record<string, string> = {
   '1': '1순위',
   '2': '2순위',
   '3': '3순위',
-  waiting: '발주 대기 중',
-  ordering: '발주 진행 중',
 };
 
 const PRIORITY_STYLE: Record<string, string> = {
   '1': 'bg-red-50 text-red-700',
   '2': 'bg-warnBg text-warn',
   '3': 'bg-paperLine text-inkSoft',
-  waiting: 'bg-paper text-inkSoft ring-1 ring-inset ring-paperLine',
-  ordering: 'bg-accentBg text-accent',
-  on_sale: 'bg-profitBg text-profit',
-  stopped: 'bg-paperLine text-inkSoft',
 };
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
@@ -1484,9 +1459,10 @@ export default function SourcingList({
   noteCategories: { id: string; label: string }[];
 }) {
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [stageFilter, setStageFilter] = useState('all');
+  // 진행 단계 필터 ('all' 또는 ProcessStep)
+  const [processFilter, setProcessFilter] = useState<'all' | ProcessStep>('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [priorityError, setPriorityError] = useState<string | null>(null);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [enteredFilter, setEnteredFilter] = useState('all');
@@ -1517,6 +1493,32 @@ export default function SourcingList({
     });
   }
 
+  // 진행 단계 칩의 개수 - 단계 필터만 빼고 나머지 조건(검색/우선순위/입력/보관함)은 그대로 적용
+  const matchesBase = (it: any) => {
+    const q = search.trim().toLowerCase();
+    if (showArchived ? !it.archived_at : !!it.archived_at) return false;
+    if (priorityFilter !== 'all' && (normalizePriority(it.priority) || 'none') !== priorityFilter) return false;
+    if (enteredFilter !== 'all' && (it.input_status || 'not_entered') !== enteredFilter) return false;
+    if (!q) return true;
+    return (
+      it.title?.toLowerCase().includes(q) ||
+      it.content?.toLowerCase().includes(q) ||
+      it.link?.toLowerCase().includes(q)
+    );
+  };
+
+  const stepCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    for (const s of PROCESS_STEPS) counts[s.value] = 0;
+    for (const it of items) {
+      if (!matchesBase(it)) continue;
+      counts.all += 1;
+      counts[resolveProcess(it)] += 1;
+    }
+    return counts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, search, priorityFilter, enteredFilter, showArchived]);
+
   const rows = useMemo(() => {
     const withMargin = items.map((it) => ({
       ...it,
@@ -1524,19 +1526,10 @@ export default function SourcingList({
       marketSize: aggregateMarketSize(it),
     }));
 
-    const q = search.trim().toLowerCase();
     const filtered = withMargin.filter((it) => {
-      if (showArchived ? !it.archived_at : !!it.archived_at) return false;
-      if (statusFilter !== 'all' && (it.status || 'checking') !== statusFilter) return false;
-      if (stageFilter !== 'all' && (it.stage || 'candidate') !== stageFilter) return false;
-      if (priorityFilter !== 'all' && (it.priority || 'none') !== priorityFilter) return false;
-      if (enteredFilter !== 'all' && (it.input_status || 'not_entered') !== enteredFilter) return false;
-      if (!q) return true;
-      return (
-        it.title?.toLowerCase().includes(q) ||
-        it.content?.toLowerCase().includes(q) ||
-        it.link?.toLowerCase().includes(q)
-      );
+      if (!matchesBase(it)) return false;
+      if (processFilter !== 'all' && resolveProcess(it) !== processFilter) return false;
+      return true;
     });
 
     const sorted = [...filtered].sort((a, b) => {
@@ -1566,7 +1559,8 @@ export default function SourcingList({
     });
 
     return sorted;
-  }, [items, search, statusFilter, stageFilter, priorityFilter, enteredFilter, showArchived, sortKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, search, processFilter, priorityFilter, enteredFilter, showArchived, sortKey]);
 
   const archivedCount = useMemo(() => items.filter((it) => !!it.archived_at).length, [items]);
 
@@ -1580,37 +1574,6 @@ export default function SourcingList({
           className="border border-paperLine bg-white px-3 py-2 text-sm flex-1 min-w-[180px]"
         />
         <select
-          value={enteredFilter}
-          onChange={(e) => setEnteredFilter(e.target.value)}
-          className="border border-paperLine bg-white px-2 py-2 text-sm"
-        >
-          <option value="all">입력/미입력 전체</option>
-          <option value="entered">입력</option>
-          <option value="not_entered">미입력</option>
-        </select>
-        <select
-          value={stageFilter}
-          onChange={(e) => setStageFilter(e.target.value)}
-          className="border border-paperLine bg-white px-2 py-2 text-sm"
-        >
-          <option value="all">후보/확정 전체</option>
-          <option value="candidate">후보</option>
-          <option value="confirmed">확정</option>
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-paperLine bg-white px-2 py-2 text-sm"
-        >
-          <option value="all">상태 전체</option>
-          <option value="not_set">미입력</option>
-          <option value="checking">검토중</option>
-          <option value="ordered">발주완료</option>
-          <option value="hold">보류</option>
-          <option value="on_sale">판매중</option>
-          <option value="stopped">판매중지</option>
-        </select>
-        <select
           value={priorityFilter}
           onChange={(e) => setPriorityFilter(e.target.value)}
           className="border border-paperLine bg-white px-2 py-2 text-sm"
@@ -1619,8 +1582,6 @@ export default function SourcingList({
           <option value="1">1순위</option>
           <option value="2">2순위</option>
           <option value="3">3순위</option>
-          <option value="waiting">발주 대기 중</option>
-          <option value="ordering">발주 진행 중</option>
           <option value="none">미지정</option>
         </select>
         <select
@@ -1643,6 +1604,56 @@ export default function SourcingList({
         >
           {showArchived ? '목록으로 돌아가기' : `보관함${archivedCount > 0 ? ` (${archivedCount})` : ''}`}
         </button>
+        <button
+          type="button"
+          onClick={() => setShowMoreFilters((v) => !v)}
+          className={`text-sm px-3 py-2 rounded-md ${
+            enteredFilter !== 'all' ? 'ring-1 ring-accent text-accent font-semibold' : 'ring-1 ring-paperLine text-inkSoft hover:text-ink'
+          }`}
+        >
+          더보기 {showMoreFilters ? '▲' : '▼'}
+        </button>
+      </div>
+
+      {showMoreFilters && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <select
+            value={enteredFilter}
+            onChange={(e) => setEnteredFilter(e.target.value)}
+            className="border border-paperLine bg-white px-2 py-2 text-sm"
+          >
+            <option value="all">입력/미입력 전체</option>
+            <option value="entered">입력 (판매가·원가 입력됨)</option>
+            <option value="not_entered">미입력</option>
+          </select>
+        </div>
+      )}
+
+      {/* 진행 단계 - 검수전 → 검수 완료 → 소싱 진행 중 → 판매중 (한 방향 흐름) | 판매중지 · 보류 (흐름 밖) */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-4">
+        <button
+          type="button"
+          onClick={() => setProcessFilter('all')}
+          className={`text-xs px-3 py-1.5 rounded-full font-semibold ${
+            processFilter === 'all' ? 'bg-accent text-white' : 'ring-1 ring-paperLine text-inkSoft hover:text-ink'
+          }`}
+        >
+          전체 {stepCounts.all}
+        </button>
+        {PROCESS_STEPS.map((s) => (
+          <span key={s.value} className="inline-flex items-center gap-1.5">
+            {s.value === 'stopped' && <span className="text-paperLine select-none">|</span>}
+            <button
+              type="button"
+              onClick={() => setProcessFilter((cur) => (cur === s.value ? 'all' : s.value))}
+              className={`text-xs px-3 py-1.5 rounded-full font-semibold ${
+                processFilter === s.value ? 'bg-accent text-white' : 'ring-1 ring-paperLine text-inkSoft hover:text-ink'
+              }`}
+            >
+              {s.label} {stepCounts[s.value]}
+            </button>
+          </span>
+        ))}
       </div>
 
       {priorityError && (
@@ -1671,9 +1682,8 @@ export default function SourcingList({
       ) : (
         <div className="grid gap-3">
           {rows.map((it) => {
-            const status = it.status || 'checking';
-            const stage = it.stage || 'candidate';
-            const priority: string | null = it.priority || null;
+            const process = resolveProcess(it);
+            const priority: string | null = normalizePriority(it.priority);
             // 등록 시점엔 판매가·원가가 둘 다 있으면 "입력"으로
             // 시작하지만, 그 뒤로는 카드에서 직접 바꿀 수 있는 독립적인
             // 값이다 (input_status 컬럼 - 가격을 나중에 고쳐도 자동으로
@@ -1719,14 +1729,9 @@ export default function SourcingList({
                         {priority ? PRIORITY_LABEL[priority] : '우선순위 미지정'}
                       </span>
                       <span
-                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_STYLE[status]}`}
+                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${PROCESS_STYLE[process]}`}
                       >
-                        {STATUS_LABEL[status]}
-                      </span>
-                      <span
-                        className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${STAGE_STYLE[stage]}`}
-                      >
-                        {STAGE_LABEL[stage]}
+                        {PROCESS_LABEL[process]}
                       </span>
                       <span
                         className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
@@ -1910,34 +1915,20 @@ export default function SourcingList({
                       <option value="1">1순위</option>
                       <option value="2">2순위</option>
                       <option value="3">3순위</option>
-                      <option value="waiting">발주 대기 중</option>
-                      <option value="ordering">발주 진행 중</option>
                     </select>
                     <select
-                      value={stage}
-                      disabled={isPending}
-                      onChange={(e) =>
-                        startTransition(() => updateSourcingStage(it.id, e.target.value))
-                      }
-                      className="border border-paperLine bg-white text-xs px-1 py-0.5"
-                    >
-                      <option value="candidate">후보</option>
-                      <option value="confirmed">확정</option>
-                    </select>
-                    <select
-                      value={status}
+                      value={process}
                       disabled={isPending}
                       onChange={(e) =>
                         startTransition(() => updateSourcingStatus(it.id, e.target.value))
                       }
                       className="border border-paperLine bg-white text-xs px-1 py-0.5"
                     >
-                      <option value="not_set">미입력</option>
-                      <option value="checking">검토중</option>
-                      <option value="ordered">발주완료</option>
-                      <option value="hold">보류</option>
-                      <option value="on_sale">판매중</option>
-                      <option value="stopped">판매중지</option>
+                      {PROCESS_STEPS.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
                     </select>
                     <button onClick={() => setEditingId(it.id)} className="text-inkSoft hover:text-ink">
                       수정

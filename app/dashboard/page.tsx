@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import CoupangSyncButton from '@/components/CoupangSyncButton';
+import { PROCESS_STEPS, resolveProcess } from '@/lib/sourcingProcess';
 
 // syncCoupangInventory 서버 액션(카탈로그+주문+재고 동기화)이 오래 걸릴 수
 // 있어 기본 실행시간 제한을 60초로 늘려둔다.
@@ -33,7 +34,7 @@ export default async function DashboardHome() {
   ] = await Promise.all([
     supabase.from('products').select('id', { count: 'exact', head: true }),
     supabase.from('warehouse_stock').select('warehouse, quantity'),
-    supabase.from('sourcing_items').select('status'),
+    supabase.from('sourcing_items').select('status, stage, priority'),
     supabase.from('channel_credentials').select('channel, connected'),
     supabase.from('margin_entries').select('id', { count: 'exact', head: true }),
     supabase
@@ -50,12 +51,11 @@ export default async function DashboardHome() {
     .filter((r) => r.warehouse === 'own')
     .reduce((sum, r) => sum + r.quantity, 0);
 
-  const statusCount = { checking: 0, ordered: 0, hold: 0 } as Record<
-    string,
-    number
-  >;
+  // 진행 단계별 개수 (예전 상태값으로 저장된 항목도 resolveProcess가 같은 단계로 환산)
+  const statusCount: Record<string, number> = {};
+  for (const s of PROCESS_STEPS) statusCount[s.value] = 0;
   for (const p of sourcingItems || []) {
-    statusCount[p.status] = (statusCount[p.status] || 0) + 1;
+    statusCount[resolveProcess(p)] += 1;
   }
 
   const isConnected = (ch: string) =>
@@ -98,20 +98,38 @@ export default async function DashboardHome() {
       <div className="grid gap-4 lg:grid-cols-2 mb-8">
         <div className="card p-5">
           <h2 className="font-display font-bold mb-4">소싱 리스트 현황</h2>
-          <div className="flex gap-3">
-            <div className="flex-1 text-center py-3 rounded-lg bg-warnBg">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center py-3 rounded-lg bg-[#F3F4F6]">
+              <div className="text-xl font-bold text-inkSoft font-mono">
+                {statusCount.before_review}
+              </div>
+              <div className="text-xs text-inkSoft mt-1">검수전</div>
+            </div>
+            <div className="text-center py-3 rounded-lg bg-accentBg">
+              <div className="text-xl font-bold text-accent font-mono">
+                {statusCount.reviewed}
+              </div>
+              <div className="text-xs text-inkSoft mt-1">검수 완료</div>
+            </div>
+            <div className="text-center py-3 rounded-lg bg-warnBg">
               <div className="text-xl font-bold text-warn font-mono">
-                {statusCount.checking}
+                {statusCount.sourcing}
               </div>
-              <div className="text-xs text-inkSoft mt-1">검토중</div>
+              <div className="text-xs text-inkSoft mt-1">소싱 진행 중</div>
             </div>
-            <div className="flex-1 text-center py-3 rounded-lg bg-profitBg">
+            <div className="text-center py-3 rounded-lg bg-profitBg">
               <div className="text-xl font-bold text-profit font-mono">
-                {statusCount.ordered}
+                {statusCount.on_sale}
               </div>
-              <div className="text-xs text-inkSoft mt-1">발주완료</div>
+              <div className="text-xs text-inkSoft mt-1">판매중</div>
             </div>
-            <div className="flex-1 text-center py-3 rounded-lg bg-[#F3F4F6]">
+            <div className="text-center py-3 rounded-lg bg-[#F3F4F6]">
+              <div className="text-xl font-bold text-inkSoft font-mono">
+                {statusCount.stopped}
+              </div>
+              <div className="text-xs text-inkSoft mt-1">판매중지</div>
+            </div>
+            <div className="text-center py-3 rounded-lg bg-[#F3F4F6]">
               <div className="text-xl font-bold text-inkSoft font-mono">
                 {statusCount.hold}
               </div>
