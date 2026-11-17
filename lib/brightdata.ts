@@ -132,67 +132,132 @@ export async function fetchCoupangBestsellers(
 ): Promise<CoupangBestseller[]> {
   const deadline = Date.now() + (options.budgetMs ?? 0);
   let lastError: unknown = null;
+  let attempt = 0;
 
   do {
     try {
-      const results = await fetchCoupangBestsellersOnce(keyword, limit);
+      // 재시도할 때마다 검색 주소 형태를 바꿔본다(정렬 옵션 때문에 차단/다른
+      // 페이지가 나오는 경우를 피하려고).
+      const results = await fetchCoupangBestsellersOnce(keyword, limit, attempt % 2);
       if (results.length > 0) return results;
     } catch (e) {
       lastError = e;
     }
+    attempt++;
   } while (Date.now() < deadline);
 
   if (lastError) throw lastError;
   return [];
 }
 
+function parseMarkdownProductBody(body: string): { price: string | null; reviewCount: string | null } {
+  const priceLines = [...body.matchAll(/(?:^|\n)\s*([\d,]{3,})원\s*(?=\n|$)/g)].map((x) => x[1]);
+  const discountMatch = body.match(/할인\s*([\d,]+)원/);
+  let price: string | null = null;
+  for (const p of priceLines) {
+    if (discountMatch && p === discountMatch[1]) continue;
+    price = p;
+    break;
+  }
+  const reviewMatch = body.match(/(?:^|\n)\s*\((\d[\d,]*)\)\s*(?=\n|$)/);
+  return { price, reviewCount: reviewMatch ? reviewMatch[1] : null };
+}
+
+// 쿠팡 검색결과 마크다운에서 상품을 뽑는다. 1순위는 지금까지 검증된 정확한
+// 모양, 그게 0건이면 2순위로 "상품 링크(/vp/products/...) 앞쪽에서 사진·이름·가격을
+// 찾는" 느슨한 방식으로 읽는다 - 쿠팡이 줄바꿈/모양을 조금 바꿔도 읽히게.
+export function parseCoupangSearchMarkdown(md: string, limit = 8): CoupangBestseller[] {
+  const results: CoupangBestseller[] = [];
+
+  const strictRe =
+    /\*\s+\[\s*\n\s*!\[([^\]]*)\]\(([^)]*)\)\s*\n\s*\1\s*\n([\s\S]*?)\]\((\/vp\/products\/[^)]+)\)/g;
+  let m: RegExpExecArray | null;
+  let rank = 0;
+  while ((m = strictRe.exec(md)) && results.length < limit) {
+    rank++;
+    const { price, reviewCount } = parseMarkdownProductBody(m[3]);
+    results.push({
+      rank,
+      name: m[1].trim(),
+      price,
+      reviewCount,
+      url: `https://www.coupang.com${m[4]}`,
+      imageUrl: m[2].trim() || null,
+    });
+  }
+  if (results.length > 0) return results;
+
+  // 느슨한 방식
+  const linkRe = /\]\(((?:https?:)?(?:\/\/www\.coupang\.com)?\/vp\/products\/(\d+)[^)\s]*)(?:\s+"[^"]*")?\)/g;
+  const seen = new Set<string>();
+  let prevEnd = 0;
+  while ((m = linkRe.exec(md)) && results.length < limit) {
+    const productId = m[2];
+    const chunkStart = Math.max(prevEnd, m.index - 1500);
+    const chunk = md.slice(chunkStart, m.index);
+    prevEnd = m.index + m[0].length;
+    if (seen.has(productId)) continue;
+
+    const images = [...chunk.matchAll(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g)];
+    const lastImg = images.length > 0 ? images[images.length - 1] : null;
+    let name = (lastImg?.[1] || '').trim();
+    if (name.length < 4) {
+      // 사진 설명이 비어 있으면 가격/별점 줄이 아닌 가장 긴 텍스트 줄을 이름으로 본다
+      const lines = chunk
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .split('\n')
+        .map((l) => l.replace(/[\[\]*]/g, '').trim())
+        .filter((l) => l.length >= 4 && !/^[\d,]+원?$/.test(l) && !/^\(\d[\d,]*\)$/.test(l) && !/^\(?https?:/.test(l));
+      name = lines.sort((a, b) => b.length - a.length)[0] || '';
+    }
+    if (!name) continue;
+
+    seen.add(productId);
+    const { price, reviewCount } = parseMarkdownProductBody(chunk);
+    let url = m[1];
+    if (url.startsWith('//')) url = `https:${url}`;
+    else if (url.startsWith('/')) url = `https://www.coupang.com${url}`;
+    results.push({
+      rank: results.length + 1,
+      name,
+      price,
+      reviewCount,
+      url,
+      imageUrl: lastImg ? (lastImg[2].startsWith('//') ? `https:${lastImg[2]}` : lastImg[2]) : null,
+    });
+  }
+  return results;
+}
+
 async function fetchCoupangBestsellersOnce(
   keyword: string,
-  limit: number
+  limit: number,
+  variant = 0
 ): Promise<CoupangBestseller[]> {
   // 실측 결과 실패 원인은 타임아웃보다 캡차 차단이 더 많았다 (14~20초
   // 만에 캡차로 막혀서 끝나는 패턴). 재시도를 2회로 늘려서 캡차를
   // 우회할 확률을 높인다.
-  const md = await unlockerMarkdown(
-    `https://www.coupang.com/np/search?component=&q=${encodeURIComponent(keyword)}&sorter=saleCountDesc`,
-    { country: 'kr', timeoutMs: 45000, retries: 2 }
+  const q = encodeURIComponent(keyword);
+  const url =
+    variant === 0
+      ? `https://www.coupang.com/np/search?component=&q=${q}&sorter=saleCountDesc`
+      : `https://www.coupang.com/np/search?q=${q}&channel=user`;
+  const md = await unlockerMarkdown(url, { country: 'kr', timeoutMs: 45000, retries: 2 });
+
+  const results = parseCoupangSearchMarkdown(md, limit);
+  if (results.length > 0) return results;
+
+  // 응답은 왔는데 상품을 하나도 못 읽음 - 원인을 맥북 로그(pm2 logs)에서 볼 수 있게 남긴다.
+  const hasProductLinks = /\/vp\/products\//.test(md);
+  console.error(
+    `[coupang search] 0건 (keyword="${keyword}", variant=${variant}, len=${md.length}, 상품링크=${hasProductLinks}) 응답 앞부분: ${md
+      .slice(0, 300)
+      .replace(/\s+/g, ' ')}`
   );
-
-  const blockRe =
-    /\*\s+\[\s*\n\s*!\[([^\]]*)\]\(([^)]*)\)\s*\n\s*\1\s*\n([\s\S]*?)\]\((\/vp\/products\/[^)]+)\)/g;
-
-  const results: CoupangBestseller[] = [];
-  let m: RegExpExecArray | null;
-  let rank = 0;
-  while ((m = blockRe.exec(md)) && results.length < limit) {
-    rank++;
-    const name = m[1].trim();
-    const imageUrl = m[2].trim() || null;
-    const body = m[3];
-    const relUrl = m[4];
-
-    const priceLines = [...body.matchAll(/\n\s*([\d,]+)원\s*\n/g)].map((x) => x[1]);
-    const discountMatch = body.match(/할인([\d,]+)원/);
-    let price: string | null = null;
-    for (const p of priceLines) {
-      if (discountMatch && p === discountMatch[1]) continue;
-      price = p;
-      break;
-    }
-
-    const reviewMatch = body.match(/\n\s*\((\d[\d,]*)\)\s*\n/);
-    const reviewCount = reviewMatch ? reviewMatch[1] : null;
-
-    results.push({
-      rank,
-      name,
-      price,
-      reviewCount,
-      url: `https://www.coupang.com${relUrl}`,
-      imageUrl,
-    });
+  if (!hasProductLinks) {
+    throw new Error('쿠팡이 검색 결과 대신 차단/빈 페이지를 돌려줬어요. 잠시 뒤 다시 눌러보세요.');
   }
-  return results;
+  return [];
 }
 
 export interface AlibabaProduct {

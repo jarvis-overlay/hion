@@ -60,7 +60,7 @@ async function fetchWithBudget(query: string) {
   // 다른 쿠팡 조사 호출부(runProductSearch 등)와 같이, 캡차로 실패해도
   // budgetMs 안에서 짧게 재시도한다. 버튼 한 번 누르고 바로 결과를
   // 기다리는 UX라 너무 길게 잡지 않음.
-  return fetchCoupangBestsellers(query, 30, { budgetMs: 25000 });
+  return fetchCoupangBestsellers(query, 30, { budgetMs: 35000 });
 }
 
 export async function researchCoupangComparisons(
