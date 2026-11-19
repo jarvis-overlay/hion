@@ -5,8 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { archiveOutput, swapWithPrevious } from '@/lib/imageHistory';
 import { createClient } from '@/lib/supabase/server';
 import {
-  generateThumbnailImage,
+  generateThumbnailImageDetailed,
   generateMainSubjectThumbnail,
+  conformMainImage,
   applyThumbnailEffect,
   isImageVisuallyUnchanged,
   duplicateImageStrip,
@@ -18,7 +19,7 @@ import {
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
 import { parsePackages, packageLabel, sameColor } from '@/lib/thumbnailPackage';
-import { applyCountBadge } from '@/lib/packageCompose';
+import { applyCountBadgeInFreeCorner } from '@/lib/packageCompose';
 import { generateThumbnailCopies, sanitizeThumbnailCopy } from '@/lib/ai';
 import {
   learnStyleBrief,
@@ -147,7 +148,7 @@ export async function addThumbnailImage(
   });
   if (insertErr) return { error: insertErr.message };
 
-  return runGeneration(supabase, imageId, projectId, { buffer, mimeType }, productPosition, effectPrompt);
+  return runGeneration(supabase, imageId, projectId, { buffer, mimeType }, productPosition, effectPrompt, kind === 'main');
 }
 
 // 메인/추가 이미지 하나를 업로드→DB 등록→생성까지 묶어서 처리 - 일괄
@@ -162,7 +163,7 @@ async function insertAndGenerateImage(
   productPosition: ThumbnailPosition,
   effectPrompt: string,
   colorLabel: string | null = null
-): Promise<{ error: string } | { success: true; url: string }> {
+): Promise<{ error: string } | { success: true; url: string; warning?: string }> {
   const imageId = randomUUID();
   const inputPath = `thumbnails/${projectId}/${imageId}-input.${extFromContentType(source.mimeType)}`;
   const { error: upErr } = await supabase.storage.from(BUCKET).upload(inputPath, source.buffer, {
@@ -184,7 +185,7 @@ async function insertAndGenerateImage(
   });
   if (insertErr) return { error: insertErr.message };
 
-  return runGeneration(supabase, imageId, projectId, source, productPosition, effectPrompt);
+  return runGeneration(supabase, imageId, projectId, source, productPosition, effectPrompt, kind === 'main');
 }
 
 // ---------------------------------------------------------------------------
@@ -732,6 +733,7 @@ export async function generateThumbnailBatch(
   const mainOk = mainResults.filter((r) => !('error' in r)).length;
   const mainErr = mainResults.find((r): r is { error: string } => 'error' in r);
   if (mainErr) notes.push(`메인 이미지 생성 실패: ${mainErr.error}`);
+  for (const r of mainResults) if ('warning' in r && r.warning) notes.push(r.warning);
 
   // 4-2) 패키지 메인: 색상별 사진을 누끼로 따서 정확한 수량만큼 한 장에 배치 (패키지 2개씩 동시에)
   const packageResults = await mapLimit(packages, 2, async (p) => {
@@ -745,13 +747,16 @@ export async function generateThumbnailBatch(
       items.push({ productImage: g[1][0], quantity: it.qty });
     }
     try {
-      const composite = await generatePackageThumbnail(items, { template: p.template, flip: p.flip, badge: p.badge });
+      const composite = await generatePackageThumbnail(items, { template: p.template, flip: p.flip });
       // 수량 배지는 메인에만 붙인다 (추가 이미지의 상품 사진으로 쓰는 composite에 배지가 섞이면 상품으로 오인됨).
-      // 배지 합성이 실패해도 메인은 배지 없이 만든다.
+      // 쿠팡 규정(상품 95% 이상)상 배지 자리를 따로 비우지 않으므로, 상품을 가리지 않는 빈 모서리에만 붙인다.
+      // 배지 합성이 실패하거나 빈 자리가 없으면 메인은 배지 없이 만든다.
       let shown = composite;
       if (p.badge) {
         try {
-          shown = await applyCountBadge(composite, items.reduce((s, it) => s + it.quantity, 0), { shape: p.badgeShape, color: p.badgeColor }, !!p.flip);
+          const badged = await applyCountBadgeInFreeCorner(composite, items.reduce((s, it) => s + it.quantity, 0), { shape: p.badgeShape, color: p.badgeColor }, !!p.flip);
+          if (badged) shown = badged;
+          else notes.push(`"${label}" 쿠팡 규정(상품이 가로/세로 95% 이상)을 지키느라 수량 배지를 붙일 빈 자리가 없어서 배지 없이 만들었어요.`);
         } catch (e: any) {
           notes.push(`"${label}" 수량 배지를 붙이지 못했어요: ${e?.message || e}`);
         }
@@ -1021,7 +1026,8 @@ export async function retryThumbnailImage(
     img.project_id,
     { buffer, mimeType },
     (img.product_position as ThumbnailPosition) || 'center',
-    effectPrompt
+    effectPrompt,
+    img.kind === 'main'
   );
 }
 
@@ -1031,8 +1037,9 @@ async function runGeneration(
   projectId: string,
   productImage: { buffer: Buffer; mimeType: string },
   position: ThumbnailPosition,
-  effectPrompt: string
-): Promise<{ error: string } | { success: true; url: string }> {
+  effectPrompt: string,
+  isMain = false
+): Promise<{ error: string } | { success: true; url: string; warning?: string }> {
   try {
     // 효과(소품/연출 추가) 요청이 있을 때만 "요즘 잘 팔리는 상품" 참고
     // 이미지를 같이 넣는다 - 기본 흰 배경 패키샷 자체는 쿠팡 규격상
@@ -1049,11 +1056,12 @@ async function runGeneration(
       }
     }
 
-    const generated = await generateThumbnailImage({
+    const { buffer: generated, warning } = await generateThumbnailImageDetailed({
       productImage,
       position,
       effectPrompt: effectPrompt || undefined,
       referenceImages,
+      main: isMain,
     });
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
     await archiveOutput(supabase, BUCKET, outPath);
@@ -1071,7 +1079,7 @@ async function runGeneration(
     if (updateErr) return { error: updateErr.message };
 
     revalidatePath(PATH);
-    return { success: true, url: outputUrl };
+    return { success: true, url: outputUrl, warning };
   } catch (e: any) {
     const message = e?.message || String(e);
     await supabase.from('thumbnail_images').update({ error: message }).eq('id', imageId);
@@ -1163,6 +1171,18 @@ export async function editThumbnailImage(
         error:
           'AI가 요청한 수정을 반영하지 못했어요 (이미지가 거의 그대로예요). 프롬프트를 더 구체적으로 적어서 다시 시도해주세요.',
       };
+    }
+
+    // 메인(대표) 이미지는 쿠팡 규정(순백 배경·상품 95% 이상·중앙)에 맞춰야 한다. 배경을 바꾸는 수정은 반영하지 않는다.
+    if (img.kind === 'main') {
+      const conformed = await conformMainImage(edited);
+      if (!conformed.report.whiteBackground) {
+        return {
+          error:
+            '쿠팡 대표 이미지는 배경이 순백색이어야 해서, 배경을 바꾸는 수정은 반영하지 않았어요. 배경 연출은 추가 이미지에서 만들어주세요.',
+        };
+      }
+      edited = conformed.buffer;
     }
 
     const outPath = `thumbnails/${img.project_id}/${imageId}-output.jpg`;

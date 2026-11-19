@@ -119,6 +119,44 @@ export async function drawCountBadge(text: string, style: BadgeStyle = {}): Prom
   return { png: canvas.toBuffer('image/png'), w, h };
 }
 
+// 쿠팡 대표 이미지 규정(상품이 95% 이상 + 비상품 요소 금지, 단 작은 수량 표기는 허용)에 맞춰,
+// 상품을 가리지 않는 "완전히 빈(흰) 모서리"에만 작은 배지를 붙인다. 위쪽 모서리부터 찾고, 어디에도
+// 빈 자리가 없으면 붙이지 않고 null을 돌려준다(호출한 쪽이 안내).
+export async function applyCountBadgeInFreeCorner(
+  base: Buffer,
+  total: number,
+  style: BadgeStyle = {},
+  flip = false
+): Promise<Buffer | null> {
+  const { png, w, h } = await drawCountBadge(`${total}P`, style);
+  const gap = 20;
+  const right = SIZE - gap - w;
+  const bottom = SIZE - gap - h;
+  const corners: [number, number][] = flip
+    ? [[gap, gap], [right, gap], [gap, bottom], [right, bottom]]
+    : [[right, gap], [gap, gap], [right, bottom], [gap, bottom]];
+  for (const [left, top] of corners) {
+    const pad = 8; // 배지 둘레에도 상품이 없어야 한다
+    const region = {
+      left: Math.max(0, left - pad),
+      top: Math.max(0, top - pad),
+      width: Math.min(SIZE, w + pad * 2),
+      height: Math.min(SIZE, h + pad * 2),
+    };
+    region.width = Math.min(region.width, SIZE - region.left);
+    region.height = Math.min(region.height, SIZE - region.top);
+    // sharp의 stats()는 extract를 무시하고 이미지 전체를 계산하므로, 먼저 잘라낸 뒤 통계를 낸다
+    const stats = await sharp(await sharp(base).extract(region).toBuffer()).stats();
+    const clear = stats.channels.slice(0, 3).every((c) => c.min >= 244);
+    if (!clear) continue;
+    return sharp(base)
+      .composite([{ input: png, left, top }])
+      .jpeg({ quality: 92 })
+      .toBuffer();
+  }
+  return null;
+}
+
 // 완성된 패키지 이미지 맨 위 띠(오른쪽, 반전이면 왼쪽)에 "N P" 배지를 붙인다 (1000x1000 기준)
 export async function applyCountBadge(base: Buffer, total: number, style: BadgeStyle = {}, flip = false): Promise<Buffer> {
   const { png, w, h } = await drawCountBadge(`${total}P`, style);

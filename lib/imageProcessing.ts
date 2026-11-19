@@ -500,6 +500,88 @@ export async function enforceThumbnailSize(buffer: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
+// ---------------------------------------------------------------------------
+// 쿠팡 "대표 이미지" 규정 맞춤 (메인 전용)
+// ---------------------------------------------------------------------------
+// 규정: 순백 배경(RGB 255) / 상품이 가로 또는 세로 기준 95% 이상 / 상품이 프레임 중앙(상하좌우 여백
+// 균형) / 잘리거나 모서리에 닿으면 안 됨. 템플릿·배치 위치·효과 결과가 어떻든 마지막에 한 번 코드로
+// 같은 기준에 맞춘다(AI가 아니라 상품 픽셀을 그대로 자르고 키우기만 함).
+export const MAIN_FILL_RATIO = 0.96; // 목표 - 규정 최소(95%)보다 살짝 여유
+const MAIN_MIN_FILL = 0.95;
+const NONWHITE_BELOW = 244; // 채널 최솟값이 이보다 작으면 "상품(또는 그림자)"으로 본다
+
+export interface MainImageReport {
+  whiteBackground: boolean; // 가장자리가 순백인가 (아니면 배경이 바뀐 이미지)
+  fillRatio: number; // 상품이 가로/세로 중 더 크게 차지하는 비율 (0~1)
+  centered: boolean;
+  adjusted: boolean; // 규정에 맞추려고 자르고 키웠는가
+}
+
+export async function conformMainImage(buffer: Buffer): Promise<{ buffer: Buffer; report: MainImageReport }> {
+  const S = THUMBNAIL_SIZE;
+  const { data } = await sharp(buffer)
+    .flatten({ background: '#ffffff' })
+    .resize({ width: S, height: S, fit: 'contain', background: '#ffffff' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  let minX = S, minY = S, maxX = -1, maxY = -1;
+  let ringTotal = 0;
+  let ringNonWhite = 0;
+  for (let y = 0; y < S; y++) {
+    const row = y * S;
+    for (let x = 0; x < S; x++) {
+      const i = (row + x) * 3;
+      const nonWhite = Math.min(data[i], data[i + 1], data[i + 2]) < NONWHITE_BELOW;
+      const onRing = x === 0 || y === 0 || x === S - 1 || y === S - 1;
+      if (onRing) {
+        ringTotal++;
+        if (nonWhite) ringNonWhite++;
+      }
+      if (nonWhite) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  const whiteBackground = ringTotal > 0 && ringNonWhite / ringTotal < 0.05;
+  if (maxX < 0 || !whiteBackground) {
+    // 상품을 못 찾았거나 배경이 흰색이 아니면 자르지 않고 그대로 두고 상태만 알려준다
+    return { buffer, report: { whiteBackground, fillRatio: 0, centered: false, adjusted: false } };
+  }
+
+  const bw = maxX - minX + 1;
+  const bh = maxY - minY + 1;
+  const fillRatio = Math.max(bw / S, bh / S);
+  const offX = Math.abs((minX + maxX + 1) / 2 - S / 2) / S;
+  const offY = Math.abs((minY + maxY + 1) / 2 - S / 2) / S;
+  const centered = offX < 0.01 && offY < 0.01;
+  if (fillRatio >= MAIN_MIN_FILL && fillRatio < 0.995 && centered) {
+    return { buffer, report: { whiteBackground, fillRatio, centered, adjusted: false } };
+  }
+
+  const crop = await sharp(data, { raw: { width: S, height: S, channels: 3 } })
+    .extract({ left: minX, top: minY, width: bw, height: bh })
+    .resize({ width: Math.round(S * MAIN_FILL_RATIO), height: Math.round(S * MAIN_FILL_RATIO), fit: 'inside', kernel: 'lanczos3' })
+    .png()
+    .toBuffer();
+  const cm = await sharp(crop).metadata();
+  const cw = cm.width || 1;
+  const ch = cm.height || 1;
+  const out = await sharp({ create: { width: S, height: S, channels: 3, background: '#ffffff' } })
+    .composite([{ input: crop, left: Math.round((S - cw) / 2), top: Math.round((S - ch) / 2) }])
+    .jpeg({ quality: 92 })
+    .toBuffer();
+  return {
+    buffer: out,
+    report: { whiteBackground, fillRatio: Math.max(cw / S, ch / S), centered: true, adjusted: true },
+  };
+}
+
 export async function composeThumbnailImage(
   cutoutBuffer: Buffer,
   position: ThumbnailPosition = 'center'
@@ -818,25 +900,47 @@ export interface GenerateThumbnailInput {
   position: ThumbnailPosition;
   effectPrompt?: string;
   referenceImages?: { buffer: Buffer; mimeType: string }[];
+  // 메인(대표) 이미지면 쿠팡 대표 이미지 규정(순백 배경·상품 95% 이상·중앙)에 맞춰 마무리한다
+  main?: boolean;
 }
 
 // 상품 위치 크롭(소품 물리적으로 제거) -> 문구/워터마크 정리 -> 누끼
 // -> 흰 배경 1000x1000 배치 -> (선택) 효과 추가, 순서로 처리한다.
-export async function generateThumbnailImage(input: GenerateThumbnailInput): Promise<Buffer> {
+// warning: 메인에서 요청한 효과가 규정(순백 배경)에 어긋나 반영하지 못했을 때의 안내
+export async function generateThumbnailImageDetailed(
+  input: GenerateThumbnailInput
+): Promise<{ buffer: Buffer; warning?: string }> {
   const cropped = await cropToProduct(input.productImage.buffer, input.productImage.mimeType);
   const cleaned = await cleanProductPhotoForCutout(cropped, input.productImage.mimeType);
   const cutout = await removeWhiteBackground(cleaned.buffer);
-  const base = await composeThumbnailImage(cutout, input.position);
+  // 메인은 위치 옵션과 상관없이 항상 중앙에 크게 둔다(규정)
+  const base = await composeThumbnailImage(cutout, input.main ? 'center' : input.position);
+  const baseFinal = input.main ? (await conformMainImage(base)).buffer : base;
   if (input.effectPrompt?.trim()) {
+    let effected: Buffer;
     try {
-      return await applyThumbnailEffect(base, input.effectPrompt.trim(), input.referenceImages || []);
+      effected = await applyThumbnailEffect(baseFinal, input.effectPrompt.trim(), input.referenceImages || []);
     } catch (e: any) {
       const m = String(e?.message || '');
       if (m.startsWith('NOIMG:')) throw new Error(`효과 적용 결과를 받지 못했어요 (${m.slice(6)}). 프롬프트를 조금 더 구체적으로 적어서 다시 시도해주세요.`);
       throw e;
     }
+    if (!input.main) return { buffer: effected };
+    const conformed = await conformMainImage(effected);
+    if (!conformed.report.whiteBackground) {
+      return {
+        buffer: baseFinal,
+        warning:
+          '쿠팡 대표 이미지는 배경이 순백색이어야 해서, 배경을 바꾸는 요청은 반영하지 않고 흰 배경 메인으로 만들었어요. 연출 컷은 추가 이미지에서 만들어주세요.',
+      };
+    }
+    return { buffer: conformed.buffer };
   }
-  return base;
+  return { buffer: baseFinal };
+}
+
+export async function generateThumbnailImage(input: GenerateThumbnailInput): Promise<Buffer> {
+  return (await generateThumbnailImageDetailed(input)).buffer;
 }
 
 // 누끼에서 가장 큰 덩어리(= 대표 상품)만 남기고 떨어져 있는 다른 조각은 지운다. 한 사진에 착용 컷과 잘린 제품 조각이
@@ -933,7 +1037,8 @@ export async function generateMainSubjectThumbnail(input: {
   const cropped = await cropToProduct(input.productImage.buffer, input.productImage.mimeType);
   const cutout = await removeWhiteBackground(cropped);
   const only = await keepMainSubject(await sharp(cutout).trim().toBuffer());
-  return composeThumbnailImage(await sharp(only).trim().toBuffer(), input.position);
+  const composed = await composeThumbnailImage(await sharp(only).trim().toBuffer(), 'center');
+  return (await conformMainImage(composed)).buffer; // 메인이라 규정(중앙·95% 이상)에 맞춘다
 }
 
 // ---------------------------------------------------------------------------
@@ -1004,8 +1109,13 @@ export async function generatePackageThumbnail(
     // 형태를 못 재면 보통 비율로 본다
   }
   const tpl = resolveTemplate(opts.template, units.length, aspect);
-  if (tpl === 'grid') return composePackageCutouts(units, { badge: opts.badge }); // 가운데 정렬이라 반전은 배지 위치만 바뀐다
-  return composeTemplate(tpl, units, { badge: opts.badge, flip: opts.flip });
+  // 배지 자리를 따로 비워두면 상품이 95% 미만이 되므로, 배지는 비워두지 않고 합성 후 빈 모서리에 붙인다
+  // (패키지 메인 합성 -> 규정 맞춤(순백·중앙·95% 이상) -> 배지).
+  const raw =
+    tpl === 'grid'
+      ? await composePackageCutouts(units) // 가운데 정렬이라 반전은 배지 위치만 바뀐다
+      : await composeTemplate(tpl, units, { flip: opts.flip });
+  return (await conformMainImage(raw)).buffer;
 }
 
 // 상품 사진에서 상품만 따낸 투명 배경 PNG. ready=true면 이미 흰 배경에 상품만 있는 이미지(패키지 합성 등)라
