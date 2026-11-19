@@ -1471,7 +1471,7 @@ function ProjectEditor({
                                 ))}
                               </select>
                               <select
-                                value={p.badgeColor || 'navy'}
+                                value={p.badgeColor || 'white'}
                                 onChange={(e) => patchPackage(p.id, (x) => ({ ...x, badgeColor: e.target.value as BadgeColor }))}
                                 className="border border-paperLine rounded px-1 py-0.5 bg-white"
                                 aria-label="배지 색"

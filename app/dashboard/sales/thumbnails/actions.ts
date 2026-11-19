@@ -15,7 +15,8 @@ import {
   fetchImageFromUrl,
   fetchTopSellerReferenceImages,
   describeProductAppearance,
-  generatePackageThumbnail,
+  generatePackageThumbnailDetailed,
+  describeCutProblems,
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
 import { parsePackages, packageLabel, sameColor } from '@/lib/thumbnailPackage';
@@ -747,7 +748,12 @@ export async function generateThumbnailBatch(
       items.push({ productImage: g[1][0], quantity: it.qty });
     }
     try {
-      const composite = await generatePackageThumbnail(items, { template: p.template, flip: p.flip });
+      const built = await generatePackageThumbnailDetailed(items, { template: p.template, flip: p.flip });
+      const composite = built.buffer;
+      // 사진에서 상품이 잘려 보이거나 해상도가 낮으면 색상별로 알려준다 (쿠팡 규정: 상품 전체가 선명해야 함)
+      built.itemProblems.forEach((prob, i) => {
+        for (const msg of describeCutProblems(prob, `"${label}"의 ${p.items[i]?.color || i + 1} 사진`)) notes.push(msg);
+      });
       // 수량 배지는 메인에만 붙인다 (추가 이미지의 상품 사진으로 쓰는 composite에 배지가 섞이면 상품으로 오인됨).
       // 쿠팡 규정(상품 95% 이상)상 배지 자리를 따로 비우지 않으므로, 상품을 가리지 않는 빈 모서리에만 붙인다.
       // 배지 합성이 실패하거나 빈 자리가 없으면 메인은 배지 없이 만든다.

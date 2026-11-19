@@ -818,6 +818,12 @@ async function detectProductBoundingBox(
 // 계속 동작한다.
 async function cropToProduct(imageBuffer: Buffer, mimeType: string): Promise<Buffer> {
   const box = await detectProductBoundingBox(imageBuffer, mimeType);
+  return cropByBox(imageBuffer, box, 0.1);
+}
+
+type ProductBox = { xMin: number; yMin: number; xMax: number; yMax: number };
+
+async function cropByBox(imageBuffer: Buffer, box: ProductBox | null, padRatio: number): Promise<Buffer> {
   if (!box) return imageBuffer;
 
   const meta = await sharp(imageBuffer).metadata();
@@ -825,7 +831,6 @@ async function cropToProduct(imageBuffer: Buffer, mimeType: string): Promise<Buf
   const height = meta.height || 0;
   if (!width || !height) return imageBuffer;
 
-  const padRatio = 0.1;
   const boxW = box.xMax - box.xMin;
   const boxH = box.yMax - box.yMin;
   const padX = boxW * padRatio;
@@ -895,6 +900,87 @@ async function cleanProductPhotoForCutout(
   };
 }
 
+// ---------------------------------------------------------------------------
+// 상품 누끼 만들기 + 잘림/저화질 감지 (메인·패키지 공용)
+// ---------------------------------------------------------------------------
+// 쿠팡 대표 이미지 규정은 "상품 전체가 선명하게 보일 것"을 전제로 한다. 그런데 누끼를 따는 과정에서
+// (1) AI가 찾은 상품 위치 좌표가 좁아 상품 끝이 잘리거나 (2) 원본 사진에서 이미 상품이 잘려 있을 수 있다.
+// 누끼의 가장자리에 상품이 닿아 있으면 잘린 것이므로, 좌표 여유를 더 넓게(30%) 잡아 한 번 더 시도하고,
+// 그래도 닿아 있으면(= 원본 사진이 잘림) 결과와 함께 알려준다.
+export type CutSide = 'top' | 'bottom' | 'left' | 'right';
+const SIDE_KO: Record<CutSide, string> = { top: '위', bottom: '아래', left: '왼쪽', right: '오른쪽' };
+
+export async function touchedSides(cutoutPng: Buffer): Promise<CutSide[]> {
+  const { data, info } = await sharp(cutoutPng).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels } = info;
+  const opaque = (x: number, y: number) => data[(y * W + x) * channels + 3] > 128;
+  const band = 2;
+  const THRESH = 0.01; // 가장자리 줄의 1% 이상이 상품이면 닿은 것
+  const sides: CutSide[] = [];
+  let top = 0, bottom = 0, left = 0, right = 0;
+  for (let b = 0; b < band; b++) {
+    for (let x = 0; x < W; x++) {
+      if (opaque(x, b)) top++;
+      if (opaque(x, H - 1 - b)) bottom++;
+    }
+    for (let y = 0; y < H; y++) {
+      if (opaque(b, y)) left++;
+      if (opaque(W - 1 - b, y)) right++;
+    }
+  }
+  if (top / (W * band) >= THRESH) sides.push('top');
+  if (bottom / (W * band) >= THRESH) sides.push('bottom');
+  if (left / (H * band) >= THRESH) sides.push('left');
+  if (right / (H * band) >= THRESH) sides.push('right');
+  return sides;
+}
+
+export interface ProductCutoutResult {
+  cutout: Buffer;
+  clipped: CutSide[]; // 상품이 잘려 보이는 쪽 (재시도 후에도 남은 것)
+  lowRes: boolean; // 원본 해상도가 낮아 확대하면 흐려질 수 있음
+}
+
+export function describeCutProblems(r: { clipped: CutSide[]; lowRes: boolean }, label = '사진'): string[] {
+  const out: string[] = [];
+  if (r.clipped.length > 0) {
+    out.push(
+      `${label}: 상품의 ${r.clipped.map((s) => SIDE_KO[s]).join('·')} 쪽이 잘려 보여요. 원본 사진에서 이미 잘려 있다면 상품 전체가 나온 사진으로 바꿔서 다시 만들어주세요.`
+    );
+  }
+  if (r.lowRes) {
+    out.push(`${label}: 원본 사진 해상도가 낮아서(상품 긴 쪽 600px 미만) 쿠팡 규정(선명해야 함)에 못 미칠 수 있어요. 더 큰 사진을 써주세요.`);
+  }
+  return out;
+}
+
+async function buildProductCutout(productImage: { buffer: Buffer; mimeType: string }): Promise<ProductCutoutResult> {
+  const box = await detectProductBoundingBox(productImage.buffer, productImage.mimeType);
+  const make = async (pad: number) => {
+    const cropped = await cropByBox(productImage.buffer, box, pad);
+    const cleaned = await cleanProductPhotoForCutout(cropped, productImage.mimeType);
+    const cutout = await removeWhiteBackground(cleaned.buffer);
+    return { cutout, sides: await touchedSides(cutout) };
+  };
+  let best = await make(0.1);
+  if (best.sides.length > 0 && box) {
+    try {
+      const wider = await make(0.3);
+      if (wider.sides.length < best.sides.length) best = wider;
+    } catch {
+      // 두 번째 시도가 실패하면 첫 결과를 그대로 쓴다
+    }
+  }
+  let lowRes = false;
+  try {
+    const m = await sharp(await sharp(best.cutout).trim().toBuffer()).metadata();
+    lowRes = Math.max(m.width || 0, m.height || 0) < 600;
+  } catch {
+    lowRes = false;
+  }
+  return { cutout: best.cutout, clipped: best.sides, lowRes };
+}
+
 export interface GenerateThumbnailInput {
   productImage: { buffer: Buffer; mimeType: string };
   position: ThumbnailPosition;
@@ -910,11 +996,10 @@ export interface GenerateThumbnailInput {
 export async function generateThumbnailImageDetailed(
   input: GenerateThumbnailInput
 ): Promise<{ buffer: Buffer; warning?: string }> {
-  const cropped = await cropToProduct(input.productImage.buffer, input.productImage.mimeType);
-  const cleaned = await cleanProductPhotoForCutout(cropped, input.productImage.mimeType);
-  const cutout = await removeWhiteBackground(cleaned.buffer);
+  const built = await buildProductCutout(input.productImage);
+  const cutProblems = input.main ? describeCutProblems(built, '메인 사진').join(' ') : '';
   // 메인은 위치 옵션과 상관없이 항상 중앙에 크게 둔다(규정)
-  const base = await composeThumbnailImage(cutout, input.main ? 'center' : input.position);
+  const base = await composeThumbnailImage(built.cutout, input.main ? 'center' : input.position);
   const baseFinal = input.main ? (await conformMainImage(base)).buffer : base;
   if (input.effectPrompt?.trim()) {
     let effected: Buffer;
@@ -930,13 +1015,17 @@ export async function generateThumbnailImageDetailed(
     if (!conformed.report.whiteBackground) {
       return {
         buffer: baseFinal,
-        warning:
+        warning: [
           '쿠팡 대표 이미지는 배경이 순백색이어야 해서, 배경을 바꾸는 요청은 반영하지 않고 흰 배경 메인으로 만들었어요. 연출 컷은 추가 이미지에서 만들어주세요.',
+          cutProblems,
+        ]
+          .filter(Boolean)
+          .join(' '),
       };
     }
-    return { buffer: conformed.buffer };
+    return { buffer: conformed.buffer, warning: cutProblems || undefined };
   }
-  return { buffer: baseFinal };
+  return { buffer: baseFinal, warning: cutProblems || undefined };
 }
 
 export async function generateThumbnailImage(input: GenerateThumbnailInput): Promise<Buffer> {
@@ -1088,13 +1177,16 @@ export async function generatePackageThumbnail(
   items: { productImage: { buffer: Buffer; mimeType: string }; quantity: number }[],
   opts: { template?: TemplateChoice; flip?: boolean; badge?: boolean } = {}
 ): Promise<Buffer> {
-  const cutouts = await Promise.all(
-    items.map(async (it) => {
-      const cropped = await cropToProduct(it.productImage.buffer, it.productImage.mimeType);
-      const cleaned = await cleanProductPhotoForCutout(cropped, it.productImage.mimeType);
-      return removeWhiteBackground(cleaned.buffer);
-    })
-  );
+  return (await generatePackageThumbnailDetailed(items, opts)).buffer;
+}
+
+// itemProblems[i]: items[i] 사진에서 감지한 잘림/저화질 안내 (없으면 빈 배열)
+export async function generatePackageThumbnailDetailed(
+  items: { productImage: { buffer: Buffer; mimeType: string }; quantity: number }[],
+  opts: { template?: TemplateChoice; flip?: boolean; badge?: boolean } = {}
+): Promise<{ buffer: Buffer; itemProblems: { clipped: CutSide[]; lowRes: boolean }[] }> {
+  const builts = await Promise.all(items.map((it) => buildProductCutout(it.productImage)));
+  const cutouts = builts.map((b) => b.cutout);
   const units: Buffer[] = [];
   items.forEach((it, i) => {
     for (let q = 0; q < it.quantity; q++) units.push(cutouts[i]);
@@ -1115,7 +1207,10 @@ export async function generatePackageThumbnail(
     tpl === 'grid'
       ? await composePackageCutouts(units) // 가운데 정렬이라 반전은 배지 위치만 바뀐다
       : await composeTemplate(tpl, units, { flip: opts.flip });
-  return (await conformMainImage(raw)).buffer;
+  return {
+    buffer: (await conformMainImage(raw)).buffer,
+    itemProblems: builts.map((b) => ({ clipped: b.clipped, lowRes: b.lowRes })),
+  };
 }
 
 // 상품 사진에서 상품만 따낸 투명 배경 PNG. ready=true면 이미 흰 배경에 상품만 있는 이미지(패키지 합성 등)라

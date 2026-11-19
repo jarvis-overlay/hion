@@ -104,14 +104,22 @@ export async function drawCountBadge(text: string, style: BadgeStyle = {}): Prom
     }
     ctx.closePath();
   };
+  const outline = normBadgeColor(style.color) === 'white'; // 흰 바탕 + 검은 외곽선·글자 (쿠팡 가이드 예시 모양)
   ctx.fillStyle = color;
   path(0);
   ctx.fill();
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 3;
-  path(7);
-  ctx.stroke();
-  ctx.fillStyle = '#ffffff';
+  if (outline) {
+    ctx.strokeStyle = '#222222';
+    ctx.lineWidth = 4;
+    path(2);
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    path(7);
+    ctx.stroke();
+  }
+  ctx.fillStyle = outline ? '#222222' : '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `${Math.round(h * (shape === 'pill' ? 0.56 : 0.44))}px ${FONT_EXTRABOLD}`;
@@ -132,9 +140,10 @@ export async function applyCountBadgeInFreeCorner(
   const gap = 20;
   const right = SIZE - gap - w;
   const bottom = SIZE - gap - h;
+  // 쿠팡 가이드의 수량 뱃지 예시처럼 아래쪽 모서리를 먼저 쓰고, 막혀 있으면 위쪽을 쓴다
   const corners: [number, number][] = flip
-    ? [[gap, gap], [right, gap], [gap, bottom], [right, bottom]]
-    : [[right, gap], [gap, gap], [right, bottom], [gap, bottom]];
+    ? [[gap, bottom], [right, bottom], [gap, gap], [right, gap]]
+    : [[right, bottom], [gap, bottom], [right, gap], [gap, gap]];
   for (const [left, top] of corners) {
     const pad = 8; // 배지 둘레에도 상품이 없어야 한다
     const region = {
