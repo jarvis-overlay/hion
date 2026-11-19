@@ -330,6 +330,7 @@ function ImageCard({
   const [editing, setEditing] = useState(false);
   const [editPrompt, setEditPrompt] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
+  const [editMsg, setEditMsg] = useState<string | null>(null);
   const [isEditPending, startEditTransition] = useTransition();
   // 실패한 카드를 "다시 생성"할 때 덧붙일 요청(선택)
   const [retryPrompt, setRetryPrompt] = useState('');
@@ -348,6 +349,7 @@ function ImageCard({
   function handleEdit() {
     if (!editPrompt.trim()) return;
     setEditError(null);
+    setEditMsg(null);
     startEditTransition(async () => {
       const res = await editThumbnailImage(img.id, editPrompt.trim());
       if (!res || 'error' in res) {
@@ -356,6 +358,7 @@ function ImageCard({
       }
       setEditing(false);
       setEditPrompt('');
+      setEditMsg('message' in res && res.message ? res.message : null);
     });
   }
 
@@ -535,6 +538,7 @@ function ImageCard({
         </button>
       </div>
       {revertMsg && <p className="text-[10px] text-warn text-center px-1 max-w-[16rem]">{revertMsg}</p>}
+      {editMsg && <p className="text-[10px] text-profit text-center px-1 max-w-[16rem]">{editMsg}</p>}
       {mainOnlyError && <p className="text-[10px] text-warn text-center px-1 max-w-[16rem]">{mainOnlyError}</p>}
       {editing && img.output_image_url && (
         <div className="grid gap-1.5 w-full">
@@ -542,7 +546,11 @@ function ImageCard({
             value={editPrompt}
             onChange={(e) => setEditPrompt(e.target.value)}
             rows={2}
-            placeholder="수정할 내용을 입력하세요 (예: 그림자를 더 연하게 해줘, 제품을 살짝 왼쪽으로 옮겨줘)"
+            placeholder={
+              String(img.color_label || '').startsWith('패키지 ') && / 배지$/.test(String(img.color_label))
+                ? '수정할 내용을 입력하세요 (예: 수량 숫자 크게 / 배지를 왼쪽 위로 / 빨간색으로 / 5개로 표기 / 배지 없애줘)'
+                : '수정할 내용을 입력하세요 (예: 그림자를 더 연하게 해줘, 제품을 살짝 왼쪽으로 옮겨줘)'
+            }
             className="border border-paperLine bg-white px-2 py-1.5 text-[11px] w-full"
           />
           <button

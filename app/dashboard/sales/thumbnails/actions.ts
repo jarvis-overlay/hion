@@ -20,7 +20,8 @@ import {
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
 import { parsePackages, packageLabel, sameColor } from '@/lib/thumbnailPackage';
-import { applyCountBadgeInFreeCorner } from '@/lib/packageCompose';
+import { placeCountBadge } from '@/lib/packageCompose';
+import { parseBadgeEdit, parsePackageLabel, readBadgeSpec, type BadgeSpec } from '@/lib/badgeEdit';
 import { generateThumbnailCopies, sanitizeThumbnailCopy } from '@/lib/ai';
 import {
   learnStyleBrief,
@@ -758,16 +759,20 @@ export async function generateThumbnailBatch(
       // 쿠팡 규정(상품 95% 이상)상 배지 자리를 따로 비우지 않으므로, 상품을 가리지 않는 빈 모서리에만 붙인다.
       // 배지 합성이 실패하거나 빈 자리가 없으면 메인은 배지 없이 만든다.
       let shown = composite;
+      let badgeSpec: BadgeSpec | undefined;
       if (p.badge) {
         try {
-          const badged = await applyCountBadgeInFreeCorner(composite, items.reduce((s, it) => s + it.quantity, 0), { shape: p.badgeShape, color: p.badgeColor }, !!p.flip);
-          if (badged) shown = badged;
-          else notes.push(`"${label}" 쿠팡 규정(상품이 가로/세로 95% 이상)을 지키느라 수량 배지를 붙일 빈 자리가 없어서 배지 없이 만들었어요.`);
+          const badged = await placeCountBadge(composite, items.reduce((s, it) => s + it.quantity, 0), { shape: p.badgeShape, color: p.badgeColor }, !!p.flip);
+          if (badged) {
+            shown = badged.buffer;
+            // 나중에 "크기 키워줘/위치 옮겨줘" 같은 수정을 코드로 정확히 하려고 설정을 저장해 둔다
+            badgeSpec = { ...readBadgeSpec(null), shape: p.badgeShape || 'circle', color: p.badgeColor || 'white', scale: badged.scale, corner: badged.corner };
+          } else notes.push(`"${label}" 쿠팡 규정(상품이 가로/세로 95% 이상)을 지키느라 수량 배지를 붙일 빈 자리가 없어서 배지 없이 만들었어요.`);
         } catch (e: any) {
           notes.push(`"${label}" 수량 배지를 붙이지 못했어요: ${e?.message || e}`);
         }
       }
-      const saved = await savePackageMain(supabase, projectId, label, composite, shown);
+      const saved = await savePackageMain(supabase, projectId, label, composite, shown, badgeSpec);
       if ('error' in saved) return { label, p, error: saved.error };
       return { label, p, composite };
     } catch (e: any) {
@@ -961,7 +966,8 @@ async function savePackageMain(
   projectId: string,
   label: string,
   composite: Buffer,
-  shown: Buffer = composite // 화면에 보이는 메인 (배지가 붙은 것). composite는 배지 없는 합성본
+  shown: Buffer = composite, // 화면에 보이는 메인 (배지가 붙은 것). composite는 배지 없는 합성본
+  badgeSpec?: BadgeSpec
 ): Promise<{ error: string } | { success: true; url: string }> {
   await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main').eq('color_label', label);
   const imageId = randomUUID();
@@ -980,7 +986,7 @@ async function savePackageMain(
       .upload(inPath, await enforceThumbnailSize(composite), { contentType: 'image/jpeg', upsert: true });
     if (!inErr) inputUrl = supabase.storage.from(BUCKET).getPublicUrl(inPath).data.publicUrl;
   }
-  const { error: insertErr } = await supabase.from('thumbnail_images').insert({
+  const row: Record<string, any> = {
     id: imageId,
     project_id: projectId,
     kind: 'main',
@@ -990,9 +996,71 @@ async function savePackageMain(
     product_position: 'center',
     effect_prompt: null,
     color_label: label,
-  });
+  };
+  let { error: insertErr } = await supabase.from('thumbnail_images').insert(badgeSpec ? { ...row, style_spec: { badge: badgeSpec } } : row);
+  if (insertErr && badgeSpec && /style_spec|schema cache|column/i.test(insertErr.message)) {
+    // style_spec 컬럼이 없으면 배지 설정만 빼고 저장한다 (이후 배지 수정은 기본값에서 시작)
+    ({ error: insertErr } = await supabase.from('thumbnail_images').insert(row));
+  }
   if (insertErr) return { error: insertErr.message };
   return { success: true, url };
+}
+
+// 패키지 메인의 수량 배지는 AI가 아니라 코드로 그린 요소다. "크기 키워줘/위치/색/없애줘" 같은 수정은 완성본을 AI에게
+// 다시 그리게 하지 않고, 배지 없는 합성본(input_image_url)에 설정을 바꿔 다시 붙인다 (숫자·상품이 틀어지지 않음).
+async function applyBadgeSpec(
+  supabase: ReturnType<typeof createClient>,
+  img: any,
+  spec: BadgeSpec,
+  pk: { total: number; flip: boolean },
+  promptText: string,
+  summary: string[]
+): Promise<{ error: string } | { success: true; url: string; message?: string }> {
+  try {
+    const res = await fetch(img.input_image_url);
+    if (!res.ok) return { error: `원본 합성 이미지를 불러오지 못했어요 (HTTP ${res.status})` };
+    const composite = Buffer.from(await res.arrayBuffer());
+
+    let finalBuf: Buffer = composite;
+    let used = spec;
+    const notes = [...summary];
+    if (spec.enabled) {
+      const placed = await placeCountBadge(composite, pk.total, { shape: spec.shape, color: spec.color, scale: spec.scale, unit: spec.unit }, pk.flip, spec.corner);
+      if (!placed) {
+        return {
+          error:
+            spec.corner === 'auto'
+              ? '배지를 붙일 빈 자리가 없어요 (상품이 모서리까지 차 있어요). 크기를 줄이거나 배지를 빼주세요.'
+              : '그 모서리에는 상품이 있어서 배지를 붙일 수 없어요. 다른 위치로 옮기거나 크기를 줄여주세요.',
+        };
+      }
+      finalBuf = placed.buffer;
+      used = { ...spec, scale: placed.scale, corner: placed.corner };
+      if (placed.scale < spec.scale - 0.01) notes.push('자리가 좁아서 요청한 것보다 조금 작게 붙였어요');
+    }
+
+    const outPath = `thumbnails/${img.project_id}/${img.id}-output.jpg`;
+    await archiveOutput(supabase, BUCKET, outPath);
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(finalBuf), {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+    if (upErr) return { error: upErr.message };
+    const outputUrl = `${supabase.storage.from(BUCKET).getPublicUrl(outPath).data.publicUrl}?v=${Date.now()}`;
+
+    const base = { output_image_url: outputUrl, effect_prompt: promptText || img.effect_prompt || null, error: null };
+    const nextStyle = { ...(img.style_spec && typeof img.style_spec === 'object' ? img.style_spec : {}), badge: used };
+    let { error: updErr } = await supabase.from('thumbnail_images').update({ ...base, style_spec: nextStyle }).eq('id', img.id);
+    if (updErr && /style_spec|schema cache|column/i.test(updErr.message)) {
+      // style_spec 컬럼이 없으면 설정은 저장하지 못하지만 이미지는 바꾼다 (다음 수정은 기본값에서 시작)
+      ({ error: updErr } = await supabase.from('thumbnail_images').update(base).eq('id', img.id));
+    }
+    if (updErr) return { error: updErr.message };
+    revalidatePath(PATH);
+    return { success: true, url: outputUrl, message: notes.length ? `${notes.join(' · ')} (AI 없이 정확하게 다시 합성했어요)` : undefined };
+  } catch (e: any) {
+    return { error: e?.message || String(e) };
+  }
 }
 
 // extraPrompt: 다시 만들 때 덧붙일 요청(선택). 비우면 예전과 똑같이 만든다.
@@ -1004,6 +1072,23 @@ export async function retryThumbnailImage(
   const { data: img, error } = await supabase.from('thumbnail_images').select('*').eq('id', imageId).single();
   if (error || !img) return { error: error?.message || '이미지를 찾을 수 없어요.' };
   const extra = (typeof extraPrompt === 'string' ? extraPrompt : '').trim().slice(0, 400);
+
+  // 배지 있는 패키지 메인: 다시 만들기도 같은 합성본에 배지를 다시 붙인다 (일반 누끼 방식으로 돌리면 배지가 사라진다)
+  const pkRetry = parsePackageLabel(img.color_label);
+  if (img.kind === 'main' && pkRetry.isPackage && pkRetry.badge && img.input_image_url) {
+    let spec = readBadgeSpec(img.style_spec);
+    let summary: string[] = [];
+    let handled = !extra;
+    if (extra) {
+      const parsed = parseBadgeEdit(extra, spec);
+      if (parsed.relevant && parsed.changed) {
+        spec = parsed.spec;
+        summary = parsed.summary;
+        handled = true;
+      }
+    }
+    if (handled) return applyBadgeSpec(supabase, img, spec, pkRetry, extra, summary);
+  }
 
   const res = await fetch(img.input_image_url);
   if (!res.ok) return { error: `원본 이미지를 다시 불러오지 못했어요 (HTTP ${res.status})` };
@@ -1101,7 +1186,7 @@ async function runGeneration(
 export async function editThumbnailImage(
   imageId: string,
   promptText: string
-): Promise<{ error: string } | { success: true; url: string }> {
+): Promise<{ error: string } | { success: true; url: string; message?: string }> {
   const prompt = promptText.trim();
   if (!prompt) return { error: '수정할 내용을 입력해주세요.' };
 
@@ -1109,6 +1194,22 @@ export async function editThumbnailImage(
   const { data: img, error } = await supabase.from('thumbnail_images').select('*').eq('id', imageId).single();
   if (error || !img) return { error: error?.message || '이미지를 찾을 수 없어요.' };
   if (!img.output_image_url) return { error: '먼저 썸네일이 생성된 후에 수정할 수 있어요.' };
+
+  // 패키지 메인의 수량 배지 수정(크기·위치·색·모양·표기·빼기)은 AI가 아니라 코드로 다시 합성한다
+  const pk = parsePackageLabel(img.color_label);
+  if (img.kind === 'main' && pk.isPackage && pk.badge && img.input_image_url) {
+    const cur = readBadgeSpec(img.style_spec);
+    const parsed = parseBadgeEdit(prompt, cur);
+    if (parsed.relevant) {
+      if (!parsed.changed) {
+        return {
+          error:
+            '배지에서 바꿀 내용을 알아듣지 못했어요. 이렇게 적어보세요: "숫자 크게", "왼쪽 위로 옮겨줘", "빨간색으로", "5개로 표기", "배지 없애줘"',
+        };
+      }
+      return applyBadgeSpec(supabase, img, parsed.spec, pk, prompt, parsed.summary);
+    }
+  }
 
   // 스타일 적용 이미지(문구 합성 포함)는 완성본을 AI로 고치지 않고, 요청을 반영해 배경 사진부터 같은 컷/문구로 다시 만든다
   // (완성본 편집은 AI가 문구를 건드리거나 결과를 못 돌려주는 일이 잦고, 상품 외형 보존 규칙도 안 탄다).

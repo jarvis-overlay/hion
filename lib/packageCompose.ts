@@ -67,23 +67,37 @@ export async function composeTemplate(id: TemplateId, units: Buffer[], opts: Com
     .toBuffer();
 }
 
+export type BadgeUnit = 'P' | '개' | 'x';
+export type BadgeCorner = 'auto' | 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+export const BADGE_MIN_SCALE = 0.6;
+export const BADGE_MAX_SCALE = 2.4;
+
 export interface BadgeStyle {
   shape?: BadgeShape;
   color?: BadgeColor;
+  scale?: number; // 기본 크기 대비 배율 (1 = 기본)
+  unit?: BadgeUnit; // 5P / 5개 / x5
 }
 
+// 기본 크기: 예전(100px)은 숫자가 너무 작다는 의견이 있어 키웠다 (원/사각 120px, 알약 260x90)
 const BADGE_SIZE: Record<BadgeShape, { w: number; h: number }> = {
-  pill: { w: 230, h: 78 },
-  circle: { w: 100, h: 100 },
-  square: { w: 100, h: 100 },
+  pill: { w: 260, h: 90 },
+  circle: { w: 120, h: 120 },
+  square: { w: 120, h: 120 },
 };
 
-// 수량 배지 이미지 (색 바탕 + 흰 테두리 + 흰 글자). 글자는 "5P" 같은 짧은 문구.
+export function badgeText(total: number, unit: BadgeUnit = 'P'): string {
+  return unit === '개' ? `${total}개` : unit === 'x' ? `x${total}` : `${total}P`;
+}
+
+// 수량 배지 이미지. 글자는 "5P" 같은 짧은 문구. 흰색은 흰 바탕+검은 외곽선·글자, 나머지는 색 바탕+흰 테두리·흰 글자.
 export async function drawCountBadge(text: string, style: BadgeStyle = {}): Promise<{ png: Buffer; w: number; h: number }> {
   ensureKoreanFontRegistered();
   const shape = normBadgeShape(style.shape);
   const color = BADGE_COLORS.find((c) => c.id === normBadgeColor(style.color))!.hex;
-  const { w, h } = BADGE_SIZE[shape];
+  const scale = Math.max(BADGE_MIN_SCALE, Math.min(BADGE_MAX_SCALE, Number.isFinite(style.scale) ? (style.scale as number) : 1));
+  const w = Math.round(BADGE_SIZE[shape].w * scale);
+  const h = Math.round(BADGE_SIZE[shape].h * scale);
   const canvas = createCanvas(w, h);
   const ctx = canvas.getContext('2d');
   const path = (inset: number) => {
@@ -104,66 +118,85 @@ export async function drawCountBadge(text: string, style: BadgeStyle = {}): Prom
     }
     ctx.closePath();
   };
-  const outline = normBadgeColor(style.color) === 'white'; // 흰 바탕 + 검은 외곽선·글자 (쿠팡 가이드 예시 모양)
+  const outline = normBadgeColor(style.color) === 'white';
   ctx.fillStyle = color;
   path(0);
   ctx.fill();
   if (outline) {
     ctx.strokeStyle = '#222222';
-    ctx.lineWidth = 4;
-    path(2);
+    ctx.lineWidth = Math.max(3, Math.round(4 * scale));
+    path(Math.round(2 * scale));
     ctx.stroke();
   } else {
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3;
-    path(7);
+    ctx.lineWidth = Math.max(2, Math.round(3 * scale));
+    path(Math.round(7 * scale));
     ctx.stroke();
   }
   ctx.fillStyle = outline ? '#222222' : '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `${Math.round(h * (shape === 'pill' ? 0.56 : 0.44))}px ${FONT_EXTRABOLD}`;
-  ctx.fillText(text, w / 2, h / 2 + 2);
+  // 글자가 칸 안에 들어가는 한 최대한 크게 (3글자 이상이면 조금 줄임)
+  const long = text.length >= 3 && shape !== 'pill';
+  ctx.font = `${Math.round(h * (shape === 'pill' ? 0.58 : long ? 0.4 : 0.52))}px ${FONT_EXTRABOLD}`;
+  ctx.fillText(text, w / 2, h / 2 + Math.round(2 * scale));
   return { png: canvas.toBuffer('image/png'), w, h };
 }
 
 // 쿠팡 대표 이미지 규정(상품이 95% 이상 + 비상품 요소 금지, 단 작은 수량 표기는 허용)에 맞춰,
-// 상품을 가리지 않는 "완전히 빈(흰) 모서리"에만 작은 배지를 붙인다. 위쪽 모서리부터 찾고, 어디에도
-// 빈 자리가 없으면 붙이지 않고 null을 돌려준다(호출한 쪽이 안내).
+// 상품을 가리지 않는 "완전히 빈(흰) 모서리"에만 배지를 붙인다. corner가 auto면 아래쪽 모서리부터
+// (쿠팡 가이드 예시와 같음) 빈 곳을 찾고, 지정했으면 그 모서리만 쓴다. 자리가 모자라면 배지를
+// 조금씩 줄여서(최소 BADGE_MIN_SCALE까지) 붙이고, 그래도 안 되면 null(호출한 쪽이 안내).
+export async function placeCountBadge(
+  base: Buffer,
+  total: number,
+  style: BadgeStyle = {},
+  flip = false,
+  corner: BadgeCorner = 'auto'
+): Promise<{ buffer: Buffer; scale: number; corner: Exclude<BadgeCorner, 'auto'> } | null> {
+  const gap = 20;
+  const pad = 8; // 배지 둘레에도 상품이 없어야 한다
+  const wantScale = Math.max(BADGE_MIN_SCALE, Math.min(BADGE_MAX_SCALE, style.scale ?? 1));
+  const text = badgeText(total, style.unit);
+  const order: Exclude<BadgeCorner, 'auto'>[] = flip
+    ? ['bottom-left', 'bottom-right', 'top-left', 'top-right']
+    : ['bottom-right', 'bottom-left', 'top-right', 'top-left'];
+  const candidates = corner === 'auto' ? order : [corner];
+
+  for (let scale = wantScale; scale >= BADGE_MIN_SCALE - 1e-6; scale = Math.round((scale * 0.88) * 1000) / 1000) {
+    const { png, w, h } = await drawCountBadge(text, { ...style, scale });
+    for (const c of candidates) {
+      const left = c.endsWith('right') ? SIZE - gap - w : gap;
+      const top = c.startsWith('bottom') ? SIZE - gap - h : gap;
+      const region = {
+        left: Math.max(0, left - pad),
+        top: Math.max(0, top - pad),
+        width: 0,
+        height: 0,
+      };
+      region.width = Math.min(w + pad * 2, SIZE - region.left);
+      region.height = Math.min(h + pad * 2, SIZE - region.top);
+      // sharp의 stats()는 extract를 무시하고 이미지 전체를 계산하므로, 먼저 잘라낸 뒤 통계를 낸다
+      const stats = await sharp(await sharp(base).extract(region).toBuffer()).stats();
+      if (!stats.channels.slice(0, 3).every((ch) => ch.min >= 244)) continue;
+      const buffer = await sharp(base)
+        .composite([{ input: png, left, top }])
+        .jpeg({ quality: 92 })
+        .toBuffer();
+      return { buffer, scale, corner: c };
+    }
+  }
+  return null;
+}
+
+// (예전 이름 - 배지를 빈 모서리에 붙인다)
 export async function applyCountBadgeInFreeCorner(
   base: Buffer,
   total: number,
   style: BadgeStyle = {},
   flip = false
 ): Promise<Buffer | null> {
-  const { png, w, h } = await drawCountBadge(`${total}P`, style);
-  const gap = 20;
-  const right = SIZE - gap - w;
-  const bottom = SIZE - gap - h;
-  // 쿠팡 가이드의 수량 뱃지 예시처럼 아래쪽 모서리를 먼저 쓰고, 막혀 있으면 위쪽을 쓴다
-  const corners: [number, number][] = flip
-    ? [[gap, bottom], [right, bottom], [gap, gap], [right, gap]]
-    : [[right, bottom], [gap, bottom], [right, gap], [gap, gap]];
-  for (const [left, top] of corners) {
-    const pad = 8; // 배지 둘레에도 상품이 없어야 한다
-    const region = {
-      left: Math.max(0, left - pad),
-      top: Math.max(0, top - pad),
-      width: Math.min(SIZE, w + pad * 2),
-      height: Math.min(SIZE, h + pad * 2),
-    };
-    region.width = Math.min(region.width, SIZE - region.left);
-    region.height = Math.min(region.height, SIZE - region.top);
-    // sharp의 stats()는 extract를 무시하고 이미지 전체를 계산하므로, 먼저 잘라낸 뒤 통계를 낸다
-    const stats = await sharp(await sharp(base).extract(region).toBuffer()).stats();
-    const clear = stats.channels.slice(0, 3).every((c) => c.min >= 244);
-    if (!clear) continue;
-    return sharp(base)
-      .composite([{ input: png, left, top }])
-      .jpeg({ quality: 92 })
-      .toBuffer();
-  }
-  return null;
+  return (await placeCountBadge(base, total, style, flip))?.buffer ?? null;
 }
 
 // 완성된 패키지 이미지 맨 위 띠(오른쪽, 반전이면 왼쪽)에 "N P" 배지를 붙인다 (1000x1000 기준)
