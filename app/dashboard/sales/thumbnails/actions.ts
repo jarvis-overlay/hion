@@ -17,6 +17,8 @@ import {
   describeProductAppearance,
   generatePackageThumbnailDetailed,
   describeCutProblems,
+  generateStagedMainImage,
+  describeStagedMain,
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
 import { parsePackages, packageLabel, sameColor } from '@/lib/thumbnailPackage';
@@ -104,6 +106,8 @@ export async function addThumbnailImage(
 
   const productPosition = (String(formData.get('productPosition') || 'center') as ThumbnailPosition) || 'center';
   const effectPrompt = String(formData.get('effectPrompt') || '').trim();
+  // 패션·잡화 연출컷 유지 메인 (kind==='main'일 때만 의미 있음)
+  const staged = kind === 'main' && formData.get('mainStyle') === 'staged';
 
   // 사진부터 확보한다 - 메인을 교체할 때 기존 메인 행을 지우는데, 고른 저장 사진이 바로 그 행의
   // 사진일 수 있어서 지우기 전에 받아둬야 한다(받기에 실패하면 기존 메인도 그대로 남는다).
@@ -139,7 +143,7 @@ export async function addThumbnailImage(
   if (upErr) return { error: upErr.message };
   const inputImageUrl = supabase.storage.from(BUCKET).getPublicUrl(inputPath).data.publicUrl;
 
-  const { error: insertErr } = await supabase.from('thumbnail_images').insert({
+  const insertErr = await insertImageRow(supabase, {
     id: imageId,
     project_id: projectId,
     kind,
@@ -147,10 +151,10 @@ export async function addThumbnailImage(
     input_image_url: inputImageUrl,
     product_position: productPosition,
     effect_prompt: effectPrompt || null,
-  });
-  if (insertErr) return { error: insertErr.message };
+  }, staged);
+  if (insertErr) return { error: insertErr };
 
-  return runGeneration(supabase, imageId, projectId, { buffer, mimeType }, productPosition, effectPrompt, kind === 'main');
+  return runGeneration(supabase, imageId, projectId, { buffer, mimeType }, productPosition, effectPrompt, kind === 'main', staged);
 }
 
 // 메인/추가 이미지 하나를 업로드→DB 등록→생성까지 묶어서 처리 - 일괄
@@ -164,7 +168,8 @@ async function insertAndGenerateImage(
   source: { buffer: Buffer; mimeType: string },
   productPosition: ThumbnailPosition,
   effectPrompt: string,
-  colorLabel: string | null = null
+  colorLabel: string | null = null,
+  staged = false
 ): Promise<{ error: string } | { success: true; url: string; warning?: string }> {
   const imageId = randomUUID();
   const inputPath = `thumbnails/${projectId}/${imageId}-input.${extFromContentType(source.mimeType)}`;
@@ -175,7 +180,7 @@ async function insertAndGenerateImage(
   if (upErr) return { error: upErr.message };
   const inputImageUrl = supabase.storage.from(BUCKET).getPublicUrl(inputPath).data.publicUrl;
 
-  const { error: insertErr } = await supabase.from('thumbnail_images').insert({
+  const insertErr = await insertImageRow(supabase, {
     id: imageId,
     project_id: projectId,
     kind,
@@ -184,10 +189,26 @@ async function insertAndGenerateImage(
     product_position: productPosition,
     effect_prompt: effectPrompt || null,
     color_label: colorLabel,
-  });
-  if (insertErr) return { error: insertErr.message };
+  }, staged && kind === 'main');
+  if (insertErr) return { error: insertErr };
 
-  return runGeneration(supabase, imageId, projectId, source, productPosition, effectPrompt, kind === 'main');
+  return runGeneration(supabase, imageId, projectId, source, productPosition, effectPrompt, kind === 'main', staged && kind === 'main');
+}
+
+// 이미지 행 저장. 연출컷 유지(staged)면 style_spec에 표시해 두어 "다시 만들기/수정" 때도 같은 방식을 쓴다.
+// style_spec 컬럼이 아직 없으면 표시만 빼고 저장한다(이미지는 만들어지고, 다시 만들 때는 흰 배경 방식으로 돌아간다).
+async function insertImageRow(
+  supabase: ReturnType<typeof createClient>,
+  row: Record<string, any>,
+  staged: boolean
+): Promise<string | null> {
+  const { error } = await supabase.from('thumbnail_images').insert(staged ? { ...row, style_spec: { staged: true } } : row);
+  if (!error) return null;
+  if (staged && /style_spec|schema cache|column/i.test(error.message)) {
+    const { error: e2 } = await supabase.from('thumbnail_images').insert(row);
+    return e2 ? e2.message : null;
+  }
+  return error.message;
 }
 
 // ---------------------------------------------------------------------------
@@ -686,6 +707,8 @@ export async function generateThumbnailBatch(
   const customPrompt = String(formData.get('customPrompt') || '').trim().slice(0, 400);
   // 메인 썸네일에 적용할 요청(예: 그림자를 연하게). 비우면 지금처럼 규정대로 흰 배경 메인만 만든다
   const mainPrompt = String(formData.get('mainPrompt') || '').trim().slice(0, 400);
+  // 패션의류·잡화는 쿠팡이 연출컷(원본 배경 유지)을 허용한다 - 켜면 메인을 흰 배경 누끼 대신 원본 사진을 상품 중심으로 잘라 만든다
+  const stagedMain = formData.get('mainStyle') === 'staged';
   // 패키지(세트) 구성: 예) 검정 1 + 회색 1. 색상별 개별 이미지 대신(또는 함께) 그 구성 그대로 담은 이미지를 만든다.
   const parsedPackages = parsePackages(String(formData.get('packages') || '[]'));
   const packages = parsedPackages.packages;
@@ -730,7 +753,7 @@ export async function generateThumbnailBatch(
     let del = supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main');
     del = label ? del.eq('color_label', label) : del.is('color_label', null);
     await del;
-    return insertAndGenerateImage(supabase, projectId, 'main', 0, sources[0], 'center', mainPrompt, label);
+    return insertAndGenerateImage(supabase, projectId, 'main', 0, sources[0], 'center', mainPrompt, label, stagedMain);
   });
   const mainOk = mainResults.filter((r) => !('error' in r)).length;
   const mainErr = mainResults.find((r): r is { error: string } => 'error' in r);
@@ -1118,7 +1141,8 @@ export async function retryThumbnailImage(
     { buffer, mimeType },
     (img.product_position as ThumbnailPosition) || 'center',
     effectPrompt,
-    img.kind === 'main'
+    img.kind === 'main',
+    img.kind === 'main' && img.style_spec?.staged === true
   );
 }
 
@@ -1129,7 +1153,8 @@ async function runGeneration(
   productImage: { buffer: Buffer; mimeType: string },
   position: ThumbnailPosition,
   effectPrompt: string,
-  isMain = false
+  isMain = false,
+  staged = false
 ): Promise<{ error: string } | { success: true; url: string; warning?: string }> {
   try {
     // 효과(소품/연출 추가) 요청이 있을 때만 "요즘 잘 팔리는 상품" 참고
@@ -1147,13 +1172,33 @@ async function runGeneration(
       }
     }
 
-    const { buffer: generated, warning } = await generateThumbnailImageDetailed({
-      productImage,
-      position,
-      effectPrompt: effectPrompt || undefined,
-      referenceImages,
-      main: isMain,
-    });
+    let generated: Buffer;
+    let warning: string | undefined;
+    if (isMain && staged) {
+      // 연출컷 유지: 원본 사진을 상품 중심으로 자르기만 한다 (흰 배경 강제·누끼 없음)
+      const st = await generateStagedMainImage(productImage);
+      generated = st.buffer;
+      warning = describeStagedMain(st).join(' ');
+      if (effectPrompt.trim()) {
+        try {
+          generated = await applyThumbnailEffect(generated, effectPrompt.trim(), referenceImages);
+        } catch (e: any) {
+          const m = String(e?.message || '');
+          if (m.startsWith('NOIMG:')) throw new Error(`효과 적용 결과를 받지 못했어요 (${m.slice(6)}). 프롬프트를 조금 더 구체적으로 적어서 다시 시도해주세요.`);
+          throw e;
+        }
+      }
+    } else {
+      const r = await generateThumbnailImageDetailed({
+        productImage,
+        position,
+        effectPrompt: effectPrompt || undefined,
+        referenceImages,
+        main: isMain,
+      });
+      generated = r.buffer;
+      warning = r.warning;
+    }
     const outPath = `thumbnails/${projectId}/${imageId}-output.jpg`;
     await archiveOutput(supabase, BUCKET, outPath);
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(outPath, await enforceThumbnailSize(generated), {
@@ -1281,7 +1326,7 @@ export async function editThumbnailImage(
     }
 
     // 메인(대표) 이미지는 쿠팡 규정(순백 배경·상품 95% 이상·중앙)에 맞춰야 한다. 배경을 바꾸는 수정은 반영하지 않는다.
-    if (img.kind === 'main') {
+    if (img.kind === 'main' && img.style_spec?.staged !== true) {
       const conformed = await conformMainImage(edited);
       if (!conformed.report.whiteBackground) {
         return {

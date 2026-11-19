@@ -1032,6 +1032,104 @@ export async function generateThumbnailImage(input: GenerateThumbnailInput): Pro
   return (await generateThumbnailImageDetailed(input)).buffer;
 }
 
+// ---------------------------------------------------------------------------
+// 연출컷 유지 메인 (패션의류·잡화)
+// ---------------------------------------------------------------------------
+// 쿠팡 광고 가이드: 패션의류/잡화는 "연출컷 허용 카테고리로 배경색 허용 -> 원본 이미지 유지"이고, 상품과 겹치지 않는
+// 오버레이만 정리해 중앙 정렬한다. 그래서 흰 배경으로 누끼를 따지 않고, 원본 사진(모델·연출 배경 포함)을 그대로 두고
+// 상품이 가로 또는 세로 85% 이상 차게 상품 위치 기준으로 정사각형으로 잘라 중앙에 둔다 (AI가 다시 그리지 않는다).
+// 사진 가장자리가 모자라 잘라낼 영역이 사진 밖으로 나가면 사진 테두리 색으로 채운다.
+export const STAGED_FILL_TARGET = 0.9; // 상품 위치 좌표가 약간 넉넉하게 잡혀도 규정(85%)을 지키도록 여유를 둔다
+
+export interface StagedMainResult {
+  buffer: Buffer;
+  fillRatio: number; // 상품(좌표 기준)이 가로/세로 중 더 크게 차지하는 비율
+  boxFound: boolean; // AI가 상품 위치를 찾았는가 (못 찾으면 사진 전체를 상품으로 보고 중앙에 둠)
+  padded: boolean; // 사진 밖으로 나가 배경색으로 채운 부분이 있는가
+  lowRes: boolean; // 잘라낸 영역이 작아 확대하면 흐려질 수 있는가
+}
+
+// 순수 계산: 상품 영역(px)이 target 비율로 차게 하는 정사각형 창의 위치와 크기
+export function stagedWindow(
+  box: { x0: number; y0: number; x1: number; y1: number },
+  target = STAGED_FILL_TARGET
+): { left: number; top: number; side: number } {
+  const bw = Math.max(1, box.x1 - box.x0);
+  const bh = Math.max(1, box.y1 - box.y0);
+  const side = Math.max(bw, bh) / target;
+  const cx = (box.x0 + box.x1) / 2;
+  const cy = (box.y0 + box.y1) / 2;
+  return { left: cx - side / 2, top: cy - side / 2, side };
+}
+
+export async function generateStagedMainImage(productImage: { buffer: Buffer; mimeType: string }): Promise<StagedMainResult> {
+  const S = THUMBNAIL_SIZE;
+  const oriented = await sharp(productImage.buffer).rotate().flatten({ background: '#ffffff' }).toBuffer();
+  const meta = await sharp(oriented).metadata();
+  const W = meta.width || 0;
+  const H = meta.height || 0;
+  if (!W || !H) throw new Error('사진을 읽지 못했어요. 다른 사진으로 다시 시도해주세요.');
+
+  let box: ProductBox | null = null;
+  try {
+    box = await detectProductBoundingBox(oriented, 'image/jpeg');
+  } catch {
+    box = null; // 위치를 못 찾아도 아래에서 사진 전체를 기준으로 계속 진행한다
+  }
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  const px = box
+    ? { x0: clamp01(box.xMin) * W, y0: clamp01(box.yMin) * H, x1: clamp01(box.xMax) * W, y1: clamp01(box.yMax) * H }
+    : { x0: 0, y0: 0, x1: W, y1: H };
+  const win = stagedWindow(px);
+  const side = Math.max(16, Math.round(win.side));
+  const left = Math.round(win.left);
+  const top = Math.round(win.top);
+
+  // 사진과 겹치는 부분만 잘라서, 사진 밖으로 나간 부분은 가장자리 색으로 채운 정사각형 캔버스에 올린다
+  const ix0 = Math.max(0, left);
+  const iy0 = Math.max(0, top);
+  const ix1 = Math.min(W, left + side);
+  const iy1 = Math.min(H, top + side);
+  if (ix1 - ix0 < 8 || iy1 - iy0 < 8) throw new Error('상품 위치를 정확히 찾지 못했어요. 상품이 더 크게 나온 사진으로 다시 시도해주세요.');
+  const padded = ix0 !== left || iy0 !== top || ix1 !== left + side || iy1 !== top + side;
+
+  let canvasBuf: Buffer;
+  if (!padded) {
+    canvasBuf = await sharp(oriented).extract({ left: ix0, top: iy0, width: ix1 - ix0, height: iy1 - iy0 }).toBuffer();
+  } else {
+    // 사진 테두리 한 줄의 평균색 (스튜디오 배경이면 거의 단색)
+    const edge = await sharp(oriented).resize(40, 40, { fit: 'fill' }).removeAlpha().raw().toBuffer();
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let y = 0; y < 40; y++) {
+      for (let x = 0; x < 40; x++) {
+        if (x !== 0 && y !== 0 && x !== 39 && y !== 39) continue;
+        const i = (y * 40 + x) * 3;
+        r += edge[i]; g += edge[i + 1]; b += edge[i + 2]; n++;
+      }
+    }
+    const part = await sharp(oriented).extract({ left: ix0, top: iy0, width: ix1 - ix0, height: iy1 - iy0 }).toBuffer();
+    canvasBuf = await sharp({ create: { width: side, height: side, channels: 3, background: { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) } } })
+      .composite([{ input: part, left: ix0 - left, top: iy0 - top }])
+      .png()
+      .toBuffer();
+  }
+  const buffer = await sharp(canvasBuf)
+    .resize({ width: S, height: S, fit: 'fill', kernel: 'lanczos3' })
+    .jpeg({ quality: 92 })
+    .toBuffer();
+  const fillRatio = Math.min(1, Math.max(px.x1 - px.x0, px.y1 - px.y0) / side);
+  return { buffer, fillRatio, boxFound: !!box, padded, lowRes: ix1 - ix0 < 600 && iy1 - iy0 < 600 };
+}
+
+export function describeStagedMain(r: StagedMainResult): string[] {
+  const out: string[] = [];
+  if (!r.boxFound) out.push('연출컷 메인: AI가 상품 위치를 찾지 못해서 사진 전체를 그대로 중앙에 두었어요. 상품이 작게 보이면 상품이 크게 나온 사진으로 다시 만들어주세요.');
+  if (r.padded) out.push('연출컷 메인: 상품이 사진 가장자리에 가까워서 모자란 부분은 사진 테두리 색으로 채웠어요.');
+  if (r.lowRes) out.push('연출컷 메인: 상품이 나온 부분의 해상도가 낮아서(600px 미만) 확대하면 흐려질 수 있어요. 더 큰 사진을 써주세요.');
+  out.push('연출컷 메인은 원본 사진을 그대로 쓰기 때문에, 상품과 겹친 문구·로고·워터마크는 지우지 못해요. 있다면 쿠팡이 수정·반려할 수 있으니 깨끗한 사진을 쓰세요.');
+  return out;
+}
+
 // 누끼에서 가장 큰 덩어리(= 대표 상품)만 남기고 떨어져 있는 다른 조각은 지운다. 한 사진에 착용 컷과 잘린 제품 조각이
 // 같이 있을 때처럼 "AI가 다시 그리면 틀어지는" 경우를 코드로 정확히 처리한다. 가까이 붙은 부분(다리와 신발 등)은 한 덩어리로 본다.
 export async function keepMainSubject(cutout: Buffer): Promise<Buffer> {

@@ -656,6 +656,8 @@ function ProjectEditor({
   const [productNote, setProductNote] = useState('');
   // 메인 썸네일에 적용할 요청(선택). 메인은 쿠팡 규정대로 흰 배경이라 기본은 비워둔다.
   const [mainPrompt, setMainPrompt] = useState('');
+  // 패션의류·잡화: 쿠팡이 연출컷(원본 배경)을 허용하는 카테고리라 메인을 흰 배경으로 바꾸지 않고 원본 사진을 상품 중심으로 잘라 만든다
+  const [stagedMain, setStagedMain] = useState(false);
   // 장면을 AI가 학습한 스타일/기본 구성에 맡기지 않고 직접 입력하고 싶을 때
   // ("추가 이미지에다가 프롬프트를 내가 입력할 수 있어야해"라는 요청으로 추가) -
   // 입력하면 모든 추가 이미지가 이 장면 하나로 만들어진다.
@@ -664,9 +666,10 @@ function ProjectEditor({
   // 적어둔 입력(URL·수량·패키지·메모)은 만들기를 돌린 뒤에도 남기고, 돌릴 때마다 기록해서 이전 입력으로 되돌릴 수 있게 한다
   const savedForm = useSavedForm(
     `thumb:${project.id}`,
-    { batchUrl, batchCounts, packages, packageOnly, productNote, mainPrompt, customScenePrompt },
+    { batchUrl, batchCounts, packages, packageOnly, productNote, mainPrompt, stagedMain, customScenePrompt },
     (v) => {
       if (typeof v.mainPrompt === 'string') setMainPrompt(v.mainPrompt);
+      if (typeof v.stagedMain === 'boolean') setStagedMain(v.stagedMain);
       if (typeof v.batchUrl === 'string') setBatchUrl(v.batchUrl);
       if (v.batchCounts && typeof v.batchCounts === 'object') setBatchCounts(v.batchCounts as Record<string, number>);
       if (Array.isArray(v.packages)) {
@@ -832,6 +835,7 @@ function ProjectEditor({
     fd.set('category', batchCategory.trim());
     fd.set('productNote', productNote.trim());
     fd.set('mainPrompt', mainPrompt.trim());
+    if (stagedMain) fd.set('mainStyle', 'staged');
     fd.set('customPrompt', customScenePrompt.trim());
     fd.set('packages', JSON.stringify(validPackages.map((p) => ({ items: p.items, additional: p.additional, template: p.template, flip: p.flip, badge: p.badge, badgeShape: p.badgeShape, badgeColor: p.badgeColor }))));
     if (usePackageOnly) fd.set('packageOnly', '1');
@@ -1297,6 +1301,18 @@ function ProjectEditor({
                 </p>
               )}
             </div>
+          )}
+          {(batchFiles.length > 0 || batchUrl.trim()) && (
+            <label className="flex items-start gap-2 text-[11px] font-semibold text-inkSoft">
+              <input type="checkbox" checked={stagedMain} onChange={(e) => setStagedMain(e.target.checked)} className="mt-0.5" />
+              <span>
+                패션의류·잡화 - 연출컷 유지 (메인을 흰 배경으로 바꾸지 않고, 원본 사진 그대로 상품이 85% 이상 차게 중앙에 맞춰요)
+                <span className="block font-normal text-inkSoft">
+                  쿠팡이 패션의류/잡화에는 연출컷·배경색을 허용해요. 원본 사진을 AI가 다시 그리지 않고 자르기만 해서 색·모양이 그대로예요. 단, 사진 속
+                  문구·로고·워터마크는 지우지 못해요. 패키지(세트) 메인에는 적용되지 않아요.
+                </span>
+              </span>
+            </label>
           )}
           {(batchFiles.length > 0 || batchUrl.trim()) && (
             <label className="grid gap-1 text-[11px] font-semibold text-inkSoft">
