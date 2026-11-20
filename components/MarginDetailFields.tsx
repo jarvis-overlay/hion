@@ -172,7 +172,7 @@ export function MarginDetailFields({
               <option value="">{feeCategory ? '카테고리 선택' : '카테고리로 채우기 (참고값)'}</option>
               {COUPANG_FEE_CATEGORIES.map((c) => (
                 <option key={c.name} value={c.name}>
-                  {c.name} {c.pct}% → {withVatPct(c.pct)}%{c.source === 'blog' ? ' ※' : ''}
+                  {c.name} · 수수료 {c.pct}% + 부가세 = {withVatPct(c.pct)}%{c.source === 'blog' ? ' ※' : ''}
                 </option>
               ))}
             </select>
