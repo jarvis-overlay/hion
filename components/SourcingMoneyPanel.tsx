@@ -50,9 +50,8 @@ export default function SourcingMoneyPanel({ item, onDone }: { item: any; onDone
           onDone?.();
         })
       }
-      className="rounded-md ring-1 ring-paperLine p-3 grid gap-3"
+      className="grid gap-3"
     >
-      <span className="text-xs font-semibold text-inkSoft">마진·배송 (금액 정보)</span>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <label className="grid gap-0.5">
           <span className="text-[10px] font-semibold text-inkSoft">판매가 (원)</span>

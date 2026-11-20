@@ -1369,6 +1369,19 @@ function ComparisonsSection({ item }: { item: any }) {
   );
 }
 
+type CardTab = 'money' | 'options' | 'suppliers' | 'comparisons' | 'checklist';
+
+// 금액 요약 칸: 작은 이름표 + 큰 값 (+ 보조 값)
+function StatBox({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
+  return (
+    <div className="bg-paper rounded-md px-2.5 py-1.5 min-w-0">
+      <div className="text-[10px] text-inkSoft">{label}</div>
+      <div className={`text-sm font-mono font-semibold truncate ${tone || 'text-ink'}`}>{value}</div>
+      {sub && <div className="text-[10px] text-inkSoft font-mono truncate">{sub}</div>}
+    </div>
+  );
+}
+
 export default function SourcingList({
   items,
   checklistTemplate,
@@ -1391,11 +1404,11 @@ export default function SourcingList({
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
-  const [expandedMoneyId, setExpandedMoneyId] = useState<string | null>(null);
-  const [expandedOptionsId, setExpandedOptionsId] = useState<string | null>(null);
-  const [expandedSuppliersId, setExpandedSuppliersId] = useState<string | null>(null);
-  const [expandedComparisonsId, setExpandedComparisonsId] = useState<string | null>(null);
-  const [expandedChecklistId, setExpandedChecklistId] = useState<string | null>(null);
+  // 카드마다 열려 있는 탭 하나 (없으면 모두 닫힘) - 한 번에 하나만 열려서 지금 뭘 보고 있는지 분명하다
+  const [tabByItem, setTabByItem] = useState<Record<string, CardTab | null>>({});
+  function toggleTab(id: string, tab: CardTab) {
+    setTabByItem((prev) => ({ ...prev, [id]: prev[id] === tab ? null : tab }));
+  }
   // 메모 기록은 다른 항목(옵션/공급처/체크리스트 등)과 달리 접어두지 않고
   // 기본으로 바로 보이게 한다 - 공장과의 소통/기록을 메모로 주로 하기
   // 때문에 매번 펼쳐야 보이면 불편하다는 요청. 그래서 "펼친 것"이 아니라
@@ -1564,11 +1577,7 @@ export default function SourcingList({
             const m = it.margin;
             const isEditing = editingId === it.id;
             const isMarginExpanded = expandedMarginId === it.id;
-            const isMoneyExpanded = expandedMoneyId === it.id;
-            const isOptionsExpanded = expandedOptionsId === it.id;
-            const isSuppliersExpanded = expandedSuppliersId === it.id;
-            const isComparisonsExpanded = expandedComparisonsId === it.id;
-            const isChecklistExpanded = expandedChecklistId === it.id;
+            const activeTab = tabByItem[it.id] ?? null;
             const isNotesCollapsed = collapsedNotesIds.has(it.id);
             const optionCount = (it.sourcing_item_options || []).length;
             const supplierCount = (it.sourcing_item_suppliers || []).length;
@@ -1650,27 +1659,37 @@ export default function SourcingList({
                 </div>
 
                 {/* 금액 요약: 입력은 "마진·배송" 탭에서, 카드에는 핵심만 한눈에 */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-inkSoft font-mono">
-                  {it.price != null && <span>판매가 {it.price.toLocaleString()}</span>}
-                  {it.cost != null && <span>원가 {it.cost.toLocaleString()}</span>}
-                  {moneySum.shipping != null && (
-                    <span title="쿠팡 로켓그로스 입출고+배송(국내)">
-                      배송비 {moneySum.shipping.toLocaleString()}
-                      {moneySum.sizeName ? ` (${moneySum.sizeName})` : ''}
-                    </span>
-                  )}
-                  {moneySum.intlShipping != null && <span title="해외배송비(개당)">해외 {moneySum.intlShipping.toLocaleString()}</span>}
-                  {it.moq && <span>MOQ {it.moq}</span>}
-                  {!moneySum.hasAnything && (
-                    <button
-                      type="button"
-                      onClick={() => setExpandedMoneyId(it.id)}
-                      className="text-accent font-sans font-semibold underline"
-                    >
-                      금액 정보를 입력해 주세요 (마진·배송 탭)
-                    </button>
-                  )}
-                </div>
+                {moneySum.hasAnything || it.moq ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
+                    {it.price != null && <StatBox label="판매가" value={it.price.toLocaleString() + '원'} />}
+                    {it.cost != null && <StatBox label="매입 원가" value={it.cost.toLocaleString() + '원'} />}
+                    {moneySum.marginPct != null && (
+                      <StatBox
+                        label="예상 마진"
+                        value={`${moneySum.marginPct.toFixed(1)}%`}
+                        sub={(moneySum.profit < 0 ? '-' : '') + fmt(Math.abs(moneySum.profit))}
+                        tone={moneySum.marginPct < 0 ? 'text-red-700' : moneySum.marginPct < 15 ? 'text-warn' : 'text-profit'}
+                      />
+                    )}
+                    {moneySum.shipping != null && (
+                      <StatBox
+                        label="배송비 (로켓그로스)"
+                        value={moneySum.shipping.toLocaleString() + '원'}
+                        sub={moneySum.sizeName ? `${moneySum.sizeName}${moneySum.sumCm != null ? ` · 세변합 ${moneySum.sumCm}cm` : ''}` : undefined}
+                      />
+                    )}
+                    {moneySum.intlShipping != null && <StatBox label="해외배송비 (개당)" value={moneySum.intlShipping.toLocaleString() + '원'} />}
+                    {it.moq && <StatBox label="MOQ" value={String(it.moq)} />}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setTabByItem((prev) => ({ ...prev, [it.id]: 'money' }))}
+                    className="text-xs text-accent font-semibold underline text-left w-fit"
+                  >
+                    금액 정보를 입력해 주세요 (마진·배송 탭)
+                  </button>
+                )}
 
                 {/* 메모 기록은 공장과의 소통/기록을 주로 담당하는 핵심
                     기능이라, 옵션/공급처/체크리스트처럼 접어두지 않고
@@ -1737,82 +1756,97 @@ export default function SourcingList({
                   />
                 )}
 
-                {/* 탭: 각 탭 이름 옆에 그 탭 내용의 요약을 같이 보여준다 */}
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <button
-                    onClick={() => setExpandedMoneyId(isMoneyExpanded ? null : it.id)}
-                    className={`text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left ${isMoneyExpanded ? 'bg-paper' : ''}`}
-                  >
-                    <span className="font-semibold">마진·배송</span>
-                    {moneySum.marginPct != null ? (
-                      <span className={moneySum.marginPct < 0 ? 'text-red-700' : moneySum.marginPct < 15 ? 'text-warn' : 'text-profit'}>
-                        {' '}· 마진 {moneySum.marginPct.toFixed(1)}%
-                      </span>
-                    ) : (
-                      <span> · 미입력</span>
-                    )}
-                    {moneySum.sizeName && <span> · {moneySum.sizeName}</span>}
-                    {moneySum.overLimit && <span className="text-red-700"> · 입고 불가</span>} {isMoneyExpanded ? '▲' : '▼'}
-                  </button>
-                  <button
-                    onClick={() => setExpandedOptionsId(isOptionsExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left"
-                  >
-                    <span className="font-semibold">옵션 구성</span>
-                    {optSum.count > 0 ? (
-                      <span>
-                        {' '}· {optSum.count}개
-                        {optSum.minPct != null && optSum.maxPct != null
-                          ? ` · 마진 ${optSum.minPct.toFixed(0)}${optSum.maxPct.toFixed(0) !== optSum.minPct.toFixed(0) ? `~${optSum.maxPct.toFixed(0)}` : ''}%`
-                          : ''}
-                      </span>
-                    ) : (
-                      <span> · 없음</span>
-                    )} {isOptionsExpanded ? '▲' : '▼'}
-                  </button>
-                  <button
-                    onClick={() => setExpandedSuppliersId(isSuppliersExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left"
-                  >
-                    <span className="font-semibold">공급처 비교</span>
-                    {supSum.count > 0 ? (
-                      <span>
-                        {' '}· {supSum.count}곳
-                        {supSum.cheapest ? ` · 최저 ${CURRENCY_LABEL[supSum.cheapest.currency] || ''}${supSum.cheapest.price.toLocaleString()}` : ''}
-                      </span>
-                    ) : (
-                      <span> · 없음</span>
-                    )} {isSuppliersExpanded ? '▲' : '▼'}
-                  </button>
-                  <button
-                    onClick={() => setExpandedComparisonsId(isComparisonsExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left"
-                  >
-                    <span className="font-semibold">비교 상품군</span>
-                    {comparisonCount > 0 ? (
-                      <span>
-                        {' '}· {comparisonCount}개{it.marketSize ? ` · 시장 ${MARKET_SIZE_LABEL[it.marketSize]}` : ''}
-                      </span>
-                    ) : (
-                      <span> · 없음</span>
-                    )} {isComparisonsExpanded ? '▲' : '▼'}
-                  </button>
-                  <button
-                    onClick={() => setExpandedChecklistId(isChecklistExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left"
-                  >
-                    <span className="font-semibold">소싱 체크리스트</span>
-                    <span> · {chkSum.checked}/{chkSum.total}</span> {isChecklistExpanded ? '▲' : '▼'}
-                  </button>
+                {/* 탭: 선택된 탭은 색을 채워서 구분하고, 각 탭 아래에 그 내용의 요약을 보여준다. 한 번에 하나만 열린다 */}
+                <div role="tablist" className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 mt-1">
+                  {(
+                    [
+                      {
+                        key: 'money' as CardTab,
+                        label: '마진·배송',
+                        summary:
+                          moneySum.marginPct != null
+                            ? `마진 ${moneySum.marginPct.toFixed(1)}%${moneySum.sizeName ? ` · ${moneySum.sizeName}` : ''}${moneySum.overLimit ? ' · 입고 불가' : ''}`
+                            : '미입력',
+                        tone: moneySum.marginPct == null ? '' : moneySum.marginPct < 0 ? 'text-red-700' : moneySum.marginPct < 15 ? 'text-warn' : 'text-profit',
+                      },
+                      {
+                        key: 'options' as CardTab,
+                        label: '옵션 구성',
+                        summary:
+                          optSum.count > 0
+                            ? `${optSum.count}개${optSum.minPct != null && optSum.maxPct != null ? ` · 마진 ${optSum.minPct.toFixed(0)}${optSum.maxPct.toFixed(0) !== optSum.minPct.toFixed(0) ? `~${optSum.maxPct.toFixed(0)}` : ''}%` : ''}`
+                            : '없음',
+                        tone: '',
+                      },
+                      {
+                        key: 'suppliers' as CardTab,
+                        label: '공급처 비교',
+                        summary:
+                          supSum.count > 0
+                            ? `${supSum.count}곳${supSum.cheapest ? ` · 최저 ${CURRENCY_LABEL[supSum.cheapest.currency] || ''}${supSum.cheapest.price.toLocaleString()}` : ''}`
+                            : '없음',
+                        tone: '',
+                      },
+                      {
+                        key: 'comparisons' as CardTab,
+                        label: '비교 상품군',
+                        summary: comparisonCount > 0 ? `${comparisonCount}개${it.marketSize ? ` · 시장 ${MARKET_SIZE_LABEL[it.marketSize]}` : ''}` : '없음',
+                        tone: '',
+                      },
+                      {
+                        key: 'checklist' as CardTab,
+                        label: '소싱 체크리스트',
+                        summary: `${chkSum.checked}/${chkSum.total} 완료`,
+                        tone: '',
+                      },
+                    ]
+                  ).map((t) => {
+                    const on = activeTab === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        role="tab"
+                        aria-selected={on}
+                        onClick={() => toggleTab(it.id, t.key)}
+                        className={`rounded-md px-2.5 py-2 text-left border transition-colors ${
+                          on
+                            ? 'bg-accent border-accent text-white shadow-sm'
+                            : 'bg-white border-paperLine text-ink hover:bg-paper'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-bold">{t.label}</span>
+                          <span className="text-[10px]">{on ? '▲' : '▼'}</span>
+                        </div>
+                        <div className={`text-[11px] mt-0.5 truncate ${on ? 'text-white/90' : t.tone || 'text-inkSoft'}`}>{t.summary}</div>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {isMoneyExpanded && <SourcingMoneyPanel item={it} />}
-                {isOptionsExpanded && <OptionsSection item={it} />}
-                {isComparisonsExpanded && <ComparisonsSection item={it} />}
-                {isSuppliersExpanded && (
-                  <SuppliersSection item={it} notes={notes} noteCategories={noteCategories} />
+                {activeTab && (
+                  <div className="rounded-md border-2 border-accent p-2.5 grid gap-2 bg-white">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-accent">
+                        ▸{' '}
+                        {{ money: '마진·배송', options: '옵션 구성', suppliers: '공급처 비교', comparisons: '비교 상품군', checklist: '소싱 체크리스트' }[activeTab]}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setTabByItem((prev) => ({ ...prev, [it.id]: null }))}
+                        className="text-[11px] text-inkSoft hover:text-ink"
+                      >
+                        닫기 ✕
+                      </button>
+                    </div>
+                    {activeTab === 'money' && <SourcingMoneyPanel item={it} />}
+                    {activeTab === 'options' && <OptionsSection item={it} />}
+                    {activeTab === 'comparisons' && <ComparisonsSection item={it} />}
+                    {activeTab === 'suppliers' && <SuppliersSection item={it} notes={notes} noteCategories={noteCategories} />}
+                    {activeTab === 'checklist' && <ChecklistSection item={it} template={checklistTemplate} />}
+                  </div>
                 )}
-                {isChecklistExpanded && <ChecklistSection item={it} template={checklistTemplate} />}
 
                 <div className="flex items-center justify-between mt-1 pt-2 border-t border-paperLine">
                   <span className="text-[11px] text-inkSoft">
