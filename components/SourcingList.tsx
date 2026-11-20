@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from 'react';
 import {
   updateSourcingStatus,
-  updateSourcingItem,
+  updateSourcingBasics,
   deleteSourcingItem,
   archiveSourcingItem,
   unarchiveSourcingItem,
@@ -40,6 +40,8 @@ import ComparisonEntryEditor, { MARKET_SIZE_LABEL } from '@/components/Compariso
 import CoupangResearchPanel from '@/components/CoupangResearchPanel';
 import HoverZoomImage from '@/components/HoverZoomImage';
 import MarginReverseCalc from '@/components/MarginReverseCalc';
+import SourcingMoneyPanel from '@/components/SourcingMoneyPanel';
+import { summarizeChecklist, summarizeMoney, summarizeOptions, summarizeSuppliers } from '@/lib/sourcingSummary';
 import NoteTimeline from '@/components/NoteTimeline';
 import CollapsibleText from '@/components/CollapsibleText';
 import { useDraft } from '@/lib/useDraft';
@@ -170,34 +172,12 @@ function aggregateMarketSize(item: any): 'high' | 'mid' | 'low' | null {
   return best;
 }
 
+// 카드 "수정": 상품명·링크·MOQ·메모만 고친다. 금액 정보(판매가·원가·수수료·배송비 등)는 카드의 "마진·배송" 탭에서
+// 따로 입력·저장한다 (예전엔 이 폼 하나에 전부 있어서 길고 복잡했다).
 function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-
-  const f = useMarginFields({
-    price: item.price,
-    cost: item.cost,
-    coupon: item.coupon,
-    importVat: item.import_vat,
-    // 기존에 저장된 쿠팡수수료/광고비 금액으로부터 역산한 비율을
-    // 기본값으로 보여준다 - 실제 판매가가 있어야 역산 가능, 없으면 각각
-    // 기본 8.6%/10%.
-    feeRatePct:
-      item.price && item.coupang_fee != null
-        ? Number(((item.coupang_fee / (item.price - (item.coupon || 0))) * 100).toFixed(2))
-        : null,
-    adRatePct:
-      item.price && item.ad_cost != null
-        ? Number(((item.ad_cost / (item.price - (item.coupon || 0))) * 100).toFixed(2))
-        : null,
-    shipping: item.shipping,
-    intlShipping: item.intl_shipping,
-    etcCost: item.etc_cost,
-  });
-
-  // jsonb 컬럼이라 Supabase 클라이언트가 이미 객체로 파싱해서 준다.
-  const intlShippingCalcInitial: ShippingCalcState | null = item.intl_shipping_calc || null;
 
   return (
     <form
@@ -205,7 +185,7 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
       action={(fd) =>
         startTransition(async () => {
           setError(null);
-          const res = await updateSourcingItem(item.id, fd);
+          const res = await updateSourcingBasics(item.id, fd);
           if (!res || 'error' in res) {
             setError(res?.error ?? '요청이 실패했어요. 다시 시도해주세요.');
             return;
@@ -215,99 +195,47 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
       }
       className="grid gap-3"
     >
-      <input
-        name="title"
-        defaultValue={item.title}
-        required
-        className="border border-paperLine bg-white px-3 py-2 text-sm"
-      />
-      <input
-        name="link"
-        defaultValue={item.link || ''}
-        placeholder="소싱 링크"
-        className="border border-paperLine bg-white px-3 py-2 text-sm"
-      />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <label className="grid gap-0.5">
+        <span className="text-[10px] font-semibold text-inkSoft">상품명</span>
         <input
-          name="price"
-          value={f.price}
-          onChange={(e) => f.setPrice(e.target.value)}
-          type="number"
-          step="0.01"
-          placeholder="판매가"
-          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
+          name="title"
+          defaultValue={item.title}
+          required
+          className="border border-paperLine bg-white px-3 py-2 text-sm"
         />
+      </label>
+      <label className="grid gap-0.5">
+        <span className="text-[10px] font-semibold text-inkSoft">소싱 링크</span>
         <input
-          readOnly
-          name="output_vat"
-          value={f.price !== '' ? Math.round(f.outputVat) : ''}
-          placeholder="매출부가세 (자동)"
-          title="판매가 / 11로 자동 계산돼요"
-          className="border border-paperLine bg-paper text-inkSoft px-3 py-2 text-sm font-mono cursor-not-allowed"
+          name="link"
+          defaultValue={item.link || ''}
+          placeholder="https://..."
+          className="border border-paperLine bg-white px-3 py-2 text-sm"
         />
-        <input
-          name="cost"
-          value={f.cost}
-          onChange={(e) => f.setCost(e.target.value)}
-          type="number"
-          step="0.01"
-          placeholder="매입 원가"
-          className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-        />
+      </label>
+      <label className="grid gap-0.5 sm:max-w-[200px]">
+        <span className="text-[10px] font-semibold text-inkSoft">MOQ (최소 주문 수량)</span>
         <input
           name="moq"
           defaultValue={item.moq || ''}
           placeholder="MOQ"
           className="border border-paperLine bg-white px-3 py-2 text-sm"
         />
-      </div>
-
-      <FxCalculator
-        onApply={(krw) => f.setCost(String(Math.round(krw)))}
-        initial={{
-          currency: item.cost_fx_currency,
-          amount: item.cost_fx_amount,
-          rate: item.cost_fx_rate,
-        }}
-      />
-
-      <MarginDetailFields fields={f} intlShippingCalcInitial={intlShippingCalcInitial} />
-
-      {f.price && (
-        <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1">
-          <div className="flex items-center justify-between">
-            <span className="text-inkSoft">예상 마진 (광고비 적용)</span>
-            <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
-              {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
-              {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-inkSoft text-xs">예상 마진 (광고비 미적용)</span>
-            <span className="font-mono text-xs text-inkSoft">
-              {(f.pureProfit < 0 ? '-' : '') + fmt(Math.abs(f.pureProfit))}
-              {f.pureMarginPct != null && ` (${f.pureMarginPct.toFixed(1)}%)`}
-            </span>
-          </div>
-        </div>
-      )}
-
-      <textarea
-        name="content"
-        defaultValue={item.content || ''}
-        placeholder="메모"
-        rows={2}
-        className="border border-paperLine bg-white px-3 py-2 text-sm"
-      />
-      {error && (
-        <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">저장 실패: {error}</p>
-      )}
+      </label>
+      <label className="grid gap-0.5">
+        <span className="text-[10px] font-semibold text-inkSoft">메모</span>
+        <textarea
+          name="content"
+          defaultValue={item.content || ''}
+          placeholder="메모"
+          rows={2}
+          className="border border-paperLine bg-white px-3 py-2 text-sm"
+        />
+      </label>
+      <p className="text-[11px] text-inkSoft">판매가·원가·수수료·배송비 같은 금액 정보는 카드의 &quot;마진·배송&quot; 탭에서 입력해요.</p>
+      {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">저장 실패: {error}</p>}
       <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={isPending}
-          className="btn-primary px-4 py-2 text-xs font-semibold disabled:opacity-50"
-        >
+        <button type="submit" disabled={isPending} className="btn-primary px-4 py-2 text-xs font-semibold disabled:opacity-50">
           {isPending ? '저장 중...' : '저장'}
         </button>
         <button
@@ -1463,6 +1391,7 @@ export default function SourcingList({
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedMarginId, setExpandedMarginId] = useState<string | null>(null);
+  const [expandedMoneyId, setExpandedMoneyId] = useState<string | null>(null);
   const [expandedOptionsId, setExpandedOptionsId] = useState<string | null>(null);
   const [expandedSuppliersId, setExpandedSuppliersId] = useState<string | null>(null);
   const [expandedComparisonsId, setExpandedComparisonsId] = useState<string | null>(null);
@@ -1635,6 +1564,7 @@ export default function SourcingList({
             const m = it.margin;
             const isEditing = editingId === it.id;
             const isMarginExpanded = expandedMarginId === it.id;
+            const isMoneyExpanded = expandedMoneyId === it.id;
             const isOptionsExpanded = expandedOptionsId === it.id;
             const isSuppliersExpanded = expandedSuppliersId === it.id;
             const isComparisonsExpanded = expandedComparisonsId === it.id;
@@ -1644,6 +1574,10 @@ export default function SourcingList({
             const supplierCount = (it.sourcing_item_suppliers || []).length;
             const comparisonCount = (it.sourcing_item_comparisons || []).length;
             const checklistCheckedCount = (it.sourcing_item_checklist || []).filter((c: any) => c.checked).length;
+            const moneySum = summarizeMoney(it);
+            const optSum = summarizeOptions(it.sourcing_item_options || []);
+            const supSum = summarizeSuppliers(it.sourcing_item_suppliers || []);
+            const chkSum = summarizeChecklist(it, checklistTemplate);
             const itemNotes = notes.filter(
               (n) => n.entity_type === 'sourcing_item' && n.entity_id === it.id
             );
@@ -1715,10 +1649,27 @@ export default function SourcingList({
                   </div>
                 </div>
 
-                <div className="flex gap-4 text-xs text-inkSoft font-mono">
+                {/* 금액 요약: 입력은 "마진·배송" 탭에서, 카드에는 핵심만 한눈에 */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-inkSoft font-mono">
                   {it.price != null && <span>판매가 {it.price.toLocaleString()}</span>}
                   {it.cost != null && <span>원가 {it.cost.toLocaleString()}</span>}
+                  {moneySum.shipping != null && (
+                    <span title="쿠팡 로켓그로스 입출고+배송(국내)">
+                      배송비 {moneySum.shipping.toLocaleString()}
+                      {moneySum.sizeName ? ` (${moneySum.sizeName})` : ''}
+                    </span>
+                  )}
+                  {moneySum.intlShipping != null && <span title="해외배송비(개당)">해외 {moneySum.intlShipping.toLocaleString()}</span>}
                   {it.moq && <span>MOQ {it.moq}</span>}
+                  {!moneySum.hasAnything && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedMoneyId(it.id)}
+                      className="text-accent font-sans font-semibold underline"
+                    >
+                      금액 정보를 입력해 주세요 (마진·배송 탭)
+                    </button>
+                  )}
                 </div>
 
                 {/* 메모 기록은 공장과의 소통/기록을 주로 담당하는 핵심
@@ -1786,33 +1737,76 @@ export default function SourcingList({
                   />
                 )}
 
+                {/* 탭: 각 탭 이름 옆에 그 탭 내용의 요약을 같이 보여준다 */}
                 <div className="flex flex-wrap gap-2 text-xs">
                   <button
-                    onClick={() => setExpandedOptionsId(isOptionsExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                    onClick={() => setExpandedMoneyId(isMoneyExpanded ? null : it.id)}
+                    className={`text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left ${isMoneyExpanded ? 'bg-paper' : ''}`}
                   >
-                    옵션 구성 {optionCount > 0 && `(${optionCount})`} {isOptionsExpanded ? '▲' : '▼'}
+                    <span className="font-semibold">마진·배송</span>
+                    {moneySum.marginPct != null ? (
+                      <span className={moneySum.marginPct < 0 ? 'text-red-700' : moneySum.marginPct < 15 ? 'text-warn' : 'text-profit'}>
+                        {' '}· 마진 {moneySum.marginPct.toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span> · 미입력</span>
+                    )}
+                    {moneySum.sizeName && <span> · {moneySum.sizeName}</span>}
+                    {moneySum.overLimit && <span className="text-red-700"> · 입고 불가</span>} {isMoneyExpanded ? '▲' : '▼'}
+                  </button>
+                  <button
+                    onClick={() => setExpandedOptionsId(isOptionsExpanded ? null : it.id)}
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left"
+                  >
+                    <span className="font-semibold">옵션 구성</span>
+                    {optSum.count > 0 ? (
+                      <span>
+                        {' '}· {optSum.count}개
+                        {optSum.minPct != null && optSum.maxPct != null
+                          ? ` · 마진 ${optSum.minPct.toFixed(0)}${optSum.maxPct.toFixed(0) !== optSum.minPct.toFixed(0) ? `~${optSum.maxPct.toFixed(0)}` : ''}%`
+                          : ''}
+                      </span>
+                    ) : (
+                      <span> · 없음</span>
+                    )} {isOptionsExpanded ? '▲' : '▼'}
                   </button>
                   <button
                     onClick={() => setExpandedSuppliersId(isSuppliersExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left"
                   >
-                    공급처 비교 {supplierCount > 0 && `(${supplierCount})`} {isSuppliersExpanded ? '▲' : '▼'}
+                    <span className="font-semibold">공급처 비교</span>
+                    {supSum.count > 0 ? (
+                      <span>
+                        {' '}· {supSum.count}곳
+                        {supSum.cheapest ? ` · 최저 ${CURRENCY_LABEL[supSum.cheapest.currency] || ''}${supSum.cheapest.price.toLocaleString()}` : ''}
+                      </span>
+                    ) : (
+                      <span> · 없음</span>
+                    )} {isSuppliersExpanded ? '▲' : '▼'}
                   </button>
                   <button
                     onClick={() => setExpandedComparisonsId(isComparisonsExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left"
                   >
-                    비교 상품군 {comparisonCount > 0 && `(${comparisonCount})`} {isComparisonsExpanded ? '▲' : '▼'}
+                    <span className="font-semibold">비교 상품군</span>
+                    {comparisonCount > 0 ? (
+                      <span>
+                        {' '}· {comparisonCount}개{it.marketSize ? ` · 시장 ${MARKET_SIZE_LABEL[it.marketSize]}` : ''}
+                      </span>
+                    ) : (
+                      <span> · 없음</span>
+                    )} {isComparisonsExpanded ? '▲' : '▼'}
                   </button>
                   <button
                     onClick={() => setExpandedChecklistId(isChecklistExpanded ? null : it.id)}
-                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1"
+                    className="text-inkSoft hover:text-ink ring-1 ring-paperLine rounded-full px-2.5 py-1 text-left"
                   >
-                    소싱 체크리스트 {checklistCheckedCount > 0 && `(${checklistCheckedCount})`} {isChecklistExpanded ? '▲' : '▼'}
+                    <span className="font-semibold">소싱 체크리스트</span>
+                    <span> · {chkSum.checked}/{chkSum.total}</span> {isChecklistExpanded ? '▲' : '▼'}
                   </button>
                 </div>
 
+                {isMoneyExpanded && <SourcingMoneyPanel item={it} />}
                 {isOptionsExpanded && <OptionsSection item={it} />}
                 {isComparisonsExpanded && <ComparisonsSection item={it} />}
                 {isSuppliersExpanded && (

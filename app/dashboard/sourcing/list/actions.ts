@@ -328,6 +328,62 @@ export async function updateSourcingItem(
   return { success: true };
 }
 
+// 카드의 "수정"은 이제 상품명·링크·MOQ·메모만 고친다. 금액 정보(판매가·원가·수수료·배송비 등)는
+// 카드의 "마진·배송" 탭에서 따로 저장하므로, 여기서는 금액 컬럼을 건드리지 않는다(빠뜨린 값이 비워지지 않게).
+export async function updateSourcingBasics(
+  id: string,
+  formData: FormData
+): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const title = String(formData.get('title') || '').trim();
+  if (!title) return { error: '상품명을 입력해주세요.' };
+
+  const { error } = await supabase
+    .from('sourcing_items')
+    .update({
+      title,
+      link: String(formData.get('link') || '').trim() || null,
+      content: String(formData.get('content') || '').trim() || null,
+      moq: String(formData.get('moq') || '').trim() || null,
+    })
+    .eq('id', id);
+  if (error) return { error: error.message };
+
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
+// "마진·배송" 탭에서 금액 정보(판매가·원가·환율·수수료·배송비·해외배송비 등)만 저장한다.
+export async function updateSourcingMargin(
+  id: string,
+  formData: FormData
+): Promise<{ error: string } | { success: true }> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('sourcing_items')
+    .update({
+      price: numOrNull(formData, 'price'),
+      cost: numOrNull(formData, 'cost'),
+      coupon: numOrNull(formData, 'coupon'),
+      output_vat: numOrNull(formData, 'output_vat'),
+      import_vat: numOrNull(formData, 'import_vat'),
+      coupang_fee: numOrNull(formData, 'coupang_fee'),
+      shipping: numOrNull(formData, 'shipping'),
+      intl_shipping: numOrNull(formData, 'intl_shipping'),
+      intl_shipping_calc: jsonOrNull(formData, 'intl_shipping_calc'),
+      ad_cost: numOrNull(formData, 'ad_cost'),
+      etc_cost: numOrNull(formData, 'etc_cost'),
+      cost_fx_currency: String(formData.get('cost_fx_currency') || '').trim() || null,
+      cost_fx_amount: numOrNull(formData, 'cost_fx_amount'),
+      cost_fx_rate: numOrNull(formData, 'cost_fx_rate'),
+    })
+    .eq('id', id);
+  if (error) return { error: error.message };
+
+  revalidatePath('/dashboard/sourcing/list');
+  return { success: true };
+}
+
 // status에는 진행 단계(lib/sourcingProcess.ts의 6단계 값)를 저장한다.
 export async function updateSourcingStatus(id: string, status: string) {
   if (!isProcessStep(status)) {

@@ -16,6 +16,7 @@ import {
   type RgSizeId,
 } from '@/lib/rocketGrowth';
 import { rgTableSvg, svgDataUrl } from '@/lib/rocketGrowthSvg';
+import { COUPANG_FEE_CATEGORIES, categoryForFeePct, withVatPct } from '@/lib/coupangFees';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
@@ -122,6 +123,8 @@ export function MarginDetailFields({
     updateTable({ ...table, fees: { ...table.fees, [id]: { ...table.fees[id], [key]: n } } });
   }
 
+  // 지금 수수료 칸 값과 맞는 카테고리 (선택 표시용)
+  const feeCategory = categoryForFeePct(parseFloat(fields.feeRatePct));
   const shipPlaceholder = fee != null ? String(fee) : '크기를 넣으면 자동';
   const shippingDiffers = fee != null && parseFloat(fields.shipping) !== fee;
 
@@ -134,7 +137,7 @@ export function MarginDetailFields({
       {/* ① 마진 계산 */}
       <div className="border border-paperLine bg-white p-3 grid gap-2">
         <span className="text-xs font-semibold text-ink">① 마진 계산</span>
-        <div className={`grid grid-cols-2 sm:grid-cols-3 ${gap}`}>
+        <div className={`grid grid-cols-2 sm:grid-cols-3 items-start ${gap}`}>
           <label className="grid gap-0.5">
             <span className={labelCls}>매입부가세 (원)</span>
             <input
@@ -147,8 +150,8 @@ export function MarginDetailFields({
               className={inputCls}
             />
           </label>
-          <label className="grid gap-0.5">
-            <span className={labelCls}>쿠팡 수수료 (%)</span>
+          <div className="grid gap-0.5">
+            <span className={labelCls}>쿠팡 수수료 (%, 부가세 포함)</span>
             <input
               value={fields.feeRatePct}
               onChange={(e) => fields.setFeeRatePct(e.target.value)}
@@ -157,7 +160,23 @@ export function MarginDetailFields({
               placeholder="8.6"
               className={inputCls}
             />
-          </label>
+            <select
+              value={feeCategory?.name ?? ''}
+              onChange={(e) => {
+                const c = COUPANG_FEE_CATEGORIES.find((x) => x.name === e.target.value);
+                if (c) fields.setFeeRatePct(String(withVatPct(c.pct)));
+              }}
+              title="카테고리를 고르면 그 카테고리의 판매수수료(부가세 10% 포함)가 칸에 들어가요"
+              className={selectCls + ' w-full text-[11px]'}
+            >
+              <option value="">{feeCategory ? '카테고리 선택' : '카테고리로 채우기 (참고값)'}</option>
+              {COUPANG_FEE_CATEGORIES.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name} {c.pct}% → {withVatPct(c.pct)}%{c.source === 'blog' ? ' ※' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
           <label className="grid gap-0.5">
             <span className={labelCls}>광고비 (%)</span>
             <input
@@ -221,6 +240,10 @@ export function MarginDetailFields({
             />
           </label>
         </div>
+        <p className="text-[10px] text-inkSoft leading-relaxed">
+          수수료율은 카테고리마다 달라요(생활용품 7.8% → 부가세 포함 8.6%). 목록의 요율은 쿠팡 공식 안내를 인용한 정리글 기준 <strong>참고값</strong>
+          이니(※는 한 곳에서만 확인된 값) WING의 &quot;판매수수료&quot;와 다르면 칸에서 직접 고쳐 쓰세요.
+        </p>
         {hasPrice && (
           <p className={suffixCls}>
             자동 계산 - 쿠팡수수료 {fmt(fields.coupangFee)} (판매가의 {fields.feeRatePct || 0}%) · 광고비{' '}
