@@ -2,6 +2,14 @@
 
 마지막 갱신: 2026-11-20 (소싱 카드 마진·배송 탭 / 로켓그로스 사이즈→배송비 / 카테고리→수수료 / 메인 연출컷 옵션 + 다른 PC 인수인계 점검). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
 
+## 자동배포 개선 (2026-11-21) — ⚠ 맥북에서 1회 설치해야 켜짐
+
+- 11/8~10 장애(빌드가 실행 중인 `.next`를 지움) 재발 방지용 새 배포 스크립트 `scripts/deploy-watch.sh` + 사용 설명 `scripts/DEPLOY.md`. **서버가 안 쓰는 칸(`.next-a`/`.next-b`)에 빌드 → 성공하면 전환 → 로그인 페이지·정적 파일이 나오는지 확인 → 실패하면 롤백**, 실패 커밋은 30분 뒤 재시도, 잠금·`npm install` 실패·서버 폴더 수정 충돌도 처리.
+- 코드 쪽 변경: `next.config.js`에 `distDir: process.env.NEXT_DIST_DIR || ".next"`(환경변수 없으면 기존과 동일, 개발·Vercel 영향 없음), `tsconfig.json` include에 `.next-a/b` 타입 폴더, `.gitignore`에 `.next-*`, `.gitattributes`(`*.sh`는 LF).
+- **아직 켜지지 않았다.** 맥북은 계속 옛 스크립트(`/Users/wook/deploy-watch.sh`)로 돈다. 맥북 터미널에서 `scripts/DEPLOY.md`의 "맥북에 한 번만 설치" 4단계(옛 파일 백업 후 새 스크립트로 연결 → 한 번 직접 실행 → 확인)를 해야 한다. 이 PC에서는 맥북에 접속할 수 없어 못 했다.
+- 검증함: `bash scripts/test-deploy-watch.sh` 38개 통과(가짜 git/npm/pm2/curl), 실제 `NEXT_DIST_DIR=.next-a`로 build·start 후 `/login`·정적 파일 200. **못 함**: 실제 맥북·진짜 pm2(`restart --update-env`, `pm2 save`)·launchd 환경. 첫 실행 로그를 직접 보는 것을 권장.
+- 같이 하면 좋은 것: 맥북 `~/.npm` 소유권 정리는 이제 필수가 아님(전용 캐시 `~/.npm-hion` 사용). 옛 `.next`는 첫 전환 후 삭제 가능.
+
 ## 다른 PC에서 시작할 때 (2026-11-20)
 
 1. `git pull` (모든 작업이 `main`에 푸시돼 있음, 마지막 커밋 `d3454da`). `package.json` 변경 없음이라 `npm install`은 안 해도 됨.
@@ -107,7 +115,7 @@
 **2026-11-08~10 장애와 원인 (재발 주의)**
 - 증상: 다른 PC에서 `hion.cc` → `/dashboard` 404. 원인: 11-08 자동배포에서 `@tiptap/*`가 맥북 `node_modules`에 없어 `next build`가 실패했고, 실패한 빌드가 `.next`를 반쯤 덮어씀(`BUILD_ID` 없음). 로그: `/Users/wook/.pm2/autodeploy.log`.
 - 복구: `npm install`이 `~/.npm` 캐시 일부가 root 소유라 EACCES → `npm install --cache <다른 폴더>`로 설치, `npm run build` 성공 확인 후 `pm2 restart hion`. **`~/.npm` 소유권 정리(`sudo chown -R $(id -u):$(id -g) ~/.npm`)는 사용자가 했는지 확인 못 함** — 안 했으면 다음 `package-lock.json` 변경 때 같은 실패가 날 수 있다.
-- 자동배포 스크립트(`/Users/wook/deploy-watch.sh`)는 "빌드 실패 시 이전 빌드로 계속 서비스"라고 돼 있으나 실제로는 `.next`가 깨졌다. 개선 후보: 별도 폴더에 빌드 후 교체, `package.json` 변경 시에도 `npm install`.
+- 자동배포 스크립트(`/Users/wook/deploy-watch.sh`)는 "빌드 실패 시 이전 빌드로 계속 서비스"라고 돼 있으나 실제로는 `.next`가 깨졌다. → 2026-11-21에 `scripts/deploy-watch.sh`로 개선(맨 위 "자동배포 개선" 절). 맥북에 설치하기 전까지는 옛 방식이다.
 
 **Bright Data (쿠팡 조사)**
 - 맥북 `/Users/wook/hion/.env.local`에 `BRIGHTDATA_API_KEY`와 `BRIGHTDATA_UNLOCKER_ZONE=hion_v2`를 2026-11-12에 넣고(키는 사용자가 파일에 직접 입력, 채팅에는 안 올림) `pm2 restart hion`. Bright Data `/request`를 직접 호출해 HTTP 200 확인함. **hion.cc 화면에서 "조사하기"가 실제로 되는지는 사용자 확인 대기.** 계정에 "Low balance" 경고와 과거 스로틀링 기록이 있음.
