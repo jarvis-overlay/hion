@@ -1,6 +1,6 @@
 # 인수인계 (HANDOFF) — 다른 PC에서 바로 이어서 작업하기
 
-마지막 갱신: 2026-11-20 (소싱 카드 마진·배송 탭 / 로켓그로스 사이즈→배송비 / 카테고리→수수료 / 메인 연출컷 옵션). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+마지막 갱신: 2026-11-20 (소싱 카드 마진·배송 탭 / 로켓그로스 사이즈→배송비 / 카테고리→수수료 / 메인 연출컷 옵션 + 다른 PC 인수인계 점검). 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
 
 ## 다른 PC에서 시작할 때 (2026-11-20)
 
@@ -14,6 +14,36 @@
    - (제안만 하고 안 한 것) 패키지 메인 뱃지 색을 흰색 외에 못 고르게 제한 / 연출컷은 패키지엔 적용 불가.
 5. 배송비 계산기·로켓그로스 요금표 수정값은 브라우저 localStorage라 PC마다 따로 저장됨.
 6. 이 PC에만 있는 미추적 파일 `업무수첩_기능정리.md`는 다른 프로젝트(rpa-system) 문서라 커밋하지 않았음. 필요하면 USB·클라우드로 직접 옮길 것.
+
+## 이 PC에만 있고 git에 없는 것 (다른 PC에서 직접 챙길 것) — 2026-11-20 점검
+
+| 항목 | 상태 | 다른 PC에서 할 일 |
+|---|---|---|
+| `.env.local` | git 제외(.gitignore). 키 이름: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `GEMINI_API_KEY`, `REMOVE_BG_API_KEY`, `VERCEL_OIDC_TOKEN` | 값은 이미 쓰고 있는 PC·맥북에서 옮긴다. **채팅·커밋에 값을 붙이지 말 것.** `VERCEL_OIDC_TOKEN`은 Vercel이 발급하는 임시 토큰(`vercel env pull`)이라 만료되므로 없어도 로컬 개발엔 무관. `.env.local.example` 참고 |
+| Supabase CLI 연결 (`supabase/.temp/`, 로그인 세션) | PC마다 따로 | 마이그레이션을 돌릴 때만 필요: `npx supabase login`(진짜 터미널에서, 브라우저 승인) → `npx supabase link --project-ref isqsvclrdzdsnizzqsia`. Docker가 없으니 `db pull`/`db diff`는 쓰지 말고 `migration new` + `db push --remote`만 쓴다 |
+| `.vercel/` | 로컬 Vercel 연결 | 필요 없으면 무시 |
+| 로켓그로스 요금표 수정값, 배송비 계산기 기본값 | 브라우저 localStorage(`hion.rocketGrowthFees.v1` 등) | PC마다 다시 입력. 요금표 기본값은 코드(`lib/rocketGrowth.ts`)에 있으니 안 입력해도 동작 |
+| 쿠팡 WING 로그인 / 앱 내장 브라우저 로그인 | PC마다 따로 | 정확한 로켓그로스 요금을 읽으려면 그 PC에서 WING 로그인(아래 "남은 일" 참고) |
+| `업무수첩_기능정리.md` (프로젝트 루트, 미추적) | 다른 프로젝트(rpa-system) 문서 | 커밋하지 말 것. 필요하면 직접 복사 |
+| Claude 자동 메모리(`~/.claude/projects/.../memory/`) | PC마다 따로 | 아래 "메모리에만 있던 내용" 요약을 이 문서가 대신함. 새 PC의 Claude는 이 문서와 `CLAUDE.md`만 믿고 시작하면 됨 |
+| 스크래치패드(임시 스크립트·쿠팡 가이드 PDF 변환 이미지 등) | 세션 임시 폴더 | 필요 없음. 가이드 PDF에서 얻은 규정(메인 85%/95%, 흰 배경, 패션·잡화 연출컷 허용)은 아래 -18, -16, -15 섹션에 정리돼 있음 |
+
+### 푸시 전 타입 검사 (CLAUDE.md의 옛 절차 대신, 2026-11-20 확인)
+- 지금 `package.json`에 `sharp`·`canvas`가 정식 의존성으로 들어 있어서, `npm install` 후 `node_modules/sharp`, `node_modules/canvas`가 있으면 `node node_modules/typescript/bin/tsc --noEmit -p .`를 **바로** 돌리면 된다(CLAUDE.md에 적힌 "스크래치패드 imgtest에서 복사" 절차는 필요 없어 보임 — 이 PC의 `node_modules`에 두 폴더가 있는 것은 확인했지만, 새 PC에서 `npm install`만으로 되는지는 못 봄). 새 PC에서 두 폴더가 없거나 canvas 설치가 실패하면 그때 CLAUDE.md의 옛 절차를 쓴다. (`web-push` 타입 오류는 무시, 끝나면 `tsconfig.tsbuildinfo` 삭제)
+- 화면을 임시로 확인할 땐 `app/tmp-*` 페이지(로그인 밖 경로)를 만들어 가짜 데이터로 본 뒤, **커밋 전에 지우고 `.next/types/app/tmp-*`도 지울 것**(안 지우면 tsc가 옛 임시 페이지를 못 찾아 오류).
+- 실제 로그인 화면·Supabase 저장·Gemini·Bright Data는 로컬에서 못 본다. 못 본 것은 보고서에 "확인 못 함"으로 쓴다.
+
+### 메모리에만 있던 내용 (이 문서로 옮김)
+- **DB 변경**: Supabase CLI 마이그레이션만 쓴다(`migration new` → SQL 작성 → `db push --remote`, 파일은 커밋). `supabase/PENDING_MIGRATIONS.md`와 `supabase/*.sql` 낱개 파일은 2026-11-05 이전 기록이라 참고용. 에이전트 모드에서 운영 DB를 바꾸는 명령은 `--yes`가 필요하고 사용자 승인을 먼저 받는다.
+- **운영 구조**: 운영은 맥북(`https://hion.cc`, pm2 + Cloudflare Tunnel). `origin/main`만 90초마다 감시해 자동 배포, feature 브랜치는 운영에 영향 없음. 상세는 `PROCESS_ARCHITECTURE.md`, `SETUP_MACOS_SELFHOST.md`.
+- **2026-11-05 기록 이후 상태를 확인 못 한 항목**: ① Google Cloud OAuth redirect URI와 Supabase Auth redirect URL에 `https://hion.cc/...` 추가 여부, ② 맥북 `.env.local`의 `NEXT_PUBLIC_APP_URL`이 `hion.vercel.app`이 아닌 `hion.cc`인지(카카오 알림 링크에 영향), ③ Vercel 프로젝트 정리 여부(요금). 해결됐다면 이 줄을 지운다.
+
+## 남은 일 / 다음 세션 후보 (2026-11-20)
+
+1. **로켓그로스 요금표를 판매가 구간별로 확장** — 사용자가 WING에 로그인해 주면 입출고·배송 요금표를 읽어 `RgFeeTable`(지금은 사이즈당 1행)을 가격 구간 구조로 넓힌다. 로그인 전에는 "~원부터" 시작 요금이 기본값이고, 화면·기준표 이미지에도 그렇게 표시돼 있다.
+2. **쿠팡 카테고리 수수료율 검증** — `lib/coupangFees.ts` 값을 WING 실제 값과 대조.
+3. **운영 확인(사용자)** — https://hion.cc 에서 Ctrl+Shift+R 후: 소싱 카드 탭(선택 탭 분홍 채움/한 번에 하나), "마진·배송" 탭 저장, 카테고리 입력 → 수수료 자동 입력(수동 수정 가능), 사이즈 입력 → 배송비 자동 반영, "기준표 보기", 썸네일 메인의 "패션의류·잡화 - 연출컷 유지". 모바일 폭도 확인.
+4. (제안만 한 것, 요청 전엔 하지 않음) 패키지 메인의 뱃지 색을 흰색 위주로 제한 / 카드에 카테고리 표시.
 
 ## -23. 소싱 카드 가독성: 탭 구분 + 금액 요약 칸 (2026-11-20)
 
