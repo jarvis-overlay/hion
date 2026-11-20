@@ -38,6 +38,25 @@
 - **운영 구조**: 운영은 맥북(`https://hion.cc`, pm2 + Cloudflare Tunnel). `origin/main`만 90초마다 감시해 자동 배포, feature 브랜치는 운영에 영향 없음. 상세는 `PROCESS_ARCHITECTURE.md`, `SETUP_MACOS_SELFHOST.md`.
 - **2026-11-05 기록 이후 상태를 확인 못 한 항목**: ① Google Cloud OAuth redirect URI와 Supabase Auth redirect URL에 `https://hion.cc/...` 추가 여부, ② 맥북 `.env.local`의 `NEXT_PUBLIC_APP_URL`이 `hion.vercel.app`이 아닌 `hion.cc`인지(카카오 알림 링크에 영향), ③ Vercel 프로젝트 정리 여부(요금). 해결됐다면 이 줄을 지운다.
 
+## 원격 접속: 이 PC로 다른 기기에서 들어오기 (2026-11-20 점검, 읽기 전용으로 확인)
+
+**이 PC**: 컴퓨터 이름 `DESKTOP-2NH6PEF`, Windows 11 Pro, 로그인 계정 `kw`. git 사용자명이 `wook`이고 이전 기록(Docker 없음 등)이 이 PC와 맞아 "wook PC"로 보이지만, 컴퓨터 이름만으로는 확정하지 못함 → jarvis/wook 중 어느 쪽인지는 사용자가 확인.
+
+**설정돼 있는 것 (확인함)**
+- **Tailscale**: 설치·실행 중(서비스 자동 시작). 이 PC의 Tailscale IP는 **`100.103.130.85`**, 계정 `dnr7350@…` 의 tailnet. 같은 tailnet 기기끼리는 공용 인터넷 없이 이 주소로 접속한다.
+- **원격 데스크톱(RDP)**: 켜져 있음(3389 포트 수신 중, 방화벽 규칙 모든 프로필 허용, NLA 사용 = 계정 로그인 필요). 접속: 다른 Windows PC에서 `mstsc` → `100.103.130.85` 입력. 폰은 Microsoft Remote Desktop 앱에 같은 주소 등록.
+- SSH(sshd)는 설치 안 됨 → 명령줄 접속은 없고 화면 접속(RDP)만 가능. WinRM은 꺼짐.
+
+**같은 tailnet의 다른 기기 (`tailscale status`, 점검 시점)**: `desktop-29mnnvq`(Windows, 100.85.93.119, 1일 전 오프라인), `kw`(Windows, 100.85.93.4, 17시간 전 오프라인), `macbookpro`(100.81.239.54)·`macbookpro-2`(100.87.216.31) 맥북 2대(둘 다 12일째 오프라인). 이 PC를 켜 둔 채 다른 PC에서 들어가려면 **그 PC도 Tailscale이 켜져 있고 로그인돼 있어야** 한다. 맥북이 Tailscale에서 오프라인이어도 운영 사이트(`https://hion.cc`)는 Cloudflare Tunnel이라 별개로 동작할 수 있음 — 다만 맥북으로 화면 공유·SSH는 지금 불가.
+
+**⚠ 들어가려는데 안 될 때 먼저 볼 것**
+1. **절전**: 전원 계획이 "균형 조정"이고 **AC 전원에서도 60분 유휴 후 절전**(`0xe10` = 3600초)이다. 절전에 들어가면 Tailscale·RDP 모두 끊기므로 **밖에서 접속하려면 절전이 꺼져 있어야 한다.** 바꾸는 건 이 PC 시스템 설정이라 내가 건드리지 않았다 → 사용자가 직접(PowerShell 관리자): `powercfg /change standby-timeout-ac 0` (모니터 끄기는 상관없음). 노트북이 아닌 데스크톱 전제.
+2. **계정 암호**: `kw` 계정 정보에 "암호 필요: 아니오"로 나온다(PIN/Windows Hello만 쓰는 계정일 수 있음). RDP는 보통 **계정 암호**로 로그인하는데, 암호가 없는 계정은 원격 로그인이 막힌다. 접속이 "자격 증명이 올바르지 않습니다"로 거부되면 Microsoft 계정 암호를 쓰거나, 암호를 설정한다. (암호는 이 문서·채팅에 적지 말 것.)
+3. 접속하는 쪽 기기의 Tailscale이 켜져 있는지: `tailscale status`에 이 PC(`desktop-2nh6pef`)가 보여야 한다.
+4. RDP로 들어가면 이 PC의 로컬 화면은 잠긴다(같은 계정으로 동시 사용 불가). 끊어도 Claude Code 세션·`npm run dev`는 계속 돈다.
+
+**확인 못 한 것**: 실제로 다른 기기에서 접속해 본 것(지금 이 PC 안에서 설정·서비스·포트만 읽음), 공유기/ISP 쪽은 Tailscale을 쓰면 필요 없지만 확인 안 함, 위 3번 접속 쪽 기기 상태.
+
 ## 남은 일 / 다음 세션 후보 (2026-11-20)
 
 1. **로켓그로스 요금표를 판매가 구간별로 확장** — 사용자가 WING에 로그인해 주면 입출고·배송 요금표를 읽어 `RgFeeTable`(지금은 사이즈당 1행)을 가격 구간 구조로 넓힌다. 로그인 전에는 "~원부터" 시작 요금이 기본값이고, 화면·기준표 이미지에도 그렇게 표시돼 있다.
