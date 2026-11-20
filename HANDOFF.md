@@ -72,6 +72,21 @@
 
 맥북에서 할 일(자동배포 로그 `tail -30 /Users/wook/.pm2/autodeploy.log` 확인, `pm2 restart hion` 등)은 위 접속이 되어야 이 PC에서 할 수 있다. 접속은 **한 번도 시험해 보지 못함.**
 
+## 원격 접속 시도 기록 / 퇴근 후 계획 (2026-11-20, jarvis PC)
+
+**오늘 한 시도와 결과 (맥북 SSH 브라우저 방식 — 해결 못 함)**
+- `https://ssh.hion.cc` 접속: 서버는 정상(Cloudflare Access 로그인으로 302 → 로그인 화면 200 확인). 그러나 사용자 브라우저에서 처음엔 **빈 화면**.
+- 이메일 코드 로그인 후 `dash.cloudflare.com/oauth/consent-form`(Cloudflare 계정 접근 **승인 화면**, "Select account(s)")이 떠서 뼈대만 보이고 로드가 안 됨. 앱 이름·권한은 못 봤고 **허용하지 않음**. 왼쪽 탭 "Consent Application"은 열린 채 남아 있을 수 있으니 허용하지 말고 닫을 것.
+- `https://old-sea-d298.cloudflareaccess.com`에 직접 로그인은 **성공**(이메일 코드). 화면은 "App Launcher를 활성화하려면 관리자에게 문의" = 앱 목록 기능이 꺼져 있다는 안내일 뿐 오류 아님.
+- 추정(미확인): Access 인증은 정상이고, 막히는 곳은 `ssh-hion` 앱의 **browser-based SSH(브라우저 렌더링)** 설정. 설정 화면은 보지 못함.
+- 이 PC에는 `cloudflared`·`~/.ssh`가 없음 → 터미널 SSH 방식은 아직 미설정.
+
+**사용자의 다음 계획**
+1. **집에서 이 윈도우 PC(jarvis)에 원격 접속 시도** — 위 "원격 접속: 이 PC로 다른 기기에서 들어오기" 절 참고(Tailscale IP `100.103.130.85`, RDP 3389, AC 절전은 해제함). 집 PC에도 Tailscale 로그인 필요. 계정 `kw`에 암호가 없으면 RDP 로그인이 막힐 수 있음(미확인).
+2. **필요하면 맥북에도 접속 시도** — 맥북 절 참고. 맥북은 Tailscale이 오프라인일 수 있으니 Cloudflare SSH를 쓴다. 브라우저 방식이 막히면 **터미널 방식**(집 PC에 `winget install --id Cloudflare.cloudflared` + `~/.ssh/config`에 `Host hion-mac / HostName ssh.hion.cc / User wook / ProxyCommand cloudflared access ssh --hostname %h` → `ssh hion-mac`)이 더 확실하다고 제안함(아직 사용자 승인·실행 전).
+
+**다음 세션이 이어서 할 것**: 집에서 접속이 됐는지/어디서 막혔는지 사용자에게 물어 이 절에 결과를 덧붙인다. 막힌 곳이 맥북이면 위 터미널 방식으로 설치·설정을 도와준다(설치 전 사용자 확인). Zero Trust `ssh-hion` 앱의 browser-based SSH 설정은 사용자가 Cloudflare 화면에서 직접 확인해야 한다.
+
 ## 운영 서버(맥북) 원격 접속·운영 메모 (2026-11-20 기록, 맥북 Claude Code 세션)
 
 위 "원격 접속" 절은 **윈도우 PC(jarvis)** 이야기다. 이 절은 **운영 서버인 맥북**(`hion.cc`) 쪽이다.
