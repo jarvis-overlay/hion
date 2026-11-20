@@ -173,9 +173,7 @@ export async function addSourcingItem(
   const priceNum = numOrNull(formData, 'price');
   const costNum = numOrNull(formData, 'cost');
 
-  const { data: item, error } = await supabase
-    .from('sourcing_items')
-    .insert({
+  const insertRow: Record<string, any> = {
       title,
       link: link || null,
       content: content || null,
@@ -199,9 +197,17 @@ export async function addSourcingItem(
       cost_fx_amount: numOrNull(formData, 'cost_fx_amount'),
       cost_fx_rate: numOrNull(formData, 'cost_fx_rate'),
       author_email: user.email,
-    })
+  };
+  // 쿠팡 수수료 카테고리 (fee_category 컬럼 마이그레이션 전이면 이 값만 빼고 저장한다)
+  const feeCategory = String(formData.get('fee_category') || '').trim().slice(0, 60) || null;
+  let { data: item, error } = await supabase
+    .from('sourcing_items')
+    .insert({ ...insertRow, fee_category: feeCategory })
     .select('id')
     .single();
+  if (error && /fee_category|schema cache|column/i.test(error.message)) {
+    ({ data: item, error } = await supabase.from('sourcing_items').insert(insertRow).select('id').single());
+  }
 
   if (error) return { error: error.message };
 
@@ -359,9 +365,7 @@ export async function updateSourcingMargin(
   formData: FormData
 ): Promise<{ error: string } | { success: true }> {
   const supabase = createClient();
-  const { error } = await supabase
-    .from('sourcing_items')
-    .update({
+  const row: Record<string, any> = {
       price: numOrNull(formData, 'price'),
       cost: numOrNull(formData, 'cost'),
       coupon: numOrNull(formData, 'coupon'),
@@ -376,8 +380,13 @@ export async function updateSourcingMargin(
       cost_fx_currency: String(formData.get('cost_fx_currency') || '').trim() || null,
       cost_fx_amount: numOrNull(formData, 'cost_fx_amount'),
       cost_fx_rate: numOrNull(formData, 'cost_fx_rate'),
-    })
-    .eq('id', id);
+  };
+  // 쿠팡 수수료 카테고리 (fee_category 컬럼 마이그레이션 전이면 이 값만 빼고 저장한다)
+  const feeCategory = String(formData.get('fee_category') || '').trim().slice(0, 60) || null;
+  let { error } = await supabase.from('sourcing_items').update({ ...row, fee_category: feeCategory }).eq('id', id);
+  if (error && /fee_category|schema cache|column/i.test(error.message)) {
+    ({ error } = await supabase.from('sourcing_items').update(row).eq('id', id));
+  }
   if (error) return { error: error.message };
 
   revalidatePath('/dashboard/sourcing/list');

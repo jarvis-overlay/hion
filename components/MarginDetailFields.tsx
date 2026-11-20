@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { useMarginFields } from '@/lib/useMarginFields';
 import ShippingCostCalculator, { type ShippingCalcState, type ShippingDims } from '@/components/ShippingCostCalculator';
 import {
@@ -16,7 +16,7 @@ import {
   type RgSizeId,
 } from '@/lib/rocketGrowth';
 import { rgTableSvg, svgDataUrl } from '@/lib/rocketGrowthSvg';
-import { COUPANG_FEE_CATEGORIES, categoryForFeePct, withVatPct } from '@/lib/coupangFees';
+import { COUPANG_FEE_CATEGORIES, findFeeCategory, withVatPct } from '@/lib/coupangFees';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
@@ -36,10 +36,12 @@ export function MarginDetailFields({
   fields,
   compact = false,
   intlShippingCalcInitial,
+  feeCategoryInitial,
 }: {
   fields: Fields;
   compact?: boolean;
   intlShippingCalcInitial?: ShippingCalcState | null;
+  feeCategoryInitial?: string | null; // 저장돼 있던 쿠팡 수수료 카테고리
 }) {
   const inputCls = compact
     ? 'border border-paperLine bg-white px-2 py-1.5 text-xs font-mono'
@@ -57,6 +59,7 @@ export function MarginDetailFields({
   const [table, setTable] = useState<RgFeeTable>(() => cloneDefaultTable());
   const [tableMsg, setTableMsg] = useState('');
   const [showTable, setShowTable] = useState(false);
+  const categoryListId = useId();
   // 저장된 요금표는 브라우저에서만 읽을 수 있어서 화면이 뜬 뒤에 불러온다
   useEffect(() => {
     setTable(loadRgTable());
@@ -124,7 +127,16 @@ export function MarginDetailFields({
   }
 
   // 지금 수수료 칸 값과 맞는 카테고리 (선택 표시용)
-  const feeCategory = categoryForFeePct(parseFloat(fields.feeRatePct));
+  // 쿠팡 카테고리: 입력/선택하면 그 카테고리의 수수료(부가세 포함)가 칸에 자동으로 들어간다. 이후 칸을 직접 고치는 것도 자유.
+  const [category, setCategory] = useState(feeCategoryInitial ?? '');
+  const feeMatched = findFeeCategory(category);
+  const feeMatchedPct = feeMatched ? withVatPct(feeMatched.pct) : null;
+  const feeManual = feeMatchedPct != null && Math.abs((parseFloat(fields.feeRatePct) || 0) - feeMatchedPct) > 0.04;
+  function onCategoryChange(v: string) {
+    setCategory(v);
+    const m = findFeeCategory(v);
+    if (m) fields.setFeeRatePct(String(withVatPct(m.pct)));
+  }
   const shipPlaceholder = fee != null ? String(fee) : '크기를 넣으면 자동';
   const shippingDiffers = fee != null && parseFloat(fields.shipping) !== fee;
 
@@ -150,32 +162,57 @@ export function MarginDetailFields({
               className={inputCls}
             />
           </label>
-          <div className="grid gap-0.5">
-            <span className={labelCls}>쿠팡 수수료 (%, 부가세 포함)</span>
-            <input
-              value={fields.feeRatePct}
-              onChange={(e) => fields.setFeeRatePct(e.target.value)}
-              type="number"
-              step="0.1"
-              placeholder="8.6"
-              className={inputCls}
-            />
-            <select
-              value={feeCategory?.name ?? ''}
-              onChange={(e) => {
-                const c = COUPANG_FEE_CATEGORIES.find((x) => x.name === e.target.value);
-                if (c) fields.setFeeRatePct(String(withVatPct(c.pct)));
-              }}
-              title="카테고리를 고르면 그 카테고리의 판매수수료(부가세 10% 포함)가 칸에 들어가요"
-              className={selectCls + ' w-full text-[11px]'}
-            >
-              <option value="">{feeCategory ? '카테고리 선택' : '카테고리로 채우기 (참고값)'}</option>
+          <div className="grid gap-0.5 sm:col-span-2">
+            <span className={labelCls}>쿠팡 카테고리 → 수수료 자동 입력</span>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                name="fee_category"
+                list={categoryListId}
+                value={category}
+                onChange={(e) => onCategoryChange(e.target.value)}
+                placeholder="카테고리 (예: 생활용품)"
+                autoComplete="off"
+                className={inputCls.replace('font-mono', '')}
+              />
+              <div className="flex items-center gap-1">
+                <input
+                  value={fields.feeRatePct}
+                  onChange={(e) => fields.setFeeRatePct(e.target.value)}
+                  type="number"
+                  step="0.1"
+                  placeholder="8.6"
+                  title="수수료(%) - 부가세 포함. 카테고리와 상관없이 직접 고칠 수 있어요"
+                  className={inputCls + ' flex-1 min-w-0'}
+                />
+                <span className={suffixCls}>% (부가세 포함)</span>
+              </div>
+            </div>
+            <datalist id={categoryListId}>
               {COUPANG_FEE_CATEGORIES.map((c) => (
                 <option key={c.name} value={c.name}>
-                  {c.name} · 수수료 {c.pct}% + 부가세 = {withVatPct(c.pct)}%{c.source === 'blog' ? ' ※' : ''}
+                  수수료 {c.pct}% + 부가세 = {withVatPct(c.pct)}%{c.source === 'blog' ? ' ※' : ''}
                 </option>
               ))}
-            </select>
+            </datalist>
+            {feeMatched ? (
+              feeManual ? (
+                <p className="text-[11px] text-warn">
+                  직접 입력한 수수료예요 ({feeMatched.name} 기준은 {feeMatchedPct}%).{' '}
+                  <button type="button" onClick={() => onCategoryChange(feeMatched.name)} className="underline">
+                    카테고리 기준으로 되돌리기
+                  </button>
+                </p>
+              ) : (
+                <p className="text-[11px] text-profit">
+                  {feeMatched.name}: 수수료 {feeMatched.pct}% + 부가세 10% = {feeMatchedPct}% 자동 적용
+                  {feeMatched.source === 'blog' ? ' (※ 한 곳에서만 확인된 값)' : ''}
+                </p>
+              )
+            ) : category.trim() ? (
+              <p className="text-[11px] text-inkSoft">목록에 없는 카테고리예요. 수수료(%)는 직접 입력하세요.</p>
+            ) : (
+              <p className="text-[11px] text-inkSoft">카테고리를 고르거나 입력하면 수수료가 자동으로 들어가요. 비워 두고 수수료만 직접 입력해도 돼요.</p>
+            )}
           </div>
           <label className="grid gap-0.5">
             <span className={labelCls}>광고비 (%)</span>
@@ -241,8 +278,8 @@ export function MarginDetailFields({
           </label>
         </div>
         <p className="text-[10px] text-inkSoft leading-relaxed">
-          수수료율은 카테고리마다 달라요(생활용품 7.8% → 부가세 포함 8.6%). 목록의 요율은 쿠팡 공식 안내를 인용한 정리글 기준 <strong>참고값</strong>
-          이니(※는 한 곳에서만 확인된 값) WING의 &quot;판매수수료&quot;와 다르면 칸에서 직접 고쳐 쓰세요.
+          카테고리별 수수료율은 쿠팡 공식 안내를 인용한 정리글 기준 <strong>참고값</strong>이에요(※는 한 곳에서만 확인된 값). 쿠팡 요율은 부가세 별도라 화면에는 부가세
+          10%를 더한 값이 들어가요. WING의 &quot;판매수수료&quot;와 다르면 칸에서 직접 고쳐 쓰세요.
         </p>
         {hasPrice && (
           <p className={suffixCls}>

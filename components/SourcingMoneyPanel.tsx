@@ -96,7 +96,7 @@ export default function SourcingMoneyPanel({ item, onDone }: { item: any; onDone
         initial={{ currency: item.cost_fx_currency, amount: item.cost_fx_amount, rate: item.cost_fx_rate }}
       />
 
-      <MarginDetailFields fields={f} intlShippingCalcInitial={intlShippingCalcInitial} />
+      <MarginDetailFields fields={f} intlShippingCalcInitial={intlShippingCalcInitial} feeCategoryInitial={item.fee_category} />
 
       {f.price && (
         <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1">

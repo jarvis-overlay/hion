@@ -41,3 +41,14 @@ export function categoryForFeePct(feePct: number): CoupangFeeCategory | null {
   if (!Number.isFinite(feePct)) return null;
   return COUPANG_FEE_CATEGORIES.find((c) => Math.abs(withVatPct(c.pct) - feePct) < 0.05) ?? null;
 }
+
+// 입력한 글자로 카테고리를 찾는다: 이름이 정확히 같거나, 2글자 이상이고 딱 하나만 걸리면 그 카테고리 (띄어쓰기·가운뎃점 무시)
+const norm = (t: string) => t.replace(/[\s·/\-()]/g, '').toLowerCase();
+export function findFeeCategory(text: string): CoupangFeeCategory | null {
+  const q = norm(text);
+  if (q.length < 2) return null;
+  const exact = COUPANG_FEE_CATEGORIES.find((c) => norm(c.name) === q);
+  if (exact) return exact;
+  const hits = COUPANG_FEE_CATEGORIES.filter((c) => norm(c.name).includes(q));
+  return hits.length === 1 ? hits[0] : null;
+}
