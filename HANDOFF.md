@@ -40,7 +40,7 @@
 
 ## 원격 접속: 이 PC로 다른 기기에서 들어오기 (2026-11-20 점검, 읽기 전용으로 확인)
 
-**이 PC**: 컴퓨터 이름 `DESKTOP-2NH6PEF`, Windows 11 Pro, 로그인 계정 `kw`. git 사용자명이 `wook`이고 이전 기록(Docker 없음 등)이 이 PC와 맞아 "wook PC"로 보이지만, 컴퓨터 이름만으로는 확정하지 못함 → jarvis/wook 중 어느 쪽인지는 사용자가 확인.
+**이 PC**: 컴퓨터 이름 `DESKTOP-2NH6PEF`, Windows 11 Pro, 로그인 계정 `kw`. 맥북 쪽 기록(아래 "운영 서버(맥북)" 절)에서 윈도우 PC를 **jarvis**라고 부르므로 이 PC = jarvis로 본다. (git 사용자명은 `wook`이지만 PC 이름과는 별개. `wook`은 맥북 계정 이름이기도 함.)
 
 **설정돼 있는 것 (확인함)**
 - **Tailscale**: 설치·실행 중(서비스 자동 시작). 이 PC의 Tailscale IP는 **`100.103.130.85`**, 계정 `dnr7350@…` 의 tailnet. 같은 tailnet 기기끼리는 공용 인터넷 없이 이 주소로 접속한다.
