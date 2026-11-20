@@ -50,7 +50,7 @@
 **같은 tailnet의 다른 기기 (`tailscale status`, 점검 시점)**: `desktop-29mnnvq`(Windows, 100.85.93.119, 1일 전 오프라인), `kw`(Windows, 100.85.93.4, 17시간 전 오프라인), `macbookpro`(100.81.239.54)·`macbookpro-2`(100.87.216.31) 맥북 2대(둘 다 12일째 오프라인). 이 PC를 켜 둔 채 다른 PC에서 들어가려면 **그 PC도 Tailscale이 켜져 있고 로그인돼 있어야** 한다. 맥북이 Tailscale에서 오프라인이어도 운영 사이트(`https://hion.cc`)는 Cloudflare Tunnel이라 별개로 동작할 수 있음 — 다만 맥북으로 화면 공유·SSH는 지금 불가.
 
 **⚠ 들어가려는데 안 될 때 먼저 볼 것**
-1. **절전**: 전원 계획이 "균형 조정"이고 **AC 전원에서도 60분 유휴 후 절전**(`0xe10` = 3600초)이다. 절전에 들어가면 Tailscale·RDP 모두 끊기므로 **밖에서 접속하려면 절전이 꺼져 있어야 한다.** 바꾸는 건 이 PC 시스템 설정이라 내가 건드리지 않았다 → 사용자가 직접(PowerShell 관리자): `powercfg /change standby-timeout-ac 0` (모니터 끄기는 상관없음). 노트북이 아닌 데스크톱 전제.
+1. **절전**: 원래 AC 전원에서도 60분 유휴 후 절전이었으나, 2026-11-20에 사용자가 `powercfg /change standby-timeout-ac 0`을 실행해 **AC 전원에서는 절전 안 함으로 바꿨고, 값(`0x0`)을 확인함.** 배터리(DC) 절전은 60분 그대로(데스크톱이면 무관). 접속이 안 되면 이 값이 되돌아갔는지 `powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE`로 먼저 본다.
 2. **계정 암호**: `kw` 계정 정보에 "암호 필요: 아니오"로 나온다(PIN/Windows Hello만 쓰는 계정일 수 있음). RDP는 보통 **계정 암호**로 로그인하는데, 암호가 없는 계정은 원격 로그인이 막힌다. 접속이 "자격 증명이 올바르지 않습니다"로 거부되면 Microsoft 계정 암호를 쓰거나, 암호를 설정한다. (암호는 이 문서·채팅에 적지 말 것.)
 3. 접속하는 쪽 기기의 Tailscale이 켜져 있는지: `tailscale status`에 이 PC(`desktop-2nh6pef`)가 보여야 한다.
 4. RDP로 들어가면 이 PC의 로컬 화면은 잠긴다(같은 계정으로 동시 사용 불가). 끊어도 Claude Code 세션·`npm run dev`는 계속 돈다.
