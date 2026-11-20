@@ -57,6 +57,32 @@
 
 **확인 못 한 것**: 실제로 다른 기기에서 접속해 본 것(지금 이 PC 안에서 설정·서비스·포트만 읽음), 공유기/ISP 쪽은 Tailscale을 쓰면 필요 없지만 확인 안 함, 위 3번 접속 쪽 기기 상태.
 
+## 운영 서버(맥북) 원격 접속·운영 메모 (2026-11-20 기록, 맥북 Claude Code 세션)
+
+위 "원격 접속" 절은 **윈도우 PC(jarvis)** 이야기다. 이 절은 **운영 서버인 맥북**(`hion.cc`) 쪽이다.
+
+**서버 위치/구조 (확인함)**
+- 진짜 프로젝트는 맥북의 **`/Users/wook/hion`**. `/Users/wook/Desktop/py/hion`은 문서 1개만 있는 거의 빈 폴더라 헷갈리지 말 것. 맥 계정 짧은 이름은 `wook`(표시 이름 김욱), macOS 12.7.6.
+- pm2: `hion`(앱 `npm start`), `caffeinate`(`-dimsu`). 2026-11-07에 caffeinate가 pm2에는 online인데 실제 프로세스가 없던 문제(실행 폴더가 없는 경로)를 고쳐 다시 등록하고 `pm2 save` 함. AC 전원 잠자기도 `sudo pmset -c sleep 0`으로 꺼 둠.
+- 무인 복구: FileVault 끔 + 자동 로그인(김욱). 재부팅 후 pm2 hion/caffeinate, cloudflared, 자동배포가 사람 없이 올라오는 것을 3회 확인함.
+- cloudflared는 **root LaunchDaemon**(`com.cloudflare.cloudflared`)이라 재시작에 관리자 암호가 필요: `sudo launchctl kickstart -k system/com.cloudflare.cloudflared`. 설정은 `/Users/wook/.cloudflared/config.yml`(수정 전 백업 `config.yml.bak-20261107`).
+
+**맥북 원격 접속 (현재 상태)**
+- **Cloudflare 터널 SSH**: `config.yml`에 `ssh.hion.cc -> ssh://localhost:22` 항목 추가, DNS(CNAME) 연결, cloudflared 재시작(2026-11-18)까지 반영됨. `https://ssh.hion.cc`는 Cloudflare Access 로그인으로 넘어감(302 확인) = 보호 걸림. Access 앱 `ssh-hion`, 정책 `me-only`(허용 이메일은 `dnr7350@gmail.com` 1개만 — **Everyone 절대 금지**).
+- 브라우저만으로 접속하는 방법(설치 불필요, 폰 가능): Cloudflare Zero Trust > Access controls > Applications > `ssh-hion` > Edit 에서 "Allow access through browser-based RDP, SSH, or VNC sessions"를 On(SSH 선택) 후 Save → `https://ssh.hion.cc` 에서 이메일 코드 인증 → 사용자 `wook` + 맥 로그인 암호. **사용자에게 켜라고 안내만 했고 실제로 켜졌는지·접속되는지는 확인 못 함.**
+- 대안(윈도우에 cloudflared 설치): `winget install --id Cloudflare.cloudflared` + `~/.ssh/config`에 `Host hion-mac / HostName ssh.hion.cc / User wook / ProxyCommand cloudflared access ssh --hostname %h`. 파워셀을 안 쓰는 사용자라 위 브라우저 방식을 우선 안내함.
+- 아직 안 한 보안 보강: SSH **키 로그인**으로 전환(접속 쪽에서 `ssh-keygen -t ed25519` → 공개 키(.pub)를 맥북 `~/.ssh/authorized_keys`에 등록 → 그 뒤 비밀번호 로그인 끄기는 sudo 필요). 지금은 맥 계정 암호로 로그인한다.
+- **Tailscale은 맥북에서 믿지 말 것**: 앱(standalone, 시스템 확장) 로그인이 재부팅 때마다(3회) 풀리고 그때마다 새 기기(`macbookpro`, `macbookpro-2`…)로 등록됐다. 원인 못 찾음(앱/CLI 로그인 모두 동일, 로그에 단서 없음). 이 상태에서 맥북의 Tailscale 주소(`100.87.216.31` 등)는 오프라인일 수 있다. 윈도우 PC의 Tailscale/RDP는 별개로 정상.
+
+**2026-11-08~10 장애와 원인 (재발 주의)**
+- 증상: 다른 PC에서 `hion.cc` → `/dashboard` 404. 원인: 11-08 자동배포에서 `@tiptap/*`가 맥북 `node_modules`에 없어 `next build`가 실패했고, 실패한 빌드가 `.next`를 반쯤 덮어씀(`BUILD_ID` 없음). 로그: `/Users/wook/.pm2/autodeploy.log`.
+- 복구: `npm install`이 `~/.npm` 캐시 일부가 root 소유라 EACCES → `npm install --cache <다른 폴더>`로 설치, `npm run build` 성공 확인 후 `pm2 restart hion`. **`~/.npm` 소유권 정리(`sudo chown -R $(id -u):$(id -g) ~/.npm`)는 사용자가 했는지 확인 못 함** — 안 했으면 다음 `package-lock.json` 변경 때 같은 실패가 날 수 있다.
+- 자동배포 스크립트(`/Users/wook/deploy-watch.sh`)는 "빌드 실패 시 이전 빌드로 계속 서비스"라고 돼 있으나 실제로는 `.next`가 깨졌다. 개선 후보: 별도 폴더에 빌드 후 교체, `package.json` 변경 시에도 `npm install`.
+
+**Bright Data (쿠팡 조사)**
+- 맥북 `/Users/wook/hion/.env.local`에 `BRIGHTDATA_API_KEY`와 `BRIGHTDATA_UNLOCKER_ZONE=hion_v2`를 2026-11-12에 넣고(키는 사용자가 파일에 직접 입력, 채팅에는 안 올림) `pm2 restart hion`. Bright Data `/request`를 직접 호출해 HTTP 200 확인함. **hion.cc 화면에서 "조사하기"가 실제로 되는지는 사용자 확인 대기.** 계정에 "Low balance" 경고와 과거 스로틀링 기록이 있음.
+- `.env.local`은 git 제외 파일이라 `git pull`/`git push`로 오가지 않는다. 맥북 파일에 직접 입력해야 한다.
+
 ## 남은 일 / 다음 세션 후보 (2026-11-20)
 
 1. **로켓그로스 요금표를 판매가 구간별로 확장** — 사용자가 WING에 로그인해 주면 입출고·배송 요금표를 읽어 `RgFeeTable`(지금은 사이즈당 1행)을 가격 구간 구조로 넓힌다. 로그인 전에는 "~원부터" 시작 요금이 기본값이고, 화면·기준표 이미지에도 그렇게 표시돼 있다.
