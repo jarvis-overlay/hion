@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { useMarginFields } from '@/lib/useMarginFields';
 import ShippingCostCalculator, { type ShippingCalcState, type ShippingDims } from '@/components/ShippingCostCalculator';
 import {
+  RG_PRESETS,
   RG_SIZES,
   classifyRocketGrowth,
   cloneDefaultTable,
@@ -14,6 +15,7 @@ import {
   type RgFeeTable,
   type RgSizeId,
 } from '@/lib/rocketGrowth';
+import { rgTableSvg, svgDataUrl } from '@/lib/rocketGrowthSvg';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
 
@@ -53,6 +55,7 @@ export function MarginDetailFields({
   const [dims, setDims] = useState<ShippingDims | null>(null);
   const [table, setTable] = useState<RgFeeTable>(() => cloneDefaultTable());
   const [tableMsg, setTableMsg] = useState('');
+  const [showTable, setShowTable] = useState(false);
   // 저장된 요금표는 브라우저에서만 읽을 수 있어서 화면이 뜬 뒤에 불러온다
   useEffect(() => {
     setTable(loadRgTable());
@@ -260,7 +263,16 @@ export function MarginDetailFields({
         />
 
         <div className="border-t border-paperLine pt-2 grid gap-1.5">
-          <span className="text-[11px] font-semibold text-inkSoft">로켓그로스 사이즈 유형 (세 변의 합 · 무게 중 큰 쪽)</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold text-inkSoft">로켓그로스 사이즈 유형 (세 변의 합 · 무게 중 큰 쪽)</span>
+            <button
+              type="button"
+              onClick={() => setShowTable(true)}
+              className="shrink-0 px-2 py-1 text-[11px] font-semibold border border-paperLine text-accent hover:bg-paper"
+            >
+              📋 기준표 보기
+            </button>
+          </div>
           {cls == null ? (
             <p className={suffixCls}>위 계산기의 &quot;박스 크기로 계산&quot;에 가로·세로·높이(와 무게)를 넣으면 사이즈 유형과 배송비가 자동으로 정해져요.</p>
           ) : cls.overLimit ? (
@@ -306,9 +318,23 @@ export function MarginDetailFields({
             <summary className="cursor-pointer text-accent">로켓그로스 요금표 확인·수정 (입출고비 + 배송비)</summary>
             <div className="mt-2 grid gap-1.5">
               <p className="leading-relaxed">
-                기본값은 쿠팡 공식 안내의 <strong>시작 요금(부가세 별도, 패션 카테고리 기준)</strong>이에요. 실제 요금은 카테고리·판매가·시점에 따라
-                달라서 윙(WING)의 로켓그로스 요금표대로 고쳐 쓰세요. 이 브라우저에 저장돼요.
+                기본값은 쿠팡 공식 공개 페이지의 <strong>시작 요금(&quot;~원부터&quot;, 부가세 별도)</strong>이에요. 공식 페이지끼리도 배송비 표기가 달라서
+                (패션·생활필수품 안내 1,125원~ / 일반 비용 안내 1,350원~) 위 버튼으로 고를 수 있어요. 실제 요금은 카테고리·판매가에 따라 달라서
+                윙(WING) 로그인 후 &quot;로켓그로스 비용&quot; 표대로 고쳐 쓰세요. 이 브라우저에 저장돼요.
               </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span>공식 시작 요금 불러오기:</span>
+                {RG_PRESETS.map((pr) => (
+                  <button
+                    key={pr.id}
+                    type="button"
+                    onClick={() => updateTable({ ...table, fees: JSON.parse(JSON.stringify(pr.fees)) })}
+                    className="px-2 py-0.5 border border-paperLine text-accent"
+                  >
+                    {pr.name}
+                  </button>
+                ))}
+              </div>
               <div className="grid grid-cols-[4rem_1fr_1fr_4.5rem] gap-1 items-center">
                 <span />
                 <span className="text-[10px]">입출고비(원)</span>
@@ -348,7 +374,87 @@ export function MarginDetailFields({
           </details>
         </div>
       </div>
+      {showTable && <RgTableModal table={table} highlight={cls?.id ?? null} onClose={() => setShowTable(false)} />}
     </>
+  );
+}
+
+// 사이즈 구분 기준 + 입출고비·배송비를 한 장의 표 이미지로 보여준다. 현재 상품의 사이즈 유형 열은 빨간 테두리로 표시.
+function RgTableModal({ table, highlight, onClose }: { table: RgFeeTable; highlight: RgSizeId | null; onClose: () => void }) {
+  const [msg, setMsg] = useState('');
+  const svg = rgTableSvg(
+    table,
+    highlight,
+    '입출고/배송 요금은 상품 카테고리·최종 판매가에 따라 달라요. 표의 금액은 이 화면의 요금표(수정 가능)예요.' + (table.vat ? ' 부가세 10% 포함.' : ' 부가세 별도.')
+  );
+  const url = svgDataUrl(svg);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // 이미지(PNG)로 저장: SVG를 캔버스에 그려서 내려받는다
+  function savePng() {
+    setMsg('');
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('canvas');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            setMsg('이미지로 저장하지 못했어요. 화면을 캡처해서 쓰세요.');
+            return;
+          }
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = '로켓그로스_사이즈_요금표.png';
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }, 'image/png');
+      } catch {
+        setMsg('이미지로 저장하지 못했어요. 화면을 캡처해서 쓰세요.');
+      }
+    };
+    img.onerror = () => setMsg('이미지로 저장하지 못했어요. 화면을 캡처해서 쓰세요.');
+    img.src = url;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-3"
+      role="dialog"
+      aria-label="로켓그로스 사이즈·요금 기준표"
+      onClick={onClose}
+    >
+      <div className="bg-white max-w-[960px] w-full max-h-[92vh] overflow-auto p-3 grid gap-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-ink">로켓그로스 사이즈 · 요금 기준표</span>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={savePng} className="px-2 py-1 text-[11px] font-semibold border border-paperLine text-accent">
+              이미지로 저장
+            </button>
+            <button type="button" onClick={onClose} className="px-2 py-1 text-[11px] font-semibold border border-paperLine text-inkSoft">
+              닫기
+            </button>
+          </div>
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt="로켓그로스 사이즈 유형과 입출고비·배송비 기준표" className="w-full h-auto border border-paperLine" />
+        {msg && <p className="text-[11px] text-warn">{msg}</p>}
+      </div>
+    </div>
   );
 }
 

@@ -136,6 +136,29 @@ export const RG_DEFAULT_TABLE: RgFeeTable = {
   vat: false,
 };
 
+// 쿠팡 공식 공개 페이지 두 곳의 "시작 요금"(2026-11-20 확인). 같은 시점인데 배송비 표기가 달라서(카테고리·판매가별 최종 금액은 WING 로그인 안쪽 표에만 있다) 둘 다 프리셋으로 둔다.
+//  - 'general': marketplace.coupang.com/rocketgrowth-fee-after-zerocostpromotion ("로켓그로스 비용/수수료")
+//  - 'fashion': marketplace.coupang.com/rocket-growth/product-categories/clothes · core-fashion(생활 필수품) 안내
+export const RG_PRESETS: { id: 'general' | 'fashion'; name: string; fees: RgFeeTable['fees'] }[] = [
+  {
+    id: 'fashion',
+    name: '패션·생활필수품 안내',
+    fees: RG_DEFAULT_TABLE.fees,
+  },
+  {
+    id: 'general',
+    name: '일반 비용 안내',
+    fees: {
+      xs: { inout: 600, delivery: 1350 },
+      s: { inout: 650, delivery: 1550 },
+      m: { inout: 1250, delivery: 2100 },
+      l1: { inout: 1375, delivery: 2200 },
+      l2: { inout: 1375, delivery: 4100 },
+      xl: { inout: 1375, delivery: 5600 },
+    },
+  },
+];
+
 export function cloneDefaultTable(): RgFeeTable {
   return { fees: Object.fromEntries(RG_SIZES.map((s) => [s.id, { ...RG_DEFAULT_TABLE.fees[s.id] }])) as RgFeeTable['fees'], vat: RG_DEFAULT_TABLE.vat };
 }
