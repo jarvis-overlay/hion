@@ -57,6 +57,21 @@
 
 **확인 못 한 것**: 실제로 다른 기기에서 접속해 본 것(지금 이 PC 안에서 설정·서비스·포트만 읽음), 공유기/ISP 쪽은 Tailscale을 쓰면 필요 없지만 확인 안 함, 위 3번 접속 쪽 기기 상태.
 
+## 이 PC(jarvis)에서 다른 기기로 나가는 접속 (2026-11-20 점검, 읽기 전용)
+
+**지금 이 PC에 설정된 것**
+- OpenSSH 클라이언트(`ssh.exe`)는 Windows 기본으로 있음.
+- **`cloudflared` 없음, `~/.ssh` 폴더·키·config 없음** → 지금은 이 PC에서 **맥북으로 SSH 접속이 설정돼 있지 않다.**
+- 원격 데스크톱(`mstsc`) 접속 기록: `172.24.53.34`, `172.24.53.37`, `172.24.53.38` (사설 IP, 어떤 기기인지는 확인 못 함 — 맥북 주소 아님).
+- Tailscale로는 맥북이 오프라인이라(맥북 절 참고) 맥북에 못 들어감. 다른 Windows PC(`desktop-29mnnvq`, `kw`)는 켜져 있고 Tailscale이 로그인돼 있으면 RDP로 접속 가능.
+
+**이 PC에서 맥북에 들어가는 방법 (둘 중 하나, 아직 아무것도 실행 안 함)**
+1. **브라우저(설치 불필요, 우선)**: Cloudflare Zero Trust에서 `ssh-hion` 앱의 "browser-based SSH"를 켠 뒤(아래 맥북 절 참고) `https://ssh.hion.cc` → 이메일 코드 인증 → 사용자 `wook` + 맥 로그인 암호.
+2. **터미널 SSH**: `winget install --id Cloudflare.cloudflared` 후 `%USERPROFILE%\.ssh\config`에
+   `Host hion-mac` / `HostName ssh.hion.cc` / `User wook` / `ProxyCommand cloudflared access ssh --hostname %h` 추가 → `ssh hion-mac`. 첫 접속 때 브라우저 Cloudflare Access 인증이 뜸. (`~/.ssh` 폴더가 없으니 먼저 만들어야 함)
+
+맥북에서 할 일(자동배포 로그 `tail -30 /Users/wook/.pm2/autodeploy.log` 확인, `pm2 restart hion` 등)은 위 접속이 되어야 이 PC에서 할 수 있다. 접속은 **한 번도 시험해 보지 못함.**
+
 ## 운영 서버(맥북) 원격 접속·운영 메모 (2026-11-20 기록, 맥북 Claude Code 세션)
 
 위 "원격 접속" 절은 **윈도우 PC(jarvis)** 이야기다. 이 절은 **운영 서버인 맥북**(`hion.cc`) 쪽이다.
