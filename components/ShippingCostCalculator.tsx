@@ -32,6 +32,7 @@ export interface ShippingCalcState {
   length: string;
   width: string;
   height: string;
+  weight?: string; // 개당 무게(kg) - 로켓그로스 사이즈 유형 판정용 (예전에 저장된 값엔 없음)
   quantity: string;
   extraFees: { label: string; amount: string; basis: FeeBasis }[];
 }
@@ -72,12 +73,27 @@ function loadFeeDefaults(): DefaultFee[] {
 // 고정 항목 몇 개를 미리 박아두는 대신 자유롭게 행을 추가하고 항목명은
 // 자주 쓰는 프리셋 중에서 고르거나 직접 입력, 금액은 항상 직접 입력하는
 // 리스트 방식으로 만들었다.
+export interface ShippingDims {
+  length: number;
+  width: number;
+  height: number;
+  weightKg: number | null;
+}
+
 export default function ShippingCostCalculator({
   onApply,
   initial,
+  defaultOpen = false,
+  onDimsChange,
+  onPerUnitChange,
 }: {
   onApply: (totalKrw: number) => void;
   initial?: ShippingCalcState | null;
+  defaultOpen?: boolean; // 처음부터 펼쳐서 크기·무게를 바로 입력하게 한다
+  // 크기(가로·세로·높이·무게)가 바뀔 때마다 알려준다 - 박스 크기 모드가 아니면 null
+  onDimsChange?: (dims: ShippingDims | null) => void;
+  // 개당 해외배송비가 바뀔 때마다 알려준다 (자동 반영용)
+  onPerUnitChange?: (perUnitKrw: number) => void;
 }) {
   const presetListId = useId();
   const rowIdCounter = useRef(0);
@@ -94,13 +110,14 @@ export default function ShippingCostCalculator({
       !!initial.height ||
       initial.extraFees.some((f) => f.amount));
 
-  const [open, setOpen] = useState(hasInitial);
+  const [open, setOpen] = useState(hasInitial || defaultOpen);
   const [mode, setMode] = useState<CbmMode>(initial?.mode || 'dims');
 
   const [cbmDirect, setCbmDirect] = useState(initial?.cbmDirect || '');
   const [length, setLength] = useState(initial?.length || '');
   const [width, setWidth] = useState(initial?.width || '');
   const [height, setHeight] = useState(initial?.height || '');
+  const [weight, setWeight] = useState(initial?.weight || '');
   const [quantity, setQuantity] = useState(initial?.quantity || '1');
 
   // 지연 초기화(함수형 초기값)로 넣어야 nextRowId()가 최초 렌더에서 딱
@@ -223,9 +240,31 @@ export default function ShippingCostCalculator({
 
   const inputCls = 'border border-paperLine bg-white px-2 py-1.5 text-xs font-mono w-full';
 
+  // 부모에게 크기·개당 금액을 알린다 (콜백은 매 렌더 새로 만들어지므로 ref로 최신 것만 쓰고, 값이 바뀔 때만 호출)
+  const dimsCb = useRef(onDimsChange);
+  dimsCb.current = onDimsChange;
+  const perUnitCb = useRef(onPerUnitChange);
+  perUnitCb.current = onPerUnitChange;
+  useEffect(() => {
+    dimsCb.current?.(
+      mode === 'dims'
+        ? {
+            length: parseFloat(length) || 0,
+            width: parseFloat(width) || 0,
+            height: parseFloat(height) || 0,
+            weightKg: weight === '' ? null : parseFloat(weight) || null,
+          }
+        : null
+    );
+  }, [mode, length, width, height, weight]);
+  const perUnitRounded = Math.round(perUnit);
+  useEffect(() => {
+    perUnitCb.current?.(perUnitRounded);
+  }, [perUnitRounded]);
+
   // 계산기 자체가 접혀있어도(open=false) 이 hidden input은 항상 폼에 남아있어야
   // 다시 열지 않고 그냥 저장해도 입력값이 안 사라진다.
-  const hasContent = hasInitial || cbmDirect || length || width || height || extraFees.some((f) => f.amount);
+  const hasContent = hasInitial || cbmDirect || length || width || height || weight || extraFees.some((f) => f.amount);
   const calcStateHiddenInput = (
     <input
       type="hidden"
@@ -238,6 +277,7 @@ export default function ShippingCostCalculator({
               length,
               width,
               height,
+              weight,
               quantity,
               extraFees: extraFees.map(({ label, amount, basis }) => ({ label, amount, basis })),
             } as ShippingCalcState)
@@ -293,7 +333,7 @@ export default function ShippingCostCalculator({
       </div>
 
       {mode === 'dims' ? (
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
           <div>
             <label className="text-[10px] text-inkSoft">가로(cm)</label>
             <input value={length} onChange={(e) => setLength(e.target.value)} type="number" placeholder="0" className={inputCls} />
@@ -307,7 +347,11 @@ export default function ShippingCostCalculator({
             <input value={height} onChange={(e) => setHeight(e.target.value)} type="number" placeholder="0" className={inputCls} />
           </div>
           <div>
-            <label className="text-[10px] text-inkSoft">수량</label>
+            <label className="text-[10px] text-inkSoft">무게(kg)</label>
+            <input value={weight} onChange={(e) => setWeight(e.target.value)} type="number" step="0.01" placeholder="0" className={inputCls} />
+          </div>
+          <div>
+            <label className="text-[10px] text-inkSoft">수량(선적)</label>
             <input value={quantity} onChange={(e) => setQuantity(e.target.value)} type="number" placeholder="1" className={inputCls} />
           </div>
         </div>

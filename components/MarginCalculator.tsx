@@ -21,6 +21,7 @@ function badgeClass(pct: number) {
 // 다르다.
 export default function MarginCalculator({ entries }: { entries: any[] }) {
   const [name, setName] = useState('');
+  const [resetKey, setResetKey] = useState(0); // 저장 뒤 입력을 비울 때 크기·자동 반영 상태도 같이 비우려고 블록을 새로 띄운다
   const f = useMarginFields();
   const [isPending, startTransition] = useTransition();
 
@@ -58,6 +59,7 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
       });
       setName('');
       f.reset();
+      setResetKey((k) => k + 1);
     });
   }
 
@@ -104,7 +106,7 @@ export default function MarginCalculator({ entries }: { entries: any[] }) {
 
             <FxCalculator onApply={(krw) => f.setCost(String(Math.round(krw)))} />
 
-            <MarginDetailFields fields={f} />
+            <MarginDetailFields key={resetKey} fields={f} />
           </div>
         </div>
 
