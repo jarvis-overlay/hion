@@ -748,18 +748,57 @@ export async function composeSizeTableSection(table: SizeTable, palette?: BrandP
   const restW = (tableW - firstW) / (n - 1);
   const colW = (i: number) => (i === 0 ? firstW : restW);
 
-  // 가장 긴 칸이 칸 폭에 들어오도록 글자 크기를 정한다 (한 표는 한 가지 크기로 통일)
-  let size = n <= 4 ? 26 : n <= 6 ? 23 : 20;
-  const fits = (s: number) => {
+  // 칸 글자를 칸 폭에 맞춰 줄바꿈한다 (공백 기준, 공백 없는 긴 단어는 글자 단위로 자른다)
+  const wrapCell = (text: string, font: string, s: number, maxW: number): string[] => {
     const c = mctx();
-    c.font = `${s}px ${FONT_BOLD}`;
-    const cells = [t.headers, ...t.rows];
-    return cells.every((row) => row.every((v, i) => c.measureText(v).width <= colW(i) - 16));
+    c.font = `${s}px ${font}`;
+    if (!text || c.measureText(text).width <= maxW) return [text];
+    const out: string[] = [];
+    let cur = '';
+    for (const word of text.split(' ')) {
+      const trial = cur ? `${cur} ${word}` : word;
+      if (c.measureText(trial).width <= maxW) {
+        cur = trial;
+        continue;
+      }
+      if (cur) {
+        out.push(cur);
+        cur = '';
+      }
+      if (c.measureText(word).width <= maxW) {
+        cur = word;
+        continue;
+      }
+      for (const ch of [...word]) {
+        if (!cur || c.measureText(cur + ch).width <= maxW) cur += ch;
+        else {
+          out.push(cur);
+          cur = ch;
+        }
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
   };
-  while (size > 14 && !fits(size)) size -= 1;
+  const cellFont = (isHead: boolean, i: number) => (isHead || i === 0 ? FONT_EXTRABOLD : FONT_BOLD);
+  const layoutAt = (s: number) => {
+    const head = t.headers.map((h, i) => wrapCell(h, cellFont(true, i), s, colW(i) - 16));
+    const body = t.rows.map((r) => r.map((v, i) => wrapCell(v, cellFont(false, i), s, colW(i) - 16)));
+    const maxLines = Math.max(...head.map((l) => l.length), ...body.flat().map((l) => l.length));
+    return { head, body, maxLines };
+  };
 
-  const rowH = Math.round(size * 2.5);
-  const headH = Math.round(rowH * 1.1);
+  // 한 줄에 들어오게 글자 크기를 줄여 보고(최소 18), 그래도 안 되면 긴 칸을 줄바꿈한다(가능하면 2줄 이내, 최소 16)
+  let size = n <= 4 ? 26 : n <= 6 ? 23 : 20;
+  while (size > 18 && layoutAt(size).maxLines > 1) size -= 1;
+  while (size > 16 && layoutAt(size).maxLines > 2) size -= 1;
+  const lay = layoutAt(size);
+
+  // 줄 수에 따라 행 높이를 정한다 (한 줄이면 예전과 같은 높이)
+  const heightFor = (lines: number, scale: number) =>
+    lines <= 1 ? Math.round(size * 2.5 * scale) : Math.round((size * 1.3 * lines + size * 1.3) * scale);
+  const headH = heightFor(Math.max(...lay.head.map((l) => l.length)), 1.1);
+  const rowHs = lay.body.map((r) => heightFor(Math.max(...r.map((l) => l.length)), 1));
   const title = t.title || '사이즈표';
   const noteText = t.note || '';
 
@@ -768,7 +807,7 @@ export async function composeSizeTableSection(table: SizeTable, palette?: BrandP
   const noteLines = noteText ? wrapBalanced(parseGlyphs(noteText), noteSt, tableW) : [];
   const topPad = 88;
   const titleH = 4 + 22 + 16 + 24 + 8 + 40; // 바 + 영문 + 제목
-  const tableH = headH + rowH * t.rows.length;
+  const tableH = headH + rowHs.reduce((a, b) => a + b, 0);
   const noteH = noteLines.length ? 28 + noteLines.length * 30 : 0;
   const H = even(topPad + titleH + 40 + tableH + noteH + 88);
 
@@ -806,6 +845,12 @@ export async function composeSizeTableSection(table: SizeTable, palette?: BrandP
 
   // 표
   const x0 = marginX;
+  const lineH = Math.round(size * 1.3);
+  // 칸 안에 줄들을 세로 가운데로 그린다
+  const drawCell = (lines: string[], cxMid: number, top: number, h: number) => {
+    const startY = top + h / 2 - ((lines.length - 1) * lineH) / 2 + 1;
+    lines.forEach((ln, k) => ctx.fillText(ln, cxMid, startY + k * lineH));
+  };
   ctx.fillStyle = headFill;
   ctx.fillRect(x0, y, tableW, headH);
   ctx.font = `${size}px ${FONT_EXTRABOLD}`;
@@ -813,24 +858,25 @@ export async function composeSizeTableSection(table: SizeTable, palette?: BrandP
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   let cx = x0;
-  t.headers.forEach((h, i) => {
-    ctx.fillText(h, cx + colW(i) / 2, y + headH / 2 + 1);
+  lay.head.forEach((lines, i) => {
+    drawCell(lines, cx + colW(i) / 2, y, headH);
     cx += colW(i);
   });
   y += headH;
-  t.rows.forEach((row, ri) => {
+  lay.body.forEach((row, ri) => {
+    const rh = rowHs[ri];
     ctx.fillStyle = ri % 2 === 0 ? '#ffffff' : '#f6f5f3';
-    ctx.fillRect(x0, y, tableW, rowH);
+    ctx.fillRect(x0, y, tableW, rh);
     let rx = x0;
-    row.forEach((v, i) => {
+    row.forEach((lines, i) => {
       ctx.font = `${size}px ${i === 0 ? FONT_EXTRABOLD : FONT_BOLD}`;
       ctx.fillStyle = i === 0 ? '#1c1c1c' : 'rgba(28,28,28,0.78)';
-      ctx.fillText(v, rx + colW(i) / 2, y + rowH / 2 + 1);
+      drawCell(lines, rx + colW(i) / 2, y, rh);
       rx += colW(i);
     });
     ctx.fillStyle = 'rgba(0,0,0,0.08)';
-    ctx.fillRect(x0, y + rowH - 1, tableW, 1);
-    y += rowH;
+    ctx.fillRect(x0, y + rh - 1, tableW, 1);
+    y += rh;
   });
   // 표 바깥 위/아래 선
   ctx.fillStyle = headFill;

@@ -295,7 +295,7 @@ export interface SizeTableData {
   note?: string;
 }
 
-export const SIZE_TABLE_LIMITS = { maxCols: 8, maxRows: 14, maxCell: 14 };
+export const SIZE_TABLE_LIMITS = { maxCols: 8, maxRows: 14, maxCell: 30 };
 export const DEFAULT_SIZE_NOTE = '※ 측정 방법에 따라 1~3cm 정도 오차가 있을 수 있습니다.';
 
 export function normalizeSizeTable(t: Partial<SizeTableData> | null | undefined): SizeTableData | null {
