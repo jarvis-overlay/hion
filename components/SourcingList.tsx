@@ -172,7 +172,7 @@ function aggregateMarketSize(item: any): 'high' | 'mid' | 'low' | null {
   return best;
 }
 
-// 카드 "수정": 상품명·링크·MOQ·메모만 고친다. 금액 정보(판매가·원가·수수료·배송비 등)는 카드의 "마진·배송" 탭에서
+// 카드 "수정": 상품명·링크·MOQ·메모만 고친다. 금액 정보(판매가·원가·수수료·배송비 등)는 카드의 "제품 마진 정보" 탭에서
 // 따로 입력·저장한다 (예전엔 이 폼 하나에 전부 있어서 길고 복잡했다).
 function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -232,7 +232,7 @@ function EditForm({ item, onDone }: { item: any; onDone: () => void }) {
           className="border border-paperLine bg-white px-3 py-2 text-sm"
         />
       </label>
-      <p className="text-[11px] text-inkSoft">판매가·원가·수수료·배송비 같은 금액 정보는 카드의 &quot;마진·배송&quot; 탭에서 입력해요.</p>
+      <p className="text-[11px] text-inkSoft">판매가·원가·수수료·배송비 같은 금액 정보는 카드의 &quot;제품 마진 정보&quot; 탭에서 입력해요.</p>
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">저장 실패: {error}</p>}
       <div className="flex gap-2">
         <button type="submit" disabled={isPending} className="btn-primary px-4 py-2 text-xs font-semibold disabled:opacity-50">
@@ -1658,7 +1658,7 @@ export default function SourcingList({
                   </div>
                 </div>
 
-                {/* 금액 요약: 입력은 "마진·배송" 탭에서, 카드에는 핵심만 한눈에 */}
+                {/* 금액 요약: 입력은 "제품 마진 정보" 탭에서, 카드에는 핵심만 한눈에 */}
                 {moneySum.hasAnything || it.moq ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
                     {it.price != null && <StatBox label="판매가" value={it.price.toLocaleString() + '원'} />}
@@ -1687,7 +1687,7 @@ export default function SourcingList({
                     onClick={() => setTabByItem((prev) => ({ ...prev, [it.id]: 'money' }))}
                     className="text-xs text-accent font-semibold underline text-left w-fit"
                   >
-                    금액 정보를 입력해 주세요 (마진·배송 탭)
+                    금액 정보를 입력해 주세요 (제품 마진 정보 탭)
                   </button>
                 )}
 
@@ -1761,13 +1761,25 @@ export default function SourcingList({
                   {(
                     [
                       {
+                        key: 'comparisons' as CardTab,
+                        label: 'AI 시장조사',
+                        summary: comparisonCount > 0 ? `${comparisonCount}개${it.marketSize ? ` · 시장 ${MARKET_SIZE_LABEL[it.marketSize]}` : ''}` : '없음',
+                        tone: '',
+                      },
+                      {
                         key: 'money' as CardTab,
-                        label: '마진·배송',
+                        label: '제품 마진 정보',
                         summary:
                           moneySum.marginPct != null
                             ? `마진 ${moneySum.marginPct.toFixed(1)}%${moneySum.sizeName ? ` · ${moneySum.sizeName}` : ''}${moneySum.overLimit ? ' · 입고 불가' : ''}`
                             : '미입력',
                         tone: moneySum.marginPct == null ? '' : moneySum.marginPct < 0 ? 'text-red-700' : moneySum.marginPct < 15 ? 'text-warn' : 'text-profit',
+                      },
+                      {
+                        key: 'checklist' as CardTab,
+                        label: '소싱 체크리스트',
+                        summary: `${chkSum.checked}/${chkSum.total} 완료`,
+                        tone: '',
                       },
                       {
                         key: 'options' as CardTab,
@@ -1785,18 +1797,6 @@ export default function SourcingList({
                           supSum.count > 0
                             ? `${supSum.count}곳${supSum.cheapest ? ` · 최저 ${CURRENCY_LABEL[supSum.cheapest.currency] || ''}${supSum.cheapest.price.toLocaleString()}` : ''}`
                             : '없음',
-                        tone: '',
-                      },
-                      {
-                        key: 'comparisons' as CardTab,
-                        label: '비교 상품군',
-                        summary: comparisonCount > 0 ? `${comparisonCount}개${it.marketSize ? ` · 시장 ${MARKET_SIZE_LABEL[it.marketSize]}` : ''}` : '없음',
-                        tone: '',
-                      },
-                      {
-                        key: 'checklist' as CardTab,
-                        label: '소싱 체크리스트',
-                        summary: `${chkSum.checked}/${chkSum.total} 완료`,
                         tone: '',
                       },
                     ]
@@ -1830,7 +1830,7 @@ export default function SourcingList({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-accent">
                         ▸{' '}
-                        {{ money: '마진·배송', options: '옵션 구성', suppliers: '공급처 비교', comparisons: '비교 상품군', checklist: '소싱 체크리스트' }[activeTab]}
+                        {{ money: '제품 마진 정보', options: '옵션 구성', suppliers: '공급처 비교', comparisons: 'AI 시장조사', checklist: '소싱 체크리스트' }[activeTab]}
                       </span>
                       <button
                         type="button"
