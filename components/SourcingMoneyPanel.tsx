@@ -52,7 +52,7 @@ export default function SourcingMoneyPanel({ item, onDone }: { item: any; onDone
       }
       className="grid gap-3"
     >
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-3xl">
         <label className="grid gap-0.5">
           <span className="text-[10px] font-semibold text-inkSoft">판매가 (원)</span>
           <input
@@ -90,15 +90,20 @@ export default function SourcingMoneyPanel({ item, onDone }: { item: any; onDone
         </label>
       </div>
 
-      <FxCalculator
-        onApply={(krw) => f.setCost(String(Math.round(krw)))}
-        initial={{ currency: item.cost_fx_currency, amount: item.cost_fx_amount, rate: item.cost_fx_rate }}
-      />
+      <div className="max-w-3xl">
+        <FxCalculator
+          onApply={(krw) => f.setCost(String(Math.round(krw)))}
+          initial={{ currency: item.cost_fx_currency, amount: item.cost_fx_amount, rate: item.cost_fx_rate }}
+        />
+      </div>
 
-      <MarginDetailFields fields={f} intlShippingCalcInitial={intlShippingCalcInitial} feeCategoryInitial={item.fee_category} />
+      {/* 넓은 화면(xl 이상)에선 ① 마진 계산과 ② 해외배송을 나란히, 좁은 화면에선 위아래로 */}
+      <div className="grid gap-3 xl:grid-cols-2 items-start">
+        <MarginDetailFields fields={f} intlShippingCalcInitial={intlShippingCalcInitial} feeCategoryInitial={item.fee_category} />
+      </div>
 
       {f.price && (
-        <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1">
+        <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1 max-w-3xl">
           <div className="flex items-center justify-between">
             <span className="text-inkSoft">예상 마진 (광고비 적용)</span>
             <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>

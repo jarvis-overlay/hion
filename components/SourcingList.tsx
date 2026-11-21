@@ -1660,7 +1660,7 @@ export default function SourcingList({
 
                 {/* 금액 요약: 입력은 "제품 마진 정보" 탭에서, 카드에는 핵심만 한눈에 */}
                 {moneySum.hasAnything || it.moq ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-1.5">
                     {it.price != null && <StatBox label="판매가" value={it.price.toLocaleString() + '원'} />}
                     {it.cost != null && <StatBox label="매입 원가" value={it.cost.toLocaleString() + '원'} />}
                     {moneySum.marginPct != null && (
