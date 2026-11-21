@@ -264,6 +264,9 @@ export default function ShippingCostCalculator({
   const vatValue = taxSupported && taxOn ? (vatManual ? Math.max(0, parseFloat(vatInput) || 0) : autoVat) : 0;
   const dutyValue = taxSupported && taxOn ? (dutyManual ? Math.max(0, parseFloat(dutyInput) || 0) : autoDuty) : 0;
   const taxTotal = vatValue + dutyValue;
+  // 부가서비스에 예전 방식("관·부가세" 같은 이름)으로 직접 넣은 줄 - 자동 계산을 켠 채로 두면 이중으로 더해지므로 알려준다
+  const isTaxRowLabel = (label: string) => /관\s*[·.]?\s*부가세|관세|부가세/.test(label);
+  const dupTaxRows = taxSupported && taxOn ? extraFees.filter((r) => isTaxRowLabel(r.label)) : [];
 
   const shipmentTotal = freight + extrasTotalBasis + taxTotal;
   const perUnit = (qty > 0 ? shipmentTotal / qty : shipmentTotal) + extrasPerUnitBasis;
@@ -422,6 +425,20 @@ export default function ShippingCostCalculator({
                 <p className="text-[11px] text-inkSoft">
                   매입액 = 매입원가 {fmt(unitCost || 0)} × 선적 수량 {qty}개 = <span className="font-mono text-ink">{fmt(taxBase)}</span>
                 </p>
+              )}
+              {dupTaxRows.length > 0 && (
+                <div className="text-[11px] text-warn bg-warnBg px-2 py-1.5 grid gap-1">
+                  <span>
+                    아래 부가서비스에 &quot;{dupTaxRows.map((r) => r.label).join('·')}&quot; 줄이 있어요. 자동 계산과 같이 쓰면 관세·부가세가 두 번 들어가요.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setExtraFees((rows) => rows.filter((r) => !isTaxRowLabel(r.label)))}
+                    className="text-accent underline text-left"
+                  >
+                    그 줄 지우기 (그 뒤 &quot;지금 목록을 기본값으로 저장&quot;을 누르면 다음부터 안 나와요)
+                  </button>
+                </div>
               )}
               <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-1.5 gap-y-1">
                 <span className="text-inkSoft">부가세</span>
