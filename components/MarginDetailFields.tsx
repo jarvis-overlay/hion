@@ -37,11 +37,16 @@ export function MarginDetailFields({
   compact = false,
   intlShippingCalcInitial,
   feeCategoryInitial,
+  quantity,
+  onQuantityChange,
 }: {
   fields: Fields;
   compact?: boolean;
   intlShippingCalcInitial?: ShippingCalcState | null;
   feeCategoryInitial?: string | null; // 저장돼 있던 쿠팡 수수료 카테고리
+  // 발주 회차 폼처럼 수량을 바깥에서 관리할 때만 넘긴다 (해외배송 계산기의 수량 입력창과 연결됨)
+  quantity?: string;
+  onQuantityChange?: (v: string) => void;
 }) {
   const inputCls = compact
     ? 'border border-paperLine bg-white px-2 py-1.5 text-xs font-mono'
@@ -321,6 +326,8 @@ export function MarginDetailFields({
           onDimsChange={setDims}
           onPerUnitChange={setPerUnit}
           initial={intlShippingCalcInitial}
+          quantity={quantity}
+          onQuantityChange={onQuantityChange}
         />
 
         <div className="border-t border-paperLine pt-2 grid gap-1.5">

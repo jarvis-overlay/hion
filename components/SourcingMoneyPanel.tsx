@@ -3,37 +3,26 @@
 import { useState, useTransition } from 'react';
 import { updateSourcingMargin } from '@/app/dashboard/sourcing/list/actions';
 import { useMarginFields } from '@/lib/useMarginFields';
-import FxCalculator from '@/components/FxCalculator';
-import { MarginDetailFields } from '@/components/MarginDetailFields';
-import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
-
-const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
+import MarginFormBody from '@/components/MarginFormBody';
+import { marginInitFromRow } from '@/lib/marginRow';
 
 // 소싱 카드의 "마진·배송" 탭: 상품 "수정"을 열지 않고 금액 정보(판매가·원가·수수료·배송비·해외배송비)만 따로 입력·저장한다.
-export default function SourcingMoneyPanel({ item, onDone }: { item: any; onDone?: () => void }) {
+export default function SourcingMoneyPanel({
+  item,
+  onDone,
+  orderCount,
+  onGoOrders,
+}: {
+  item: any;
+  onDone?: () => void;
+  orderCount?: number; // 발주 이력이 있으면 맨 위에 "이 값은 기준(견적)" 안내를 보여준다
+  onGoOrders?: () => void;
+}) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const f = useMarginFields({
-    price: item.price,
-    cost: item.cost,
-    coupon: item.coupon,
-    importVat: item.import_vat,
-    // 저장돼 있던 수수료/광고비 금액에서 비율을 되살린다 (판매가가 있어야 가능, 없으면 기본 8.6%/10%)
-    feeRatePct:
-      item.price && item.coupang_fee != null
-        ? Number(((item.coupang_fee / (item.price - (item.coupon || 0))) * 100).toFixed(2))
-        : null,
-    adRatePct:
-      item.price && item.ad_cost != null
-        ? Number(((item.ad_cost / (item.price - (item.coupon || 0))) * 100).toFixed(2))
-        : null,
-    shipping: item.shipping,
-    intlShipping: item.intl_shipping,
-    etcCost: item.etc_cost,
-  });
-  const intlShippingCalcInitial: ShippingCalcState | null = item.intl_shipping_calc || null;
+  const f = useMarginFields(marginInitFromRow(item));
 
   return (
     <form
@@ -52,74 +41,17 @@ export default function SourcingMoneyPanel({ item, onDone }: { item: any; onDone
       }
       className="grid gap-3"
     >
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-3xl">
-        <label className="grid gap-0.5">
-          <span className="text-[10px] font-semibold text-inkSoft">판매가 (원)</span>
-          <input
-            name="price"
-            value={f.price}
-            onChange={(e) => f.setPrice(e.target.value)}
-            type="number"
-            step="0.01"
-            placeholder="0"
-            className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-          />
-        </label>
-        <label className="grid gap-0.5">
-          <span className="text-[10px] font-semibold text-inkSoft">매출부가세 (자동)</span>
-          <input
-            readOnly
-            name="output_vat"
-            value={f.price !== '' ? Math.round(f.outputVat) : ''}
-            placeholder="판매가 ÷ 11"
-            title="판매가 / 11로 자동 계산돼요"
-            className="border border-paperLine bg-paper text-inkSoft px-3 py-2 text-sm font-mono cursor-not-allowed"
-          />
-        </label>
-        <label className="grid gap-0.5">
-          <span className="text-[10px] font-semibold text-inkSoft">매입 원가 (원)</span>
-          <input
-            name="cost"
-            value={f.cost}
-            onChange={(e) => f.setCost(e.target.value)}
-            type="number"
-            step="0.01"
-            placeholder="0"
-            className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
-          />
-        </label>
-      </div>
-
-      <div className="max-w-3xl">
-        <FxCalculator
-          onApply={(krw) => f.setCost(String(Math.round(krw)))}
-          initial={{ currency: item.cost_fx_currency, amount: item.cost_fx_amount, rate: item.cost_fx_rate }}
-        />
-      </div>
-
-      {/* 넓은 화면(xl 이상)에선 ① 마진 계산과 ② 해외배송을 나란히, 좁은 화면에선 위아래로 */}
-      <div className="grid gap-3 xl:grid-cols-2 items-start">
-        <MarginDetailFields fields={f} intlShippingCalcInitial={intlShippingCalcInitial} feeCategoryInitial={item.fee_category} />
-      </div>
-
-      {f.price && (
-        <div className="rounded-md bg-paper px-3 py-2 text-sm grid gap-1 max-w-3xl">
-          <div className="flex items-center justify-between">
-            <span className="text-inkSoft">예상 마진 (광고비 적용)</span>
-            <span className={`font-mono font-semibold ${f.margin.profit < 0 ? 'text-red-700' : 'text-profit'}`}>
-              {(f.margin.profit < 0 ? '-' : '') + fmt(Math.abs(f.margin.profit))}
-              {f.margin.marginPct != null && ` (${f.margin.marginPct.toFixed(1)}%)`}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-inkSoft text-xs">예상 마진 (광고비 미적용)</span>
-            <span className="font-mono text-xs text-inkSoft">
-              {(f.pureProfit < 0 ? '-' : '') + fmt(Math.abs(f.pureProfit))}
-              {f.pureMarginPct != null && ` (${f.pureMarginPct.toFixed(1)}%)`}
-            </span>
-          </div>
-        </div>
+      {orderCount != null && orderCount > 0 && (
+        <p className="text-[11px] text-inkSoft bg-paper px-3 py-2 max-w-3xl">
+          이 값은 기준(견적)이에요. 실제 발주 기록은 발주 이력 탭에서 보세요.{' '}
+          {onGoOrders && (
+            <button type="button" onClick={onGoOrders} className="text-accent underline font-semibold">
+              발주 이력 탭으로 ({orderCount}회)
+            </button>
+          )}
+        </p>
       )}
+      <MarginFormBody f={f} item={item} />
 
       {error && <p className="text-xs text-warn bg-warnBg rounded-md px-3 py-2">저장 실패: {error}</p>}
       <div className="flex items-center gap-2">

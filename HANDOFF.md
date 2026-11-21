@@ -128,6 +128,15 @@
 3. **운영 확인(사용자)** — https://hion.cc 에서 Ctrl+Shift+R 후: 소싱 카드 탭(선택 탭 분홍 채움/한 번에 하나), "마진·배송" 탭 저장, 카테고리 입력 → 수수료 자동 입력(수동 수정 가능), 사이즈 입력 → 배송비 자동 반영, "기준표 보기", 썸네일 메인의 "패션의류·잡화 - 연출컷 유지". 모바일 폭도 확인.
 4. (제안만 한 것, 요청 전엔 하지 않음) 패키지 메인의 뱃지 색을 흰색 위주로 제한 / 카드에 카테고리 표시.
 
+## -27. 소싱 카드 "발주 이력" 탭 (2026-11-21) — **DB 마이그레이션 미적용(승인 대기)**
+
+- 목적: 같은 상품을 추가 발주할 때마다 후보를 새로 등록하지 않고, 한 카드 안에 회차(1차, 2차…)별 기록을 쌓아 수량별 개당 마진·총 마진을 비교. 탭 순서: AI 시장조사 / 제품 마진 정보 / **발주 이력** / 소싱 체크리스트 / 옵션 구성 / 공급처 비교.
+- **운영 DB에 아직 `sourcing_item_orders`가 없다** → 코드는 푸시됐지만 탭에 "발주 이력 기능 준비 중(DB 적용 전)"이 뜨고 다른 탭은 정상. 적용: `supabase/migrations/20261121112453_add_sourcing_item_orders.sql` 을 사용자 승인 후 `npx supabase db push --remote --yes`(이 PC에서 supabase login/link 필요할 수 있음). 적용 뒤 확인: 연속 추가 시 1,2차 번호, 삭제 후 번호, RLS(허용 안 된 계정 차단), 상품 삭제 시 cascade.
+- 설계 결정(사용자 확정): 회차마다 판매가 포함 값을 스냅샷으로 저장(기본 정보를 바꿔도 과거 회차는 안 바뀜), 새 회차는 직전 회차 값 복사(수량·발주일 비움, "복사됨" 표시), 기존 마진 값 자동 이전 없음(빈 이력에서 "현재 마진 정보로 1차 발주 만들기" 버튼으로 직접), 소싱 진행 단계 자동 변경 없음, 옵션 구성과 합치지 않음. 회차 번호는 DB 트리거(advisory lock)가 부여하고 삭제해도 재정렬하지 않음.
+- 구조: `lib/formData.ts`(numOrNull/jsonOrNull/marginRowFromFormData), `lib/marginRow.ts`(저장 금액→수수료율 역산 공용), `lib/orderSummary.ts`(회차 요약·합계·복사 초기값), `lib/shippingCalc.ts`의 `computeShippingPerUnit`(계산기와 복사가 공용), `app/dashboard/sourcing/list/orderActions.ts`(add/update/delete, 로그인 확인, 한국어 오류), `components/{MarginFormBody,SourcingOrderForm,SourcingOrdersPanel}.tsx`. 총 마진 = round(개당 마진) × 수량. 합계 줄: 총 수량·총 마진 합계·수량 가중평균 마진율. 수량은 회차 폼의 수량 칸 하나가 계산기 "선적 수량"과 공유(`ShippingCostCalculator`의 선택 prop `quantity`/`onQuantityChange`, prop 없으면 기존 동작).
+- 확인함: tsc, 순수 함수 테스트(스크래치패드), 임시 화면(headless)에서 표·수량 연동·복사 시나리오·상태별 문구, reviewer 2회·QA 1회(지적 11개 반영). 확인 못 함: 트리거·RLS·실제 insert/update/delete, 로그인 후 실제 카드 화면, 모바일 폭, `window.confirm` 흐름.
+- 남은 사소한 것: 계산기 버튼으로만 값을 바꾼 경우 "작성 중" 표시가 안 켜져 행 전환 시 확인창이 안 뜸 / 폼이 열린 채 다른 탭으로 가면 초안이 사라짐(다른 탭도 동일) / page.tsx 주석의 "병렬" 표현은 실제와 다름.
+
 ## -26. 소싱 카드 폭 정리 (2026-11-21)
 
 - 카드 위 금액 요약 칸: `auto-fit minmax(150px,1fr)`로 한 줄을 꽉 채움(예전엔 6칸 격자라 오른쪽이 비었음).

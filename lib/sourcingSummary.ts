@@ -1,5 +1,5 @@
 // 소싱 카드에서 탭(마진·배송 / 옵션 / 공급처 / 비교 상품군 / 체크리스트)별 "요약 한 줄"을 만드는 순수 함수.
-import { computeMargin } from '@/lib/marginCalc';
+import { computeMargin, type MarginResult } from '@/lib/marginCalc';
 import { classifyRocketGrowth } from '@/lib/rocketGrowth';
 
 const num = (v: unknown): number => {
@@ -22,8 +22,9 @@ export interface MoneySummary {
   hasAnything: boolean;
 }
 
-export function summarizeMoney(it: any): MoneySummary {
-  const m = computeMargin({
+// 저장된 마진 행(소싱 상품 / 발주 회차 공통 컬럼)에서 마진 계산 결과를 구한다.
+export function marginResultFromRow(it: any): MarginResult {
+  return computeMargin({
     price: it.price ?? null,
     coupon: it.coupon ?? null,
     cost: it.cost ?? null,
@@ -35,6 +36,10 @@ export function summarizeMoney(it: any): MoneySummary {
     adCost: it.ad_cost ?? null,
     etcCost: it.etc_cost ?? null,
   });
+}
+
+export function summarizeMoney(it: any): MoneySummary {
+  const m = marginResultFromRow(it);
   // 저장된 해외배송 계산기 값(박스 크기 모드)에서 사이즈 유형을 다시 구한다
   const calc = it.intl_shipping_calc;
   const cls =

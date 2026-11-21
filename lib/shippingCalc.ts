@@ -58,3 +58,49 @@ export const SHIPPING_EXTRA_FEE_PRESETS: ShippingExtraFeePreset[] = [
   { label: '관세사 수임료 (개인)', amount: 3650 },
   { label: '관세사 수임료 (사업자)', amount: 22000 },
 ];
+
+// ---- 해외배송비 계산기의 "개당 금액" 계산 (ShippingCostCalculator와 발주 회차 복사가 같이 쓴다) ----
+export interface ShippingCalcInput {
+  mode: 'direct' | 'dims';
+  cbmDirect: string;
+  length: string;
+  width: string;
+  height: string;
+  quantity: string;
+  extraFees: { label?: string; amount: string; basis: 'total' | 'perUnit' }[];
+  taxes?: { on: boolean; dutyRate: string; vatManual: boolean; vat: string; dutyManual: boolean; duty: string };
+}
+
+// unitCost(개당 매입원가)를 넘기면 관세·부가세 자동 계산 구역이 있는 것으로 본다 (taxes.on이 켜져 있을 때만 합산).
+// 수량은 calc.quantity 문자열을 쓴다(빈칸/0이면 1개로 계산). 부가세 = 매입액/11, 관세 = 매입액 x 관세율.
+export function computeShippingPerUnit(calc: ShippingCalcInput, unitCost?: number) {
+  const qty = Math.max(1, parseInt(calc.quantity) || 1);
+  const cbm =
+    calc.mode === 'direct'
+      ? parseFloat(calc.cbmDirect) || 0
+      : cbmFromDimensions(parseFloat(calc.length) || 0, parseFloat(calc.width) || 0, parseFloat(calc.height) || 0, qty);
+  const freight = computeLclFreightKrw(cbm);
+  // '전체 화물 기준' 항목은 해상운임과 합쳐서 수량으로 나누고, '개당' 항목은 이미 1개 기준이므로 그대로 더한다.
+  const extrasTotalBasis = calc.extraFees
+    .filter((r) => r.basis === 'total')
+    .reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+  const extrasPerUnitBasis = calc.extraFees
+    .filter((r) => r.basis === 'perUnit')
+    .reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+  const taxSupported = unitCost !== undefined;
+  const taxOn = !!calc.taxes?.on;
+  const taxBase = Math.max(0, unitCost || 0) * qty;
+  const dutyRateNum = Math.max(0, parseFloat(calc.taxes?.dutyRate ?? '8') || 0);
+  const autoVat = Math.round(taxBase / 11);
+  const autoDuty = Math.round((taxBase * dutyRateNum) / 100);
+  const vatValue = taxSupported && taxOn ? (calc.taxes!.vatManual ? Math.max(0, parseFloat(calc.taxes!.vat) || 0) : autoVat) : 0;
+  const dutyValue = taxSupported && taxOn ? (calc.taxes!.dutyManual ? Math.max(0, parseFloat(calc.taxes!.duty) || 0) : autoDuty) : 0;
+  const taxTotal = vatValue + dutyValue;
+  const shipmentTotal = freight + extrasTotalBasis + taxTotal;
+  const perUnit = shipmentTotal / qty + extrasPerUnitBasis;
+  const grandTotal = shipmentTotal + extrasPerUnitBasis * qty;
+  return {
+    qty, cbm, freight, extrasTotalBasis, extrasPerUnitBasis, taxSupported, taxBase,
+    autoVat, autoDuty, vatValue, dutyValue, taxTotal, shipmentTotal, perUnit, grandTotal,
+  };
+}

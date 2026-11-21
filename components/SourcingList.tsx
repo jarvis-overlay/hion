@@ -41,6 +41,8 @@ import CoupangResearchPanel from '@/components/CoupangResearchPanel';
 import HoverZoomImage from '@/components/HoverZoomImage';
 import MarginReverseCalc from '@/components/MarginReverseCalc';
 import SourcingMoneyPanel from '@/components/SourcingMoneyPanel';
+import SourcingOrdersPanel, { type OrdersStatus } from '@/components/SourcingOrdersPanel';
+import { summarizeOrders } from '@/lib/orderSummary';
 import { summarizeChecklist, summarizeMoney, summarizeOptions, summarizeSuppliers } from '@/lib/sourcingSummary';
 import NoteTimeline from '@/components/NoteTimeline';
 import CollapsibleText from '@/components/CollapsibleText';
@@ -1369,7 +1371,7 @@ function ComparisonsSection({ item }: { item: any }) {
   );
 }
 
-type CardTab = 'money' | 'options' | 'suppliers' | 'comparisons' | 'checklist';
+type CardTab = 'money' | 'orders' | 'options' | 'suppliers' | 'comparisons' | 'checklist';
 
 // 금액 요약 칸: 작은 이름표 + 큰 값 (+ 보조 값)
 function StatBox({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
@@ -1387,7 +1389,9 @@ export default function SourcingList({
   checklistTemplate,
   notes,
   noteCategories,
+  ordersStatus = 'ok',
 }: {
+  ordersStatus?: OrdersStatus; // 발주 이력(sourcing_item_orders)을 읽은 결과: 정상 / 테이블 없음 / 오류
   items: any[];
   checklistTemplate: any[];
   notes: any[];
@@ -1584,6 +1588,8 @@ export default function SourcingList({
             const comparisonCount = (it.sourcing_item_comparisons || []).length;
             const checklistCheckedCount = (it.sourcing_item_checklist || []).filter((c: any) => c.checked).length;
             const moneySum = summarizeMoney(it);
+            const orderRows = summarizeOrders(it.sourcing_item_orders || []);
+            const lastOrder = orderRows.length > 0 ? orderRows[orderRows.length - 1] : null;
             const optSum = summarizeOptions(it.sourcing_item_options || []);
             const supSum = summarizeSuppliers(it.sourcing_item_suppliers || []);
             const chkSum = summarizeChecklist(it, checklistTemplate);
@@ -1659,7 +1665,7 @@ export default function SourcingList({
                 </div>
 
                 {/* 금액 요약: 입력은 "제품 마진 정보" 탭에서, 카드에는 핵심만 한눈에 */}
-                {moneySum.hasAnything || it.moq ? (
+                {moneySum.hasAnything || it.moq || lastOrder ? (
                   <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-1.5">
                     {it.price != null && <StatBox label="판매가" value={it.price.toLocaleString() + '원'} />}
                     {it.cost != null && <StatBox label="매입 원가" value={it.cost.toLocaleString() + '원'} />}
@@ -1680,6 +1686,14 @@ export default function SourcingList({
                     )}
                     {moneySum.intlShipping != null && <StatBox label="해외배송비 (개당)" value={moneySum.intlShipping.toLocaleString() + '원'} />}
                     {it.moq && <StatBox label="MOQ" value={String(it.moq)} />}
+                    {lastOrder && (
+                      <StatBox
+                        label="발주 이력"
+                        value={`${orderRows.length}회${lastOrder.marginPct != null ? ` · 최근 ${lastOrder.marginPct.toFixed(1)}%` : ''}`}
+                        sub={`최근 ${lastOrder.roundNo}차 개당 마진 ${lastOrder.profit != null ? (lastOrder.profit < 0 ? '-' : '') + fmt(Math.abs(lastOrder.profit)) : '-'}`}
+                        tone={lastOrder.marginPct == null ? '' : lastOrder.marginPct < 0 ? 'text-red-700' : lastOrder.marginPct < 15 ? 'text-warn' : 'text-profit'}
+                      />
+                    )}
                   </div>
                 ) : (
                   <button
@@ -1757,7 +1771,7 @@ export default function SourcingList({
                 )}
 
                 {/* 탭: 선택된 탭은 색을 채워서 구분하고, 각 탭 아래에 그 내용의 요약을 보여준다. 한 번에 하나만 열린다 */}
-                <div role="tablist" className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 mt-1">
+                <div role="tablist" className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mt-1">
                   {(
                     [
                       {
@@ -1774,6 +1788,19 @@ export default function SourcingList({
                             ? `마진 ${moneySum.marginPct.toFixed(1)}%${moneySum.sizeName ? ` · ${moneySum.sizeName}` : ''}${moneySum.overLimit ? ' · 입고 불가' : ''}`
                             : '미입력',
                         tone: moneySum.marginPct == null ? '' : moneySum.marginPct < 0 ? 'text-red-700' : moneySum.marginPct < 15 ? 'text-warn' : 'text-profit',
+                      },
+                      {
+                        key: 'orders' as CardTab,
+                        label: '발주 이력',
+                        summary:
+                          ordersStatus === 'missing'
+                            ? '준비 중'
+                            : ordersStatus === 'error'
+                              ? '확인 불가'
+                              : lastOrder
+                              ? `${orderRows.length}회${lastOrder.marginPct != null ? ` · 최근 ${lastOrder.marginPct.toFixed(0)}%` : ''}`
+                              : '없음',
+                        tone: lastOrder?.marginPct == null ? '' : lastOrder.marginPct < 0 ? 'text-red-700' : lastOrder.marginPct < 15 ? 'text-warn' : 'text-profit',
                       },
                       {
                         key: 'checklist' as CardTab,
@@ -1830,7 +1857,7 @@ export default function SourcingList({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-accent">
                         ▸{' '}
-                        {{ money: '제품 마진 정보', options: '옵션 구성', suppliers: '공급처 비교', comparisons: 'AI 시장조사', checklist: '소싱 체크리스트' }[activeTab]}
+                        {{ money: '제품 마진 정보', orders: '발주 이력', options: '옵션 구성', suppliers: '공급처 비교', comparisons: 'AI 시장조사', checklist: '소싱 체크리스트' }[activeTab]}
                       </span>
                       <button
                         type="button"
@@ -1840,7 +1867,14 @@ export default function SourcingList({
                         닫기 ✕
                       </button>
                     </div>
-                    {activeTab === 'money' && <SourcingMoneyPanel item={it} />}
+                    {activeTab === 'money' && (
+                      <SourcingMoneyPanel
+                        item={it}
+                        orderCount={orderRows.length}
+                        onGoOrders={() => setTabByItem((prev) => ({ ...prev, [it.id]: 'orders' }))}
+                      />
+                    )}
+                    {activeTab === 'orders' && <SourcingOrdersPanel item={it} orders={it.sourcing_item_orders || []} status={ordersStatus} />}
                     {activeTab === 'options' && <OptionsSection item={it} />}
                     {activeTab === 'comparisons' && <ComparisonsSection item={it} />}
                     {activeTab === 'suppliers' && <SuppliersSection item={it} notes={notes} noteCategories={noteCategories} />}

@@ -10,6 +10,12 @@ export const maxDuration = 180;
 
 export default async function SourcingPage() {
   const supabase = createClient();
+  // 발주 이력은 메인 쿼리와 별도로(병렬로) 읽는다 - 테이블이 아직 없어도 목록은 그대로 보이게.
+  const ordersPromise = supabase
+    .from('sourcing_item_orders')
+    .select('*')
+    .order('sourcing_item_id')
+    .order('round_no');
   // 옵션/공급처 테이블 마이그레이션을 아직 안 돌렸으면 이 조인 쿼리
   // 자체가 실패한다 - 그런 경우에도 기존 소싱 리스트는 그대로 보이도록
   // (옵션/공급처 없이) 예전 방식으로 한 번 더 시도한다.
@@ -27,6 +33,25 @@ export default async function SourcingPage() {
       .order('created_at', { ascending: false });
     items = fallback.data;
   }
+
+  // 발주 이력을 각 상품에 붙인다. 오류: 테이블 없음 -> 'missing', 그 외 -> 'error' (둘 다 빈 배열로 두고 화면에서 안내)
+  let ordersStatus: 'ok' | 'missing' | 'error' = 'ok';
+  const ordersByItem = new Map<string, any[]>();
+  try {
+    const { data: orderRows, error: ordersError } = await ordersPromise;
+    if (ordersError) {
+      ordersStatus = /PGRST205|42P01|schema cache|relation .* does not exist/i.test(ordersError.message || '') ? 'missing' : 'error';
+    } else {
+      for (const o of orderRows || []) {
+        const list = ordersByItem.get(o.sourcing_item_id) ?? [];
+        list.push(o);
+        ordersByItem.set(o.sourcing_item_id, list);
+      }
+    }
+  } catch {
+    ordersStatus = 'error';
+  }
+  const itemsWithOrders = (items || []).map((it: any) => ({ ...it, sourcing_item_orders: ordersByItem.get(it.id) ?? [] }));
 
   // 체크리스트 기본 항목(모든 소싱 아이템 공통) - 마이그레이션 전이면
   // 빈 배열로 두고, 화면에서는 그냥 기본 항목 없이 커스텀 항목만 쓸 수
@@ -61,7 +86,8 @@ export default async function SourcingPage() {
       </p>
       <SourcingForm />
       <SourcingList
-        items={items || []}
+        items={itemsWithOrders}
+        ordersStatus={ordersStatus}
         checklistTemplate={checklistTemplate || []}
         notes={notes || []}
         noteCategories={noteCategories || []}

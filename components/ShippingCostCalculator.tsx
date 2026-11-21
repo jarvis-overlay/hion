@@ -2,8 +2,9 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
-  cbmFromDimensions,
+  computeShippingPerUnit,
   computeLclFreightKrw,
+  cbmFromDimensions,
   LCL_MIN_CHARGE,
   LCL_RATE_PER_CBM,
   roundLclCbm,
@@ -96,7 +97,13 @@ export default function ShippingCostCalculator({
   onDimsChange,
   onPerUnitChange,
   unitCost,
+  quantity: quantityProp,
+  onQuantityChange,
 }: {
+  // 수량을 바깥(예: 발주 회차 폼)이 갖고 있을 때 넘긴다 - 넘기면 이 계산기의 수량 입력창이 그 값을 그대로 쓰고 바꾼다.
+  // 안 넘기면 예전처럼 계산기 안에서 따로 관리한다. 제어 모드에서 빈칸이면 해외배송비 자동 반영은 하지 않는다(0 보고).
+  quantity?: string;
+  onQuantityChange?: (v: string) => void;
   // 매입 원가(개당, 원). 넘기면 "관세·부가세 자동 계산" 구역이 나온다 (안 넘기면 구역 자체가 없음)
   unitCost?: number;
   onApply: (totalKrw: number) => void;
@@ -130,7 +137,13 @@ export default function ShippingCostCalculator({
   const [width, setWidth] = useState(initial?.width || '');
   const [height, setHeight] = useState(initial?.height || '');
   const [weight, setWeight] = useState(initial?.weight || '');
-  const [quantity, setQuantity] = useState(initial?.quantity || '1');
+  const [quantityState, setQuantityState] = useState(initial?.quantity || '1');
+  const controlledQty = quantityProp !== undefined;
+  const quantity = controlledQty ? quantityProp : quantityState;
+  const setQuantity = (v: string) => {
+    if (controlledQty) onQuantityChange?.(v);
+    else setQuantityState(v);
+  };
 
   // 지연 초기화(함수형 초기값)로 넣어야 nextRowId()가 최초 렌더에서 딱
   // 한 번만 호출된다 - 배열 리터럴을 그대로 넘기면 매 렌더마다 호출되어
@@ -233,44 +246,23 @@ export default function ShippingCostCalculator({
     setExtraFees((rows) => rows.map((r) => (r.id === id ? { ...r, basis } : r)));
   }
 
-  const qty = Math.max(1, parseInt(quantity) || 1);
-
-  const cbm = useMemo(() => {
-    if (mode === 'direct') return parseFloat(cbmDirect) || 0;
-    return cbmFromDimensions(
-      parseFloat(length) || 0,
-      parseFloat(width) || 0,
-      parseFloat(height) || 0,
-      qty
-    );
-  }, [mode, cbmDirect, length, width, height, qty]);
-
-  const freight = computeLclFreightKrw(cbm);
-  // '전체 화물 기준' 항목은 해상운임과 합쳐서 수량으로 나누고, '개당' 항목은
-  // 이미 1개 기준이므로 안 나누고 그대로 더한다.
-  const extrasTotalBasis = extraFees
-    .filter((r) => r.basis === 'total')
-    .reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-  const extrasPerUnitBasis = extraFees
-    .filter((r) => r.basis === 'perUnit')
-    .reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+  // 개당 금액 계산은 lib/shippingCalc.ts의 순수 함수 (발주 회차 복사 때도 같은 식을 쓴다)
   // 관세·부가세: 매입원가 x 선적 수량(= 화물 전체 매입액) 기준. 부가세 = 매입액 / 11, 관세 = 매입액 x 관세율(기본 8%).
   // 자동 값은 원가·수량·관세율이 바뀌면 같이 바뀌고, 칸을 직접 고치면 그 값을 쓴다("자동 계산으로" 버튼으로 되돌림).
-  const taxSupported = unitCost !== undefined;
-  const taxBase = Math.max(0, unitCost || 0) * qty;
-  const dutyRateNum = Math.max(0, parseFloat(dutyRate) || 0);
-  const autoVat = Math.round(taxBase / 11);
-  const autoDuty = Math.round((taxBase * dutyRateNum) / 100);
-  const vatValue = taxSupported && taxOn ? (vatManual ? Math.max(0, parseFloat(vatInput) || 0) : autoVat) : 0;
-  const dutyValue = taxSupported && taxOn ? (dutyManual ? Math.max(0, parseFloat(dutyInput) || 0) : autoDuty) : 0;
-  const taxTotal = vatValue + dutyValue;
+  const {
+    qty, cbm, freight, extrasTotalBasis, extrasPerUnitBasis, taxSupported, taxBase,
+    autoVat, autoDuty, vatValue, dutyValue, taxTotal, shipmentTotal, perUnit, grandTotal,
+  } = computeShippingPerUnit(
+    {
+      mode, cbmDirect, length, width, height, quantity, extraFees,
+      taxes: { on: taxOn, dutyRate, vatManual, vat: vatInput, dutyManual, duty: dutyInput },
+    },
+    unitCost
+  );
   // 부가서비스에 예전 방식("관·부가세" 같은 이름)으로 직접 넣은 줄 - 자동 계산을 켠 채로 두면 이중으로 더해지므로 알려준다
   const isTaxRowLabel = (label: string) => /관\s*[·.]?\s*부가세|관세|부가세/.test(label);
   const dupTaxRows = taxSupported && taxOn ? extraFees.filter((r) => isTaxRowLabel(r.label)) : [];
 
-  const shipmentTotal = freight + extrasTotalBasis + taxTotal;
-  const perUnit = (qty > 0 ? shipmentTotal / qty : shipmentTotal) + extrasPerUnitBasis;
-  const grandTotal = shipmentTotal + extrasPerUnitBasis * qty;
 
   const inputCls = 'border border-paperLine bg-white px-2 py-1.5 text-xs font-mono w-full';
 
@@ -293,8 +285,9 @@ export default function ShippingCostCalculator({
   }, [mode, length, width, height, weight]);
   const perUnitRounded = Math.round(perUnit);
   useEffect(() => {
-    perUnitCb.current?.(perUnitRounded);
-  }, [perUnitRounded]);
+    // 제어 모드에서 수량이 빈칸이면 자동 반영이 일어나지 않게 0으로 알린다
+    perUnitCb.current?.(controlledQty && !(parseInt(quantity) > 0) ? 0 : perUnitRounded);
+  }, [perUnitRounded, controlledQty, quantity]);
 
   // 계산기 자체가 접혀있어도(open=false) 이 hidden input은 항상 폼에 남아있어야
   // 다시 열지 않고 그냥 저장해도 입력값이 안 사라진다.
@@ -390,7 +383,7 @@ export default function ShippingCostCalculator({
           </div>
           <div>
             <label className="text-[10px] text-inkSoft">수량(선적)</label>
-            <input value={quantity} onChange={(e) => setQuantity(e.target.value)} type="number" placeholder="1" className={inputCls} />
+            <input value={quantity} onChange={(e) => setQuantity(e.target.value)} type="number" placeholder={controlledQty ? '수량' : '1'} className={inputCls} />
           </div>
         </div>
       ) : (
@@ -401,7 +394,7 @@ export default function ShippingCostCalculator({
           </div>
           <div>
             <label className="text-[10px] text-inkSoft">수량 (개당 배송비 계산용)</label>
-            <input value={quantity} onChange={(e) => setQuantity(e.target.value)} type="number" placeholder="1" className={inputCls} />
+            <input value={quantity} onChange={(e) => setQuantity(e.target.value)} type="number" placeholder={controlledQty ? '수량' : '1'} className={inputCls} />
           </div>
         </div>
       )}
@@ -410,6 +403,10 @@ export default function ShippingCostCalculator({
         총 CBM {cbm.toFixed(2)}m³ → {LCL_RATE_PER_CBM.toLocaleString('ko-KR')}원/CBM, 0.5CBM 단위
         올림, 최소 {LCL_MIN_CHARGE.toLocaleString('ko-KR')}원
       </p>
+
+      {controlledQty && (
+        <p className="text-[11px] text-inkSoft">수량을 바꾸면 자동 계산된 해외배송비만 같이 바뀌어요. 직접 입력한 값은 그대로예요.</p>
+      )}
 
       {taxSupported && (
         <div className="border-t border-paperLine pt-2 grid gap-1.5">
