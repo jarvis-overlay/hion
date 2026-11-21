@@ -35,6 +35,15 @@ export interface ShippingCalcState {
   weight?: string; // 개당 무게(kg) - 로켓그로스 사이즈 유형 판정용 (예전에 저장된 값엔 없음)
   quantity: string;
   extraFees: { label: string; amount: string; basis: FeeBasis }[];
+  // 관세·부가세 자동 계산 (예전에 저장된 값엔 없음 → 켜지 않은 채로 열어서 기존 금액이 바뀌지 않게 한다)
+  taxes?: {
+    on: boolean;
+    dutyRate: string; // 관세율(%)
+    vatManual: boolean; // true면 vat 칸 값을 그대로 쓰고 자동 계산 안 함
+    vat: string;
+    dutyManual: boolean;
+    duty: string;
+  };
 }
 
 // 부가서비스 "기본값" - 자주 쓰는 항목 조합(검수·포장·서류비 등)을 이 브라우저에
@@ -86,7 +95,10 @@ export default function ShippingCostCalculator({
   defaultOpen = false,
   onDimsChange,
   onPerUnitChange,
+  unitCost,
 }: {
+  // 매입 원가(개당, 원). 넘기면 "관세·부가세 자동 계산" 구역이 나온다 (안 넘기면 구역 자체가 없음)
+  unitCost?: number;
   onApply: (totalKrw: number) => void;
   initial?: ShippingCalcState | null;
   defaultOpen?: boolean; // 처음부터 펼쳐서 크기·무게를 바로 입력하게 한다
@@ -128,6 +140,14 @@ export default function ShippingCostCalculator({
       ? initial.extraFees.map((f) => ({ id: nextRowId(), ...f }))
       : [{ id: nextRowId(), label: '', amount: '', basis: 'total' }]
   );
+
+  // 관세·부가세 자동 계산 상태. 새 상품은 켜진 채로 시작, 예전에 저장된 계산기(taxes 없음)는 꺼진 채로 열어서 기존 금액을 건드리지 않는다.
+  const [taxOn, setTaxOn] = useState(initial ? !!initial.taxes?.on : true);
+  const [dutyRate, setDutyRate] = useState(initial?.taxes?.dutyRate || '8');
+  const [vatManual, setVatManual] = useState(!!initial?.taxes?.vatManual);
+  const [vatInput, setVatInput] = useState(initial?.taxes?.vat || '');
+  const [dutyManual, setDutyManual] = useState(!!initial?.taxes?.dutyManual);
+  const [dutyInput, setDutyInput] = useState(initial?.taxes?.duty || '');
 
   const [defaultsCount, setDefaultsCount] = useState(0);
   const [defaultsMsg, setDefaultsMsg] = useState('');
@@ -234,7 +254,18 @@ export default function ShippingCostCalculator({
   const extrasPerUnitBasis = extraFees
     .filter((r) => r.basis === 'perUnit')
     .reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-  const shipmentTotal = freight + extrasTotalBasis;
+  // 관세·부가세: 매입원가 x 선적 수량(= 화물 전체 매입액) 기준. 부가세 = 매입액 / 11, 관세 = 매입액 x 관세율(기본 8%).
+  // 자동 값은 원가·수량·관세율이 바뀌면 같이 바뀌고, 칸을 직접 고치면 그 값을 쓴다("자동 계산으로" 버튼으로 되돌림).
+  const taxSupported = unitCost !== undefined;
+  const taxBase = Math.max(0, unitCost || 0) * qty;
+  const dutyRateNum = Math.max(0, parseFloat(dutyRate) || 0);
+  const autoVat = Math.round(taxBase / 11);
+  const autoDuty = Math.round((taxBase * dutyRateNum) / 100);
+  const vatValue = taxSupported && taxOn ? (vatManual ? Math.max(0, parseFloat(vatInput) || 0) : autoVat) : 0;
+  const dutyValue = taxSupported && taxOn ? (dutyManual ? Math.max(0, parseFloat(dutyInput) || 0) : autoDuty) : 0;
+  const taxTotal = vatValue + dutyValue;
+
+  const shipmentTotal = freight + extrasTotalBasis + taxTotal;
   const perUnit = (qty > 0 ? shipmentTotal / qty : shipmentTotal) + extrasPerUnitBasis;
   const grandTotal = shipmentTotal + extrasPerUnitBasis * qty;
 
@@ -264,7 +295,8 @@ export default function ShippingCostCalculator({
 
   // 계산기 자체가 접혀있어도(open=false) 이 hidden input은 항상 폼에 남아있어야
   // 다시 열지 않고 그냥 저장해도 입력값이 안 사라진다.
-  const hasContent = hasInitial || cbmDirect || length || width || height || weight || extraFees.some((f) => f.amount);
+  const hasContent =
+    hasInitial || cbmDirect || length || width || height || weight || extraFees.some((f) => f.amount) || (taxSupported && !taxOn);
   const calcStateHiddenInput = (
     <input
       type="hidden"
@@ -280,6 +312,9 @@ export default function ShippingCostCalculator({
               weight,
               quantity,
               extraFees: extraFees.map(({ label, amount, basis }) => ({ label, amount, basis })),
+              ...(taxSupported
+                ? { taxes: { on: taxOn, dutyRate, vatManual, vat: vatManual ? vatInput : '', dutyManual, duty: dutyManual ? dutyInput : '' } }
+                : {}),
             } as ShippingCalcState)
           : ''
       }
@@ -373,6 +408,78 @@ export default function ShippingCostCalculator({
         올림, 최소 {LCL_MIN_CHARGE.toLocaleString('ko-KR')}원
       </p>
 
+      {taxSupported && (
+        <div className="border-t border-paperLine pt-2 grid gap-1.5">
+          <label className="flex items-center gap-1.5 text-inkSoft font-semibold">
+            <input type="checkbox" checked={taxOn} onChange={(e) => setTaxOn(e.target.checked)} />
+            관세·부가세 자동 계산 (화물 전체 기준, 해외배송비에 포함)
+          </label>
+          {taxOn && (
+            <>
+              {taxBase <= 0 ? (
+                <p className="text-[11px] text-warn">위쪽 &quot;매입 원가&quot;를 입력하면 관세·부가세가 자동으로 계산돼요.</p>
+              ) : (
+                <p className="text-[11px] text-inkSoft">
+                  매입액 = 매입원가 {fmt(unitCost || 0)} × 선적 수량 {qty}개 = <span className="font-mono text-ink">{fmt(taxBase)}</span>
+                </p>
+              )}
+              <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-1.5 gap-y-1">
+                <span className="text-inkSoft">부가세</span>
+                <input
+                  value={vatManual ? vatInput : String(autoVat)}
+                  onChange={(e) => {
+                    setVatInput(e.target.value);
+                    setVatManual(true);
+                  }}
+                  type="number"
+                  placeholder="0"
+                  title="매입액 ÷ 11. 직접 고칠 수 있어요"
+                  className={inputCls + (vatManual ? '' : ' bg-profitBg')}
+                />
+                {vatManual ? (
+                  <button type="button" onClick={() => setVatManual(false)} className="text-[11px] text-accent underline">
+                    자동 계산으로
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-inkSoft">매입액 ÷ 11 · 자동</span>
+                )}
+
+                <span className="text-inkSoft">관세</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    value={dutyManual ? dutyInput : String(autoDuty)}
+                    onChange={(e) => {
+                      setDutyInput(e.target.value);
+                      setDutyManual(true);
+                    }}
+                    type="number"
+                    placeholder="0"
+                    title="매입액 × 관세율. 직접 고칠 수 있어요"
+                    className={inputCls + (dutyManual ? '' : ' bg-profitBg')}
+                  />
+                  <input
+                    value={dutyRate}
+                    onChange={(e) => setDutyRate(e.target.value)}
+                    type="number"
+                    step="0.1"
+                    title="관세율(%)"
+                    className={inputCls + ' !w-16 shrink-0'}
+                  />
+                  <span className="text-[11px] text-inkSoft shrink-0">%</span>
+                </div>
+                {dutyManual ? (
+                  <button type="button" onClick={() => setDutyManual(false)} className="text-[11px] text-accent underline">
+                    자동 계산으로
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-inkSoft">매입액 × 관세율 · 자동</span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="border-t border-paperLine pt-2 grid gap-1.5">
         <div className="flex items-center justify-between">
           <span className="text-inkSoft font-semibold">부가서비스 (검수·포장·서류비 등)</span>
@@ -452,6 +559,14 @@ export default function ShippingCostCalculator({
             {roundLclCbm(cbm) * LCL_RATE_PER_CBM < LCL_MIN_CHARGE &&
               ` → 최소 청구금액 ${LCL_MIN_CHARGE.toLocaleString('ko-KR')}원 적용`}
           </p>
+        )}
+        {taxTotal > 0 && (
+          <div className="flex justify-between text-inkSoft">
+            <span>
+              관세 {fmt(dutyValue)} + 부가세 {fmt(vatValue)}
+            </span>
+            <span className="font-mono text-ink">{fmt(taxTotal)}</span>
+          </div>
         )}
         {extrasTotalBasis > 0 && (
           <div className="flex justify-between text-inkSoft">

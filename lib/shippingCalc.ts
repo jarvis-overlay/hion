@@ -53,7 +53,6 @@ export const SHIPPING_EXTRA_FEE_PRESETS: ShippingExtraFeePreset[] = [
   { label: '밀크런 택배' },
   { label: '화물택배 (착불)' },
   { label: '창고료' },
-  { label: '관·부가세' },
   // 목록통관 배제/금액초과로 일반(간이)통관 진행 시 붙는 관세사 수임료
   // (사용자 제공 요금 안내 기준 고정값)
   { label: '관세사 수임료 (개인)', amount: 3650 },

@@ -313,6 +313,7 @@ export function MarginDetailFields({
 
         <ShippingCostCalculator
           defaultOpen
+          unitCost={parseFloat(fields.cost) || 0}
           onApply={(v) => {
             fields.setIntlShipping(String(Math.round(v)));
             setIntlAuto(true);
