@@ -1575,7 +1575,7 @@ export default function SourcingList({
               : '조건에 맞는 항목이 없어요.'}
         </p>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid grid-cols-1 gap-3">
           {rows.map((it) => {
             const process = resolveProcess(it);
             const m = it.margin;
@@ -1606,7 +1606,7 @@ export default function SourcingList({
             }
 
             return (
-              <div key={it.id} className="card p-4 flex flex-col gap-2">
+              <div key={it.id} className="card p-4 flex flex-col gap-2 min-w-0 [overflow-wrap:anywhere]">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -1666,7 +1666,7 @@ export default function SourcingList({
 
                 {/* 금액 요약: 입력은 "제품 마진 정보" 탭에서, 카드에는 핵심만 한눈에 */}
                 {moneySum.hasAnything || it.moq || lastOrder ? (
-                  <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-1.5">
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,200px))] gap-1.5">
                     {it.price != null && <StatBox label="판매가" value={it.price.toLocaleString() + '원'} />}
                     {it.cost != null && <StatBox label="매입 원가" value={it.cost.toLocaleString() + '원'} />}
                     {moneySum.marginPct != null && (

@@ -69,8 +69,8 @@ export default function MarginFormBody({
         />
       </div>
 
-      {/* 넓은 화면(xl 이상)에선 ① 마진 계산과 ② 해외배송을 나란히, 좁은 화면에선 위아래로 */}
-      <div className="grid gap-3 xl:grid-cols-2 items-start">
+      {/* 카드 폭이 좁아서(목록 폭 제한) ① 마진 계산과 ② 해외배송은 위아래로 쌓는다 */}
+      <div className="grid gap-3 items-start">
         <MarginDetailFields
           fields={f}
           intlShippingCalcInitial={intlShippingCalcInitial}
