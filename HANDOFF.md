@@ -6,7 +6,7 @@
 
 - 11/8~10 장애(빌드가 실행 중인 `.next`를 지움) 재발 방지용 새 배포 스크립트 `scripts/deploy-watch.sh` + 사용 설명 `scripts/DEPLOY.md`. **서버가 안 쓰는 칸(`.next-a`/`.next-b`)에 빌드 → 성공하면 전환 → 로그인 페이지·정적 파일이 나오는지 확인 → 실패하면 롤백**, 실패 커밋은 30분 뒤 재시도, 잠금·`npm install` 실패·서버 폴더 수정 충돌도 처리.
 - 코드 쪽 변경: `next.config.js`에 `distDir: process.env.NEXT_DIST_DIR || ".next"`(환경변수 없으면 기존과 동일, 개발·Vercel 영향 없음), `tsconfig.json` include에 `.next-a/b` 타입 폴더, `.gitignore`에 `.next-*`, `.gitattributes`(`*.sh`는 LF).
-- **아직 켜지지 않았다.** 맥북은 계속 옛 스크립트(`/Users/wook/deploy-watch.sh`)로 돈다. 맥북 터미널에서 `scripts/DEPLOY.md`의 "맥북에 한 번만 설치" 4단계(옛 파일 백업 후 새 스크립트로 연결 → 한 번 직접 실행 → 확인)를 해야 한다. 이 PC에서는 맥북에 접속할 수 없어 못 했다.
+- **2026-11-22 맥북에 설치 완료.** `ssh hion-mac`(이 PC `KW`에 cloudflared 설치 + `~/.ssh/config`의 `hion-mac` 항목, Cloudflare Access 이메일 코드 + 맥 계정 암호)로 접속해 `/Users/wook/deploy-watch.sh`를 새 스크립트(`scripts/deploy-watch.sh`)의 심볼릭 링크로 바꿨고(옛 파일은 `deploy-watch.sh.old`), launchd가 실행한 첫 배포가 성공했다(`배포 완료 … 서비스 칸: .next-a`, 상태 폴더 `~/.hion-deploy/`). 푸시로 일어나는 두 번째 전환(b 칸)은 아직 못 봤다.
 - 검증함: `bash scripts/test-deploy-watch.sh` 38개 통과(가짜 git/npm/pm2/curl), 실제 `NEXT_DIST_DIR=.next-a`로 build·start 후 `/login`·정적 파일 200. **못 함**: 실제 맥북·진짜 pm2(`restart --update-env`, `pm2 save`)·launchd 환경. 첫 실행 로그를 직접 보는 것을 권장.
 - 같이 하면 좋은 것: 맥북 `~/.npm` 소유권 정리는 이제 필수가 아님(전용 캐시 `~/.npm-hion` 사용). 옛 `.next`는 첫 전환 후 삭제 가능.
 

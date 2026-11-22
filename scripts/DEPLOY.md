@@ -22,12 +22,12 @@
 cd /Users/wook/hion && git pull
 ```
 
-2. 맥북의 자동배포 파일을 새 스크립트로 연결 (이후 스크립트 개선은 `git push`만으로 반영됨). 옛 파일은 백업해 둡니다.
+2. 맥북의 자동배포 파일을 새 스크립트로 연결 (이후 스크립트 개선은 `git push`만으로 반영됨). 옛 파일은 백업해 두고, 같은 이름을 새 스크립트의 바로가기(심볼릭 링크)로 바꿉니다. 따옴표가 없어서 윈도우 PowerShell에서 `ssh hion-mac '...'` 한 줄로 보내도 깨지지 않습니다 (2026-11-22 이 방식으로 설치함).
 ```bash
-cp /Users/wook/deploy-watch.sh /Users/wook/deploy-watch.sh.old && printf '#!/bin/bash\nexec /bin/bash /Users/wook/hion/scripts/deploy-watch.sh\n' > /Users/wook/deploy-watch.sh
+cp /Users/wook/deploy-watch.sh /Users/wook/deploy-watch.sh.old && ln -sf /Users/wook/hion/scripts/deploy-watch.sh /Users/wook/deploy-watch.sh
 ```
 
-3. 한 번 직접 실행해서 확인 (처음엔 기록이 없어서 현재 커밋을 한 번 빌드·전환합니다. 1~3분 걸리고 그동안 사이트는 그대로예요)
+3. (선택) 한 번 직접 실행해서 확인. 바로가기만 걸어 두면 launchd가 90초 안에 알아서 처음 배포를 하므로 `tail -25 /Users/wook/.pm2/autodeploy.log`로 결과만 봐도 됩니다. (처음엔 기록이 없어서 현재 커밋을 한 번 빌드·전환합니다. 1~4분 걸리고 그동안 사이트는 그대로예요)
 ```bash
 /bin/bash /Users/wook/deploy-watch.sh
 ```
@@ -53,4 +53,5 @@ export PATH="$HOME/bin:$HOME/.npm-global/bin:$PATH"; pm2 list; curl -sI https://
 
 - **검증함**: `bash scripts/test-deploy-watch.sh` (가짜 git 저장소 + 가짜 npm/pm2/curl) 38개 확인 — 첫 배포, 변경 없을 때 무동작, lock 변경 시 설치, 빌드 실패 시 서비스 유지·재시도 대기, 설치 실패, 전환 후 확인 실패 시 롤백, 정적 파일 400 감지, 잠금(죽은/살아 있는), 서버 폴더 수정 충돌, 배포 중 스크립트 자체 교체.
 - **검증함(실제)**: `NEXT_DIST_DIR=.next-a`로 `next build` 성공, 같은 값으로 `next start` 후 `/login`과 `/_next/static/*` 모두 200. 빌드가 `tsconfig.json`을 건드리지 않음.
-- **못 함**: 실제 맥북(macOS 12, 기본 bash 3.2), 진짜 pm2의 `restart --update-env`와 `pm2 save`로 칸 전환, launchd 환경(HOME/PATH), 실제 `npm install`. 처음 한 번은 위 3번을 직접 실행하며 로그를 보는 것을 권장.
+- **실제 맥북에서 확인함 (2026-11-22)**: 바로가기로 연결한 뒤 launchd가 새 스크립트를 실행 → `서버를 .next-a 로 전환` → `배포 완료 (259f444…, 서비스 칸: .next-a)`, 상태 파일(`slot`=a, `deployed_sha`, `lock_hash`) 생성, `hion.cc/login`과 정적 파일 6개 모두 200.
+- **아직 못 본 것**: 푸시로 일어나는 두 번째 배포(b 칸으로 전환), 맥북 재부팅 후 `pm2 save`로 저장된 칸 복원, 빌드/설치 실패 시 실제 롤백(가짜 환경 시험만 함).
