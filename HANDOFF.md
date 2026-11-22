@@ -1,6 +1,63 @@
 # 인수인계 (HANDOFF) — 다른 PC에서 바로 이어서 작업하기
 
-마지막 갱신: 2026-11-21 (관세·부가세 자동 계산 / 카드 탭 순서 / 카드 폭 / 발주 이력 탭 + 운영 DB 적용 / 사이즈표 잘림 수정). 최신 작업은 아래 "-29 → -24" 섹션. 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+마지막 갱신: 2026-11-22 (맨 위 "★ 2026-11-21~22 세션 상세 기록" = 문구 가드 + 무중단 자동배포 맥북 설치·검증 + 이 PC에서 맥북 SSH). 그 이전: 2026-11-21 (관세·부가세 자동 계산 / 카드 탭 순서 / 카드 폭 / 발주 이력 탭 + 운영 DB 적용 / 사이즈표 잘림 수정). 최신 작업은 아래 "-29 → -24" 섹션. 개발 규칙은 `CLAUDE.md`가 기준이다. 이 문서는 "지금 어디까지 왔나"만 적는다.
+
+## ★ 2026-11-21~22 세션 상세 기록 (KW PC, Claude Code) — 먼저 읽기
+
+이 PC = Windows `KW`(Tailscale 100.85.93.4, 사용자 계정 `user`, 프로젝트 `C:\Users\user\Desktop\py\hion`). 아래 "원격 접속" 절들에 나오는 `DESKTOP-2NH6PEF`(100.103.130.85, jarvis)는 **다른 윈도우 PC**다. 운영 서버는 **맥북**(`gim-ug-ui-MacBookPro`, 계정 `wook`, `https://hion.cc`)이고 `git push`(main) = 운영 배포다. (이 세션 초반에 내가 "운영은 Vercel"이라고 잘못 적었던 것을 사용자가 정정했고 문서도 고쳤다.)
+
+### A. 이 세션에서 한 일 (시간순)
+
+| # | 요청 | 결과 | 커밋 |
+|---|---|---|---|
+| 1 | "EO 멸균이 뭐야? 실제 있는 명칭이야?" (상세페이지 이미지의 "EO 멸균으로 깨끗하게 관리") | **EO = 에틸렌옥사이드(Ethylene Oxide) 가스 멸균**, 의료기기·마스크 등에 실제 쓰는 공정 이름이다. 그러나 일반 의류·잡화에 근거 없이 쓰면 안 되는 문구(인증·시험성적서 필요) → 해당 문구를 상품 근거 없이 만들지 않도록 아래 3번 가드에 반영 | — |
+| 2 | 1688 상품정보고시 칸을 뭐라고 적을지 (상품 2개) | 판매처 페이지에서 확인되는 것만 적고, **소재 혼용률은 판매처에 확인**하라고 안내. 남성 속옷 C858(폴리 95% / 나머지 5% 미확인), 오버니 양말(涤棉 75% 외 미확인) — 아래 "7. 사용자(소싱) 쪽 메모"에도 있음 | — |
+| 3 | AI가 "신장 고급 면 100% 사용 / Premium Xinjiang Cotton"을 지어냄 → 적절히 변경 | **상품 정보에 근거 없는 소재·원산지·함량 단정을 프롬프트 + 코드로 차단** (아래 B) | `1622b73` |
+| 4 | 깃푸시·핸드오프·SQL 정리 | HANDOFF 정리, 마이그레이션은 전부 운영 적용 완료(추가 SQL 없음) | `9a7d3fa` |
+| 5 | 화면 이상(hion.cc/login 스타일 깨짐) | 정적 파일(`/_next/static/*`) 400 → 새 빌드 산출물과 실행 중 서버의 `.next`가 어긋난 증상. **맥북 로그를 직접 못 봐서 이번 건의 정확한 원인은 단정 못 함**(11/8~10 장애와 같은 계열: 빌드가 실행 중 `.next`를 건드림). 구조적으로 재발을 막는 방향으로 6번 진행 | — |
+| 6 | "자동 배포가 되어야해" | **무중단 blue/green 자동배포 설계·구현·맥북 설치·검증** (아래 C) | `057e4d8`, `cbad650`, `24d1f00` |
+| 7 | 다른 PC·맥북 원격 연결 | **이 PC에서 `ssh hion-mac`으로 맥북 접속** 구성 (아래 D) | (저장소 밖 설정) |
+
+### B. 문구 가드 (copyGuard) — 3번 상세
+- 파일: `lib/copyGuard.ts`(신규), `lib/ai.ts`(프롬프트 "사실 규칙" + 결과 필드를 가드 통과), `lib/detailOptions.ts`(`sanitizePlannedFields`/`sanitizeSpecRows`/`finalizePlan`에 `evidence` 추가), `app/dashboard/sales/detail-pages/actions.ts`(근거 = 상품명 + `a.description` + `a.koreanTexts` + `a.facts` 를 넘김).
+- 규칙: 소재군(면/실크/울/린넨/가죽/모달·텐셀/나일론/스판덱스) 언급은 **상품명·OCR 텍스트·사용자 힌트에 근거가 있을 때만** 허용. 원산지명(신장/新疆/Xinjiang)은 **항상 차단**. "…100%" 단정은 근거에 "100%"가 있어야 허용. 걸리면 **다시 쓰지 않고 그 칸/줄을 비운다**(지어낸 대체 문구를 넣지 않기 위해). 뱃지 예시에서 "특허출원"도 뺌.
+- 확인함: 가드 단위 시험 스크립트(`guard_test.js`, 스크래치패드라 git에 없음) + `tsc --noEmit` 통과. **못 봄**: 실제 Gemini 응답에서 어떻게 걸리는지, 운영 화면 결과. → 사용자가 상세페이지를 새로 생성해 "신장/100%" 문구가 안 나오는지 눈으로 확인 필요. (이미 만든 이미지는 다시 생성해야 반영됨.)
+
+### C. 새 자동배포 — 6번 상세 (자세한 사용법은 `scripts/DEPLOY.md`)
+- **구조**: 맥북 launchd `com.hion.autodeploy`(90초마다) → `/bin/bash /Users/wook/deploy-watch.sh` (= `/Users/wook/hion/scripts/deploy-watch.sh`로 가는 **심볼릭 링크**, 옛 파일은 `deploy-watch.sh.old`로 백업). 스크립트를 고치면 `git push`만으로 반영된다.
+- **동작**: `origin/main`이 마지막 성공 커밋(`~/.hion-deploy/deployed_sha`)과 다르면 → `git merge --ff-only`(서버 폴더에 수정이 있으면 stash 후 진행) → `package-lock.json` 해시가 바뀌었거나 `node_modules`가 없을 때만 `npm install`(전용 캐시 `~/.npm-hion`, 실패 시 중단) → **서비스 중이 아닌 칸(`.next-a`/`.next-b`)에 `NEXT_DIST_DIR=.next-X npm run build`** → `BUILD_ID` 확인 → `pm2 restart hion --update-env`로 새 칸 전환 → `/login` 200 + 거기서 찾은 첫 `/_next/static/*.css|js` 200 확인 → 실패하면 이전 칸으로 롤백, 성공하면 `slot`·`deployed_sha` 기록 + `pm2 save`.
+- 실패한 커밋은 30분(`RETRY_SECS=1800`) 뒤 재시도. 잠금은 pid 기록, 죽은/45분 넘은 잠금은 자동 해제. 로그: 맥북 `/Users/wook/.pm2/autodeploy.log`. 상태 폴더: `~/.hion-deploy/` (`slot`, `deployed_sha`, `lock_hash`, `failed`, `lock/`).
+- 코드 쪽 변경: `next.config.js`(`distDir: process.env.NEXT_DIST_DIR || ".next"`), `tsconfig.json`(include에 `.next-a/types`, `.next-b/types`), `.gitignore`(`.next-*`), `.gitattributes`(`*.sh text eol=lf`). 환경변수가 없으면 기존과 동일 → 로컬 개발·Vercel 영향 없음.
+- **확인함(실제 맥북)**: 첫 배포 → `.next-a`(`259f444`), 푸시로 일어난 두 번째 배포(`cbad650`) → `.next-b`, 푸시~완료 약 2분, 그동안 이 PC에서 8번 본 `/login`·CSS 모두 200(끊김 없음). 가짜 환경 시험 `bash scripts/test-deploy-watch.sh` 38개 통과.
+- **못 본 것**: ① 맥북 **재부팅 후** `pm2 save`로 저장된 칸이 복원되는지, ② **실제** 빌드/설치 실패 시 롤백(가짜 환경에서만 시험), ③ 마지막 푸시(`24d1f00`, 문서만 바뀜)가 만들 세 번째 배포가 `a`로 돌아오는지 — 이 PC에서 확인하려 했으나 `ssh hion-mac`은 접속마다 사람이 인증(Cloudflare 이메일 코드 + 맥 암호)해야 해서 자동으로는 못 봤다. 맥북에서 `tail -15 /Users/wook/.pm2/autodeploy.log; cat ~/.hion-deploy/slot`로 확인(정상: `배포 완료 … 서비스 칸: .next-a`, `slot`=a).
+- **주의**: 맥북에서 `pm2 delete hion` 후 다시 만들지 말 것(`NEXT_DIST_DIR`가 사라져 옛 `.next`를 봄). 재시작은 `pm2 restart hion`만. 되돌리기: `rm ~/.hion-deploy/deployed_sha` 후 스크립트 1회 실행. 옛 `.next` 폴더는 안정 확인 후 `rm -rf /Users/wook/hion/.next`로 지워도 됨(아직 안 지움, 사용자 몫).
+
+### D. 이 PC(KW)에서 맥북 원격 접속 — 7번 상세
+- 설치한 것(저장소 밖, 이 PC에만 있음): `cloudflared`(`C:\Program Files (x86)\cloudflared\cloudflared.exe`), `C:\Users\user\.ssh\config`:
+  ```
+  Host hion-mac
+    HostName ssh.hion.cc
+    User wook
+    ProxyCommand "C:\Program Files (x86)\cloudflared\cloudflared.exe" access ssh --hostname %h
+  ```
+  (`id_ed25519`/`known_hosts`는 원래 있던 것, 건드리지 않음.) 다른 PC에서 같은 접속을 하려면 위와 같이 cloudflared 설치 + config 추가.
+- 사용: PowerShell에서 `ssh hion-mac` → 브라우저 창이 뜨면 Cloudflare Access 이메일 코드(허용 이메일 1개뿐, 정책 `me-only`) → 맥 계정 암호. **자동화 불가**(매번 사람 인증). Tailscale 없이도 되므로 맥북 Tailscale이 풀려 있어도 된다. 이전 "브라우저 SSH(browser-based) 막힘" 기록은 이 터미널 방식으로 **대체됨**.
+- 한 줄 실행 요령(PowerShell 5.1): `ssh hion-mac '명령'` 처럼 **작은따옴표로 감싸고 안쪽엔 큰따옴표 쓰지 말 것**(큰따옴표가 벗겨짐). 비대화형 SSH는 PATH에 node가 없어 `pm2`가 `env: node: No such file`로 실패 → `export PATH="$PATH:/usr/local/bin:$HOME/bin:$HOME/.npm-global/bin"` 먼저(맥 node v24.21.0). 맥북 명령(`&&`, zsh)을 로컬 PowerShell에 그대로 붙이면 `&&` 구문 오류가 나므로 반드시 `ssh hion-mac '...'` 안에 넣을 것.
+- 이 PC에서 `git push`가 로그인 자격 증명이 없으면 멈춘다(`git credential-manager get` 대기) → 사용자가 자기 PowerShell에서 한 번 로그인/푸시해야 풀린다. 자동 실행 시 `GIT_TERMINAL_PROMPT=0 timeout 60 git push`로 무한 대기를 피할 것. 다른 폴더에서 푸시하려면 `git -C C:\Users\user\Desktop\py\hion push`.
+- `DESKTOP-2NH6PEF`(jarvis)의 RDP는 Tailscale 경유 3389 포트가 열려 있는 것까지만 확인(로그인 미시험). 이 PC(KW)는 RDP 꺼져 있음.
+
+### E. 다음 PC에서 시작하는 순서
+1. `git pull` → `npm install`(sharp·canvas가 정식 의존성이라 이걸로 타입 검사 가능) → 필요 시 `node node_modules/typescript/bin/tsc --noEmit -p .` (끝나면 `tsconfig.tsbuildinfo` 삭제, 임시 빌드 폴더 `.next-*`는 git 무시지만 로컬에 남으면 지워도 됨).
+2. 맥북 확인(이 PC가 아니어도 됨, 맥북 자리에서 또는 `ssh hion-mac`): 위 C의 "못 본 것" ③ 로그 확인 → 그다음 ①②는 시간이 날 때(재부팅은 사용자가 맥북 재부팅 후 `pm2 list`와 `cat ~/.hion-deploy/slot`, `curl -sI https://hion.cc/login | head -3`).
+3. 사용자 확인 대기(아래 "남은 일"과 중복 포함): 문구 가드(B) 실제 생성 확인, hion.cc "조사하기"(Bright Data), WING 로그인 후 로켓그로스 요금표, 카테고리 수수료율 검증, OAuth/Supabase 리디렉션 URL·`NEXT_PUBLIC_APP_URL`·Vercel 정리(기존 항목).
+4. DB: 이 세션에서 **새 SQL/마이그레이션 없음**. 추가로 `db push`할 것 없음.
+
+### F. 이 세션에서 겪은 함정 (같은 실수 방지)
+- 맥북 명령을 윈도우 PowerShell에 직접 붙여 넣지 말 것(위 D).
+- Git Bash에서 `grep -c $'\r'`은 모든 줄을 세는 오검출 → 줄바꿈 확인은 `git ls-files --eol` 또는 `tr -cd '\r' | wc -c`.
+- `.sh` 파일이 CRLF가 되면 맥북에서 깨지므로 `.gitattributes`로 LF 강제(이미 적용), 실행 권한은 `git update-index --chmod=+x`.
+- 스크립트 파일을 git이 실행 중에 교체해도 안전하도록 `deploy-watch.sh` 전체를 `main()`으로 감싸고 `exit`(이미 적용, 시험 10번).
+- 11/9 사이트 장애는 맥북 재부팅이 아니라 11/8 빌드 실패(@tiptap 누락)였다(내가 처음에 재부팅으로 잘못 추정했었음).
 
 ## 자동배포 개선 (2026-11-21) — ⚠ 맥북에서 1회 설치해야 켜짐
 
@@ -16,7 +73,7 @@
    - 새 DB 테이블 `sourcing_item_orders`(마이그레이션 `20261121112453`)는 **운영 DB에 이미 적용됨** → 다시 `db push` 불필요.
    - 한 일(아래 섹션): -24 관세·부가세 자동 계산, -25 카드 탭 순서/이름, -26·-28 카드 폭, -27 발주 이력 탭(추가 발주 회차별 기록), -29 상세페이지 사이즈표 글자 잘림.
    - **사용자 확인 대기**: ① ~~관세 계산식~~ → **확정(2026-11-21 사용자 확인): 관세 = 매입액(매입원가 x 수량) x 8%, 부가세 = 매입액/11. 현재 구현이 맞음**, ② 카드 폭이 사용자 실제 데이터에서 고쳐졌는지(안 되면 그 카드의 상품명·메모·링크 길이와 브라우저 확대 비율 필요), ③ 발주 이력을 운영 화면에서 눌러본 결과(트리거 회차 번호, RLS, 저장/수정/삭제, 모바일), ④ 사이즈표는 이미 만든 이미지를 다시 만들어야 새 규칙 적용.
-   - **원격 접속 미해결**: ssh.hion.cc 브라우저 SSH 안 됨(아래 "원격 접속 시도 기록"). 사용자가 집에서 이 PC(jarvis, Tailscale 100.103.130.85 RDP)와 맥북 접속을 시도할 예정 → 결과를 그 절에 덧붙일 것.
+   - **원격 접속**: (2026-11-22 갱신) 브라우저 SSH는 여전히 미해결이지만 **터미널 방식(`ssh hion-mac`)은 KW PC에서 성공**(맨 위 "D"). 아래 옛 기록은 참고용. 사용자가 집에서 이 PC(jarvis, Tailscale 100.103.130.85 RDP)와 맥북 접속을 시도할 예정 → 결과를 그 절에 덧붙일 것.
    - **맥북 대기 작업**: 새 자동배포 스크립트 설치(맨 위 "자동배포 개선"), `~/.npm` 소유권, Cloudflare 정책 확인, hion.cc에서 Bright Data "조사하기" 동작 확인.
 1. `git pull` (이전 시점 기록: 마지막 커밋 `d3454da`). `package.json` 변경 없음이라 `npm install`은 안 해도 됨.
 2. DB: 이번에 추가한 `sourcing_items.fee_category` 컬럼 마이그레이션(`20261120012525`)은 **운영 DB에 이미 적용됨**. 다시 `db push` 할 필요 없음.
