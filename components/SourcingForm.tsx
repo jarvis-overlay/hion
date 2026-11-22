@@ -70,7 +70,7 @@ export default function SourcingForm() {
               onChange={(e) => f.setPrice(e.target.value)}
               type="number"
               step="0.01"
-              placeholder="판매가"
+              placeholder="판매가 (필수)"
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
             />
             <input
@@ -87,7 +87,7 @@ export default function SourcingForm() {
               onChange={(e) => f.setCost(e.target.value)}
               type="number"
               step="0.01"
-              placeholder="매입 원가"
+              placeholder="매입 원가 (필수)"
               className="border border-paperLine bg-white px-3 py-2 text-sm font-mono"
             />
             <input

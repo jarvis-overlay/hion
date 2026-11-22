@@ -16,6 +16,7 @@ import {
   type RgSizeId,
 } from '@/lib/rocketGrowth';
 import { rgTableSvg, svgDataUrl } from '@/lib/rocketGrowthSvg';
+import { FieldTag } from '@/components/FieldTag';
 import { COUPANG_FEE_CATEGORIES, findFeeCategory, withVatPct } from '@/lib/coupangFees';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ko-KR') + '원';
@@ -156,19 +157,29 @@ export function MarginDetailFields({
         <span className="text-xs font-semibold text-ink">① 마진 계산</span>
         <div className={`grid grid-cols-2 sm:grid-cols-3 items-start ${gap}`}>
           <label className="grid gap-0.5">
-            <span className={labelCls}>매입부가세 (원)</span>
+            <span className={labelCls}>
+              매입부가세 (원)<FieldTag kind="auto" />
+            </span>
             <input
               name="import_vat"
               value={fields.importVat}
               onChange={(e) => fields.setImportVat(e.target.value)}
               type="number"
               step="0.01"
-              placeholder="0"
-              className={inputCls}
+              placeholder="매입원가 ÷ 11"
+              title="매입원가 ÷ 11로 자동 계산돼요. 직접 고칠 수 있어요"
+              className={inputCls + (!fields.importVatManual && fields.importVat !== '' ? ' bg-profitBg' : '')}
             />
+            {fields.importVatManual ? (
+              <button type="button" onClick={fields.resetImportVat} className="text-[11px] text-warn underline text-left">
+                직접 입력한 값이에요 · 자동(매입원가 ÷ 11)으로 되돌리기
+              </button>
+            ) : (
+              <span className="text-[11px] text-inkSoft">{fields.importVat !== '' ? '매입원가 ÷ 11 자동' : '매입원가를 넣으면 자동'}</span>
+            )}
           </label>
           <div className="grid gap-0.5 sm:col-span-2">
-            <span className={labelCls}>쿠팡 카테고리 → 수수료 자동 입력</span>
+            <span className={labelCls}>쿠팡 카테고리 → 수수료 (%)<FieldTag kind="auto" /></span>
             <div className="grid grid-cols-2 gap-2">
               <input
                 name="fee_category"
@@ -187,7 +198,7 @@ export function MarginDetailFields({
                   step="0.1"
                   placeholder="8.6"
                   title="수수료(%) - 부가세 포함. 카테고리와 상관없이 직접 고칠 수 있어요"
-                  className={inputCls + ' flex-1 min-w-0'}
+                  className={inputCls + ' flex-1 min-w-0' + (feeMatched && !feeManual ? ' bg-profitBg' : '')}
                 />
                 <span className={suffixCls}>% (부가세 포함)</span>
               </div>
@@ -220,7 +231,7 @@ export function MarginDetailFields({
             )}
           </div>
           <label className="grid gap-0.5">
-            <span className={labelCls}>광고비 (%)</span>
+            <span className={labelCls}>광고비 (%)<FieldTag kind="auto" /></span>
             <input
               value={fields.adRatePct}
               onChange={(e) => fields.setAdRatePct(e.target.value)}
@@ -231,7 +242,7 @@ export function MarginDetailFields({
             />
           </label>
           <div className="grid gap-0.5">
-            <span className={labelCls}>쿠폰 할인</span>
+            <span className={labelCls}>쿠폰 할인<FieldTag kind="optional" /></span>
             <div className="flex items-center gap-1">
               <select
                 value={fields.couponMode}
@@ -253,7 +264,7 @@ export function MarginDetailFields({
             </div>
           </div>
           <label className="grid gap-0.5">
-            <span className={labelCls}>기타 비용 (원)</span>
+            <span className={labelCls}>기타 비용 (원)<FieldTag kind="optional" /></span>
             <input
               name="etc_cost"
               value={fields.etcCost}
@@ -266,7 +277,7 @@ export function MarginDetailFields({
           </label>
           <label className="grid gap-0.5">
             <span className={labelCls}>
-              배송비 (로켓그로스 입출고+배송){shipAuto && fee != null ? ' · 자동' : ''}
+              배송비 (로켓그로스 입출고+배송)<FieldTag kind="auto" />
             </span>
             <input
               name="shipping"
@@ -300,7 +311,8 @@ export function MarginDetailFields({
         <span className="text-xs font-semibold text-ink">② 해외배송 (중국→한국) · 로켓그로스 사이즈</span>
         <label className="grid gap-0.5">
           <span className={labelCls}>
-            해외배송비 (개당, 원){intlAuto && perUnit > 0 ? ' · 아래 계산기에서 자동' : ''}
+            해외배송비 (개당, 원)<FieldTag kind="auto" />
+            <span className="font-normal"> {intlAuto && perUnit > 0 ? '아래 계산기에서 자동' : '크기·수량을 넣으면 자동'}</span>
           </span>
           <input
             name="intl_shipping"

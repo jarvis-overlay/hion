@@ -1,6 +1,7 @@
 'use client';
 
 import FxCalculator from '@/components/FxCalculator';
+import { FieldLegend, FieldTag } from '@/components/FieldTag';
 import { MarginDetailFields } from '@/components/MarginDetailFields';
 import type { ShippingCalcState } from '@/components/ShippingCostCalculator';
 import type { useMarginFields } from '@/lib/useMarginFields';
@@ -24,9 +25,10 @@ export default function MarginFormBody({
   const intlShippingCalcInitial: ShippingCalcState | null = item.intl_shipping_calc || null;
   return (
     <>
+      <FieldLegend />
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-3xl">
         <label className="grid gap-0.5">
-          <span className="text-[10px] font-semibold text-inkSoft">판매가 (원)</span>
+          <span className="text-[10px] font-semibold text-inkSoft">판매가 (원)<FieldTag kind="required" /></span>
           <input
             name="price"
             value={f.price}
@@ -38,18 +40,18 @@ export default function MarginFormBody({
           />
         </label>
         <label className="grid gap-0.5">
-          <span className="text-[10px] font-semibold text-inkSoft">매출부가세 (자동)</span>
+          <span className="text-[10px] font-semibold text-inkSoft">매출부가세<FieldTag kind="auto" /></span>
           <input
             readOnly
             name="output_vat"
             value={f.price !== '' ? Math.round(f.outputVat) : ''}
             placeholder="판매가 ÷ 11"
             title="판매가 / 11로 자동 계산돼요"
-            className="border border-paperLine bg-paper text-inkSoft px-3 py-2 text-sm font-mono cursor-not-allowed"
+            className="border border-paperLine bg-profitBg text-inkSoft px-3 py-2 text-sm font-mono cursor-not-allowed"
           />
         </label>
         <label className="grid gap-0.5">
-          <span className="text-[10px] font-semibold text-inkSoft">매입 원가 (원)</span>
+          <span className="text-[10px] font-semibold text-inkSoft">매입 원가 (원)<FieldTag kind="required" /></span>
           <input
             name="cost"
             value={f.cost}

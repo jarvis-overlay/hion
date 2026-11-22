@@ -292,7 +292,7 @@ function OptionAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onD
           onChange={(e) => f.setPrice(e.target.value)}
           type="number"
           step="0.01"
-          placeholder="판매가"
+          placeholder="판매가 (필수)"
           className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
         />
         <input
@@ -309,7 +309,7 @@ function OptionAddForm({ sourcingItemId, onDone }: { sourcingItemId: string; onD
           onChange={(e) => f.setCost(e.target.value)}
           type="number"
           step="0.01"
-          placeholder="매입 원가"
+          placeholder="매입 원가 (필수)"
           className="border border-paperLine bg-white px-2 py-1.5 text-xs font-mono"
         />
       </div>
@@ -1413,15 +1413,12 @@ export default function SourcingList({
   function toggleTab(id: string, tab: CardTab) {
     setTabByItem((prev) => ({ ...prev, [id]: prev[id] === tab ? null : tab }));
   }
-  // 메모 기록은 다른 항목(옵션/공급처/체크리스트 등)과 달리 접어두지 않고
-  // 기본으로 바로 보이게 한다 - 공장과의 소통/기록을 메모로 주로 하기
-  // 때문에 매번 펼쳐야 보이면 불편하다는 요청. 그래서 "펼친 것"이 아니라
-  // "접은 것"만 집합으로 추적한다(기본값 = 전부 펼쳐짐).
-  const [collapsedNotesIds, setCollapsedNotesIds] = useState<Set<string>>(new Set());
+  // 메모 기록은 기본으로 접어 둔다(2026-11-22 요청: 카드가 길어져서). "펼친 것"만 집합으로 추적한다(기본값 = 전부 접힘).
+  const [expandedNotesIds, setExpandedNotesIds] = useState<Set<string>>(new Set());
   const [isPending, startTransition] = useTransition();
 
   function toggleNotesCollapsed(id: string) {
-    setCollapsedNotesIds((prev) => {
+    setExpandedNotesIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -1582,7 +1579,7 @@ export default function SourcingList({
             const isEditing = editingId === it.id;
             const isMarginExpanded = expandedMarginId === it.id;
             const activeTab = tabByItem[it.id] ?? null;
-            const isNotesCollapsed = collapsedNotesIds.has(it.id);
+            const isNotesCollapsed = !expandedNotesIds.has(it.id);
             const optionCount = (it.sourcing_item_options || []).length;
             const supplierCount = (it.sourcing_item_suppliers || []).length;
             const comparisonCount = (it.sourcing_item_comparisons || []).length;
@@ -1705,10 +1702,7 @@ export default function SourcingList({
                   </button>
                 )}
 
-                {/* 메모 기록은 공장과의 소통/기록을 주로 담당하는 핵심
-                    기능이라, 옵션/공급처/체크리스트처럼 접어두지 않고
-                    기본으로 바로 보이게 한다. 필요하면 카드별로 접을 수는
-                    있음. */}
+                {/* 메모 기록: 기본은 접힘, 눌러서 펼친다 (메모 개수는 접힌 상태에서도 제목에 보임) */}
                 <div>
                   <button
                     onClick={() => toggleNotesCollapsed(it.id)}

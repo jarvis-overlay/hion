@@ -40,7 +40,12 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
   const [cost, setCost] = useState(toStr(init.cost));
   const [couponMode, setCouponMode] = useState<CouponMode>('amount');
   const [couponValue, setCouponValue] = useState(toStr(init.coupon));
-  const [importVat, setImportVat] = useState(toStr(init.importVat));
+  // 매입부가세: 직접 입력하지 않으면 매입원가 ÷ 11로 자동 계산한다(직접 고치면 그 값을 쓴다).
+  // 저장돼 있던 값이 자동 계산값과 다르면 직접 입력한 값으로 보고 그대로 둔다.
+  const [importVatInput, setImportVatInput] = useState(toStr(init.importVat));
+  const [importVatManual, setImportVatManual] = useState(
+    init.importVat != null && Math.round((init.cost || 0) / 11) !== init.importVat
+  );
   const [feeRatePct, setFeeRatePct] = useState(
     init.feeRatePct != null ? String(init.feeRatePct) : String(DEFAULT_FEE_RATE_PCT)
   );
@@ -50,6 +55,17 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
   const [shipping, setShipping] = useState(toStr(init.shipping));
   const [intlShipping, setIntlShipping] = useState(toStr(init.intlShipping));
   const [etcCost, setEtcCost] = useState(toStr(init.etcCost));
+
+  const autoImportVat = cost === '' ? '' : String(Math.round((parseFloat(cost) || 0) / 11));
+  const importVat = importVatManual ? importVatInput : autoImportVat;
+  function setImportVat(v: string) {
+    setImportVatInput(v);
+    setImportVatManual(true);
+  }
+  function resetImportVat() {
+    setImportVatInput('');
+    setImportVatManual(false);
+  }
 
   const priceNum = parseFloat(price) || 0;
   const couponValueNum = parseFloat(couponValue) || 0;
@@ -90,7 +106,7 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
     setCost('');
     setCouponMode('amount');
     setCouponValue('');
-    setImportVat('');
+    resetImportVat();
     setFeeRatePct(String(DEFAULT_FEE_RATE_PCT));
     setAdRatePct(String(DEFAULT_AD_RATE_PCT));
     setShipping('');
@@ -110,6 +126,9 @@ export function useMarginFields(init: MarginFieldsInit = {}) {
     couponAmount,
     importVat,
     setImportVat,
+    importVatManual,
+    autoImportVat,
+    resetImportVat,
     feeRatePct,
     setFeeRatePct,
     adRatePct,
