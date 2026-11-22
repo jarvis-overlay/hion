@@ -1730,7 +1730,7 @@ export default function SourcingList({
                       {isNotesCollapsed && latestNote && (
                         <span className="block text-[11px] text-inkSoft truncate">
                           {latestNote.pinned ? '📌 ' : ''}
-                          {String(latestNote.body ?? '').replace(/s+/g, ' ')}
+                          {String(latestNote.body ?? '').replace(/\s+/g, ' ')}
                         </span>
                       )}
                     </span>
