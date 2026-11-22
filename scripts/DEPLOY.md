@@ -54,4 +54,5 @@ export PATH="$HOME/bin:$HOME/.npm-global/bin:$PATH"; pm2 list; curl -sI https://
 - **검증함**: `bash scripts/test-deploy-watch.sh` (가짜 git 저장소 + 가짜 npm/pm2/curl) 38개 확인 — 첫 배포, 변경 없을 때 무동작, lock 변경 시 설치, 빌드 실패 시 서비스 유지·재시도 대기, 설치 실패, 전환 후 확인 실패 시 롤백, 정적 파일 400 감지, 잠금(죽은/살아 있는), 서버 폴더 수정 충돌, 배포 중 스크립트 자체 교체.
 - **검증함(실제)**: `NEXT_DIST_DIR=.next-a`로 `next build` 성공, 같은 값으로 `next start` 후 `/login`과 `/_next/static/*` 모두 200. 빌드가 `tsconfig.json`을 건드리지 않음.
 - **실제 맥북에서 확인함 (2026-11-22)**: 바로가기로 연결한 뒤 launchd가 새 스크립트를 실행 → `서버를 .next-a 로 전환` → `배포 완료 (259f444…, 서비스 칸: .next-a)`, 상태 파일(`slot`=a, `deployed_sha`, `lock_hash`) 생성, `hion.cc/login`과 정적 파일 6개 모두 200.
-- **아직 못 본 것**: 푸시로 일어나는 두 번째 배포(b 칸으로 전환), 맥북 재부팅 후 `pm2 save`로 저장된 칸 복원, 빌드/설치 실패 시 실제 롤백(가짜 환경 시험만 함).
+- **푸시로 일어나는 전환도 확인함 (2026-11-22)**: 푸시(cbad650) 후 맥북이 스스로 `새 커밋 발견 → 빌드 → .next-b 전환 → 배포 완료`(약 2분), `slot`=b. 그동안 이 PC에서 8번 지켜본 `hion.cc/login`·CSS는 전부 200(끊김 없음).
+- **아직 못 본 것**: 맥북 재부팅 후 `pm2 save`로 저장된 칸 복원, 빌드/설치 실패 시 실제 롤백(가짜 환경 시험만 함).
