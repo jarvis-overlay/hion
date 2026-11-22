@@ -1594,6 +1594,14 @@ export default function SourcingList({
               (n) => n.entity_type === 'sourcing_item' && n.entity_id === it.id
             );
 
+            // 접힌 상태에서 보여 줄 대표 메모: 고정 메모 우선, 없으면 가장 최근
+            const latestNote =
+              [...itemNotes].sort(
+                (x, y) =>
+                  Number(!!y.pinned) - Number(!!x.pinned) ||
+                  new Date(y.created_at).getTime() - new Date(x.created_at).getTime()
+              )[0] || null;
+
             if (isEditing) {
               return (
                 <div key={it.id} className="card p-4">
@@ -1705,10 +1713,28 @@ export default function SourcingList({
                 {/* 메모 기록: 기본은 접힘, 눌러서 펼친다 (메모 개수는 접힌 상태에서도 제목에 보임) */}
                 <div>
                   <button
+                    type="button"
                     onClick={() => toggleNotesCollapsed(it.id)}
-                    className="text-xs font-semibold text-inkSoft hover:text-ink flex items-center gap-1"
+                    aria-expanded={!isNotesCollapsed}
+                    className={`w-full rounded-md px-3 py-2 text-left border transition-colors flex items-center justify-between gap-3 ${
+                      isNotesCollapsed ? 'bg-white border-paperLine hover:bg-paper' : 'bg-paper border-accent'
+                    }`}
                   >
-                    메모 기록 {itemNotes.length > 0 && `(${itemNotes.length})`} {isNotesCollapsed ? '▼' : '▲'}
+                    <span className="min-w-0">
+                      <span className="block text-sm font-bold text-ink">
+                        📝 메모 기록{' '}
+                        <span className={itemNotes.length > 0 ? 'text-accent' : 'text-inkSoft font-normal'}>
+                          {itemNotes.length > 0 ? `${itemNotes.length}건` : '없음'}
+                        </span>
+                      </span>
+                      {isNotesCollapsed && latestNote && (
+                        <span className="block text-[11px] text-inkSoft truncate">
+                          {latestNote.pinned ? '📌 ' : ''}
+                          {String(latestNote.body ?? '').replace(/s+/g, ' ')}
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 text-xs text-inkSoft">{isNotesCollapsed ? '펼치기 ▼' : '접기 ▲'}</span>
                   </button>
                   {!isNotesCollapsed && (
                     <div className="mt-1.5">
