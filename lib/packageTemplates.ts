@@ -158,4 +158,6 @@ export const BADGE_COLORS: { id: BadgeColor; name: string; hex: string }[] = [
   { id: 'purple', name: '보라', hex: '#6a3fa0' },
 ];
 export const normBadgeShape = (v: unknown): BadgeShape => (BADGE_SHAPES.some((s) => s.id === v) ? (v as BadgeShape) : 'circle');
-export const normBadgeColor = (v: unknown): BadgeColor => (BADGE_COLORS.some((c) => c.id === v) ? (v as BadgeColor) : 'white');
+// 쿠팡 광고 이미지 가이드는 수량 뱃지를 "흰 바탕 + 검은 외곽선·글자"만 허용한다. 예전에 저장된 값이나 말로 한 수정에서
+// 다른 색이 들어와도 항상 흰색으로 그린다(빨강 등은 이미지 가이드 위반으로 광고가 정지됨).
+export const normBadgeColor = (_v: unknown): BadgeColor => 'white';

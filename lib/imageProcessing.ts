@@ -517,6 +517,43 @@ export interface MainImageReport {
   adjusted: boolean; // 규정에 맞추려고 자르고 키웠는가
 }
 
+// 배경에 남은 "흐릿한 흰 얼룩"(AI가 글자를 지우다 남긴 옅은 회색 번짐, 순백이 아닌 232~254 값)을 순백으로 만든다.
+// 가장자리에서 이어진 거의 흰 영역만 칠하므로(상품 안쪽은 건드리지 않음) 흰 상품의 음영은 유지된다.
+// 쿠팡 광고 이미지 가이드: 오버레이·흐린 윤곽 금지. 이 얼룩이 상품 영역으로 잡혀 상품이 작아지는 문제도 같이 막는다.
+const HAZE_FROM = 232;
+export function whitenBackgroundHaze(data: Uint8Array, S: number): number {
+  const near = (p: number) => Math.min(data[p * 3], data[p * 3 + 1], data[p * 3 + 2]) >= HAZE_FROM;
+  const seen = new Uint8Array(S * S);
+  const stack: number[] = [];
+  const push = (p: number) => {
+    if (!seen[p] && near(p)) {
+      seen[p] = 1;
+      stack.push(p);
+    }
+  };
+  for (let i = 0; i < S; i++) {
+    push(i);
+    push((S - 1) * S + i);
+    push(i * S);
+    push(i * S + S - 1);
+  }
+  let changed = 0;
+  while (stack.length) {
+    const p = stack.pop() as number;
+    const o = p * 3;
+    if (data[o] !== 255 || data[o + 1] !== 255 || data[o + 2] !== 255) {
+      data[o] = data[o + 1] = data[o + 2] = 255;
+      changed++;
+    }
+    const x = p % S;
+    if (x > 0) push(p - 1);
+    if (x < S - 1) push(p + 1);
+    if (p >= S) push(p - S);
+    if (p < S * (S - 1)) push(p + S);
+  }
+  return changed;
+}
+
 export async function conformMainImage(buffer: Buffer): Promise<{ buffer: Buffer; report: MainImageReport }> {
   const S = THUMBNAIL_SIZE;
   const { data } = await sharp(buffer)
@@ -525,6 +562,15 @@ export async function conformMainImage(buffer: Buffer): Promise<{ buffer: Buffer
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
+  // 배경이 흰색일 때만(테두리가 대부분 흰색) 얼룩을 지운다. 회색·색 배경 이미지는 건드리지 않는다.
+  let ringWhite = 0;
+  for (let i = 0; i < S; i++) {
+    for (const p of [i, (S - 1) * S + i, i * S, i * S + S - 1]) {
+      if (Math.min(data[p * 3], data[p * 3 + 1], data[p * 3 + 2]) >= HAZE_FROM) ringWhite++;
+    }
+  }
+  const hazeCleaned = ringWhite / (S * 4) >= 0.95 ? whitenBackgroundHaze(data, S) > 0 : false;
+  const reencode = () => sharp(data, { raw: { width: S, height: S, channels: 3 } }).jpeg({ quality: 92 }).toBuffer();
 
   let minX = S, minY = S, maxX = -1, maxY = -1;
   let ringTotal = 0;
@@ -551,7 +597,7 @@ export async function conformMainImage(buffer: Buffer): Promise<{ buffer: Buffer
   const whiteBackground = ringTotal > 0 && ringNonWhite / ringTotal < 0.05;
   if (maxX < 0 || !whiteBackground) {
     // 상품을 못 찾았거나 배경이 흰색이 아니면 자르지 않고 그대로 두고 상태만 알려준다
-    return { buffer, report: { whiteBackground, fillRatio: 0, centered: false, adjusted: false } };
+    return { buffer: hazeCleaned ? await reencode() : buffer, report: { whiteBackground, fillRatio: 0, centered: false, adjusted: false } };
   }
 
   const bw = maxX - minX + 1;
@@ -561,7 +607,7 @@ export async function conformMainImage(buffer: Buffer): Promise<{ buffer: Buffer
   const offY = Math.abs((minY + maxY + 1) / 2 - S / 2) / S;
   const centered = offX < 0.01 && offY < 0.01;
   if (fillRatio >= MAIN_MIN_FILL && fillRatio < 0.995 && centered) {
-    return { buffer, report: { whiteBackground, fillRatio, centered, adjusted: false } };
+    return { buffer: hazeCleaned ? await reencode() : buffer, report: { whiteBackground, fillRatio, centered, adjusted: false } };
   }
 
   const crop = await sharp(data, { raw: { width: S, height: S, channels: 3 } })

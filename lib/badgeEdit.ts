@@ -24,7 +24,7 @@ export const DEFAULT_BADGE_SPEC: BadgeSpec = {
   color: 'white',
   scale: 1,
   corner: 'auto',
-  unit: 'P',
+  unit: '개', // 쿠팡 광고 가이드의 수량 뱃지 예시("2개", "x3", "1 set")와 같은 표기
 };
 
 const CORNERS: BadgeCorner[] = ['auto', 'bottom-right', 'bottom-left', 'top-right', 'top-left'];
@@ -39,7 +39,7 @@ export function readBadgeSpec(styleSpec: unknown): BadgeSpec {
     color: normBadgeColor(b?.color),
     scale: Number.isFinite(scale) ? Math.max(BADGE_SCALE_MIN, Math.min(BADGE_SCALE_MAX, scale)) : 1,
     corner: CORNERS.includes(b?.corner) ? b.corner : 'auto',
-    unit: b?.unit === '개' || b?.unit === 'x' ? b.unit : 'P',
+    unit: b?.unit === 'P' || b?.unit === 'x' ? b.unit : '개',
   };
 }
 
@@ -131,9 +131,9 @@ export function parseBadgeEdit(prompt: string, current: BadgeSpec): BadgeEditRes
     // 색
     for (const [re, color] of COLOR_WORDS) {
       if (re.test(t)) {
-        if (color !== current.color) {
-          next.color = color;
-          summary.push('배지 색을 바꿨어요');
+        if (color !== 'white') {
+          // 쿠팡 광고 이미지 가이드: 수량 뱃지는 흰 바탕 + 검은 외곽선·글자만 허용
+          summary.push('쿠팡 규정상 수량 배지는 흰 바탕·검은 글자만 가능해서 색은 그대로 뒀어요');
         }
         break;
       }

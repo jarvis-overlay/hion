@@ -1249,7 +1249,7 @@ export async function editThumbnailImage(
       if (!parsed.changed) {
         return {
           error:
-            '배지에서 바꿀 내용을 알아듣지 못했어요. 이렇게 적어보세요: "숫자 크게", "왼쪽 위로 옮겨줘", "빨간색으로", "5개로 표기", "배지 없애줘"',
+            '배지에서 바꿀 내용을 알아듣지 못했어요. 이렇게 적어보세요: "숫자 크게", "왼쪽 위로 옮겨줘", "x5로 표기", "배지 없애줘"',
         };
       }
       return applyBadgeSpec(supabase, img, parsed.spec, pk, prompt, parsed.summary);

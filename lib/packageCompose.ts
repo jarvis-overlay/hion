@@ -86,7 +86,7 @@ const BADGE_SIZE: Record<BadgeShape, { w: number; h: number }> = {
   square: { w: 120, h: 120 },
 };
 
-export function badgeText(total: number, unit: BadgeUnit = 'P'): string {
+export function badgeText(total: number, unit: BadgeUnit = '개'): string {
   return unit === '개' ? `${total}개` : unit === 'x' ? `x${total}` : `${total}P`;
 }
 

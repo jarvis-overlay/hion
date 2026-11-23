@@ -548,7 +548,7 @@ function ImageCard({
             rows={2}
             placeholder={
               String(img.color_label || '').startsWith('패키지 ') && / 배지$/.test(String(img.color_label))
-                ? '수정할 내용을 입력하세요 (예: 수량 숫자 크게 / 배지를 왼쪽 위로 / 빨간색으로 / 5개로 표기 / 배지 없애줘)'
+                ? '수정할 내용을 입력하세요 (예: 수량 숫자 크게 / 배지를 왼쪽 위로 / x5로 표기 / 배지 없애줘)'
                 : '수정할 내용을 입력하세요 (예: 그림자를 더 연하게 해줘, 제품을 살짝 왼쪽으로 옮겨줘)'
             }
             className="border border-paperLine bg-white px-2 py-1.5 text-[11px] w-full"
@@ -1472,13 +1472,13 @@ function ProjectEditor({
                             />
                             <span>좌우 반전</span>
                           </label>
-                          <label className="flex items-center gap-1" title="맨 위 모서리에 수량 배지(예: 5P)를 붙여요. 메인 이미지에만 붙어요">
+                          <label className="flex items-center gap-1" title="맨 위 모서리에 수량 배지(예: 5개)를 붙여요. 메인 이미지에만 붙어요">
                             <input
                               type="checkbox"
                               checked={!!p.badge}
                               onChange={(e) => patchPackage(p.id, (x) => ({ ...x, badge: e.target.checked }))}
                             />
-                            <span>수량 배지({packageUnitCount(p)}P)</span>
+                            <span>수량 배지({packageUnitCount(p)}개)</span>
                           </label>
                           {p.badge && (
                             <>
@@ -1494,18 +1494,9 @@ function ProjectEditor({
                                   </option>
                                 ))}
                               </select>
-                              <select
-                                value={p.badgeColor || 'white'}
-                                onChange={(e) => patchPackage(p.id, (x) => ({ ...x, badgeColor: e.target.value as BadgeColor }))}
-                                className="border border-paperLine rounded px-1 py-0.5 bg-white"
-                                aria-label="배지 색"
-                              >
-                                {BADGE_COLORS.map((b) => (
-                                  <option key={b.id} value={b.id}>
-                                    {b.name}
-                                  </option>
-                                ))}
-                              </select>
+                              <span className="text-[11px] text-inkSoft" title="쿠팡 광고 이미지 가이드: 수량 뱃지는 흰 바탕 + 검은 외곽선·글자만 허용돼요">
+                                흰색 고정(쿠팡 규정)
+                              </span>
                             </>
                           )}
                           {p.template && p.template !== 'grid' && p.template !== 'auto' && !templateFits(p.template, packageUnitCount(p)) && (
