@@ -60,7 +60,7 @@ async function fitInto(unit: Buffer, c: Cell) {
 export async function composeTemplate(id: TemplateId, units: Buffer[], opts: ComposeOptions = {}): Promise<Buffer> {
   const cells = templateCells(id, units.length, opts);
   const placed = [];
-  for (let i = 0; i < units.length; i++) placed.push(await fitInto(units[i], cells[i]));
+  for (let i = 0; i < cells.length; i++) placed.push(await fitInto(units[i], cells[i])); // single은 칸이 1개(상품 1개만 그림)
   return sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: '#ffffff' } })
     .composite(placed)
     .jpeg({ quality: 92 })

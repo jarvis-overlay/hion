@@ -1344,7 +1344,7 @@ export async function generatePackageThumbnailDetailed(
   } catch {
     // 형태를 못 재면 보통 비율로 본다
   }
-  const tpl = resolveTemplate(opts.template, units.length, aspect);
+  const tpl = resolveTemplate(opts.template, units.length, aspect, items.filter((it) => it.quantity > 0).length);
   // 배지 자리를 따로 비워두면 상품이 95% 미만이 되므로, 배지는 비워두지 않고 합성 후 빈 모서리에 붙인다
   // (패키지 메인 합성 -> 규정 맞춤(순백·중앙·95% 이상) -> 배지).
   const raw =

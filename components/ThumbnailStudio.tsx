@@ -1458,7 +1458,7 @@ function ProjectEditor({
                               <option value="grid">나열형 (같은 크기로 나란히)</option>
                               <option value="auto">자동 추천 (수량·형태에 맞춰)</option>
                               {PACKAGE_TEMPLATES.filter((t) => t.id !== 'grid').map((t) => (
-                                <option key={t.id} value={t.id} disabled={!templateFits(t.id, packageUnitCount(p))}>
+                                <option key={t.id} value={t.id} disabled={!templateFits(t.id, packageUnitCount(p)) || (t.id === 'single' && p.items.length !== 1)}>
                                   {t.name} ({t.min}~{t.max}개)
                                 </option>
                               ))}
@@ -1504,7 +1504,11 @@ function ProjectEditor({
                           )}
                           {p.template === 'auto' && (
                             <span className="text-[11px] text-inkSoft">
-                              {packageUnitCount(p) < 3 ? '2개 이하는 나열형으로 만들어요' : '상품이 가로로 넓은지 세로로 긴지 보고 골라요'}
+                              {p.items.length === 1 && packageUnitCount(p) >= 2
+                                ? '한 색상 여러 개는 "대표 1개 + 수량 배지"로 만들어요 (쿠팡 가이드 예시 방식)'
+                                : packageUnitCount(p) < 3
+                                  ? '2개 이하는 나열형으로 만들어요'
+                                  : '상품이 가로로 넓은지 세로로 긴지 보고 골라요'}
                             </span>
                           )}
                           {p.template && p.template !== 'grid' && p.template !== 'auto' && getTemplate(p.template) && (

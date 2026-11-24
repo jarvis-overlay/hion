@@ -12,7 +12,7 @@ export interface PackageSpec {
   additional: number; // 이 패키지로 만들 추가 이미지 개수 (0 ~ MAX_PACKAGE_ADDITIONAL)
   template?: TemplateChoice; // 배치 템플릿 (기본 grid = 나열형, auto = 수량·형태로 추천)
   flip?: boolean; // 좌우 반전
-  badge?: boolean; // 맨 위 모서리에 수량 배지("5P")를 붙인다
+  badge?: boolean; // 빈 모서리에 수량 배지("5개")를 붙인다
   badgeShape?: BadgeShape;
   badgeColor?: BadgeColor;
 }
@@ -72,7 +72,10 @@ export function parsePackages(raw: unknown): { packages: PackageSpec[]; warnings
     // 예전 값(layout: 'hero')도 받아준다
     const rawTpl = (p as any)?.template ?? ((p as any)?.layout === 'hero' ? 'hero-side' : 'grid');
     let template: TemplateChoice = rawTpl === 'auto' || (TEMPLATE_IDS as string[]).includes(rawTpl) ? rawTpl : 'grid';
-    if (template !== 'auto' && !templateFits(template, unitCount(kept))) {
+    if (template === 'single' && kept.length !== 1) {
+      warnings.push(`"대표 1개 + 수량 배지" 배치는 색상이 하나일 때만 돼서 "${packageLabel({ items: kept, additional: 0 })}"는 나열형으로 만들었어요.`);
+      template = 'grid';
+    } else if (template !== 'auto' && !templateFits(template, unitCount(kept))) {
       const t = getTemplate(template)!;
       warnings.push(`"${t.name}" 배치는 상품이 ${t.min}~${t.max}개일 때만 돼서 "${packageLabel({ items: kept, additional: 0 })}"는 나열형으로 만들었어요.`);
       template = 'grid';
@@ -89,6 +92,9 @@ export function parsePackages(raw: unknown): { packages: PackageSpec[]; warnings
   }
   return { packages, warnings };
 }
+
+// 이 구성이 "대표 1개 + 수량 배지"로 만들어지는가 (색상 1개 + 수량 2개 이상이고 템플릿이 single/자동 추천). 이때는 수량을 배지로만 알리므로 배지를 꼭 붙인다.
+export const isSingleLayout = (p: PackageSpec) => p.items.length === 1 && unitCount(p.items) >= 2 && (p.template === 'single' || p.template === 'auto');
 
 // 상품 n개를 한 장에 놓을 때의 줄/칸 수: 3개까지는 한 줄, 그 이상은 위아래 두 줄 이상
 export function packageGrid(n: number): { cols: number; rows: number } {
