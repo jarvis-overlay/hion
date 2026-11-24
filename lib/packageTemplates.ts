@@ -148,7 +148,7 @@ export const templateName = (id: string) => (id === 'auto' ? '자동 추천' : g
 // distinct = 서로 다른 색상(사진) 수. 한 색상만 여러 개면 "대표 1개 + 수량 배지"를 고른다.
 export function recommendTemplate(units: number, aspect = 1, distinct = 0): TemplateId {
   // 같은 상품 여러 개는 실제 개수만큼 같은 크기로 쌓아 보여준다 (수량 배지는 냉동식품에서만 허용되므로 글자로 수량을 알리지 않는다)
-  if (distinct === 1 && units >= 3 && units <= 8) return aspect >= 1.15 ? 'duo' : units <= 6 ? 'pyramid' : 'grid';
+  if (distinct === 1 && units >= 3 && units <= 8) return aspect >= 0.9 ? 'duo' : units <= 6 ? 'pyramid' : 'grid'; // 세로로 긴 상품만 다른 배치 (누끼 여백 때문에 가로 상품도 1.0 근처로 잴 수 있어 기준을 낮춤)
   if (units < 3) return 'grid';
   if (aspect >= 1.15) return 'hero-side';
   if (aspect <= 0.8) return 'hero-bottom';
