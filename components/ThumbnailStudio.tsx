@@ -1954,6 +1954,17 @@ export default function ThumbnailStudio({
         projectTitle: p.title || '',
       });
     }
+    // 패키지만 만들 때 올린 원본 사진: 패키지 메인 행의 style_spec.sources에 저장돼 있다 (id는 "행id#번호")
+    const pkgs = ((p.thumbnail_images || []) as any[])
+      .filter((i) => i.kind === 'main' && String(i.color_label || '').startsWith('패키지 ') && Array.isArray(i.style_spec?.sources))
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    for (const i of pkgs) {
+      (i.style_spec.sources as any[]).forEach((s, idx) => {
+        if (!s || typeof s.url !== 'string' || !s.url || seenUrls.has(s.url)) return;
+        seenUrls.add(s.url);
+        library.push({ id: `${i.id}#${idx}`, url: s.url, colorLabel: String(s.color || ''), projectId: p.id, projectTitle: p.title || '' });
+      });
+    }
   }
 
   if (active) {

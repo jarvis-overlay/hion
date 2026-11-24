@@ -1,6 +1,6 @@
 'use server';
 
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
 import { archiveOutput, swapWithPrevious } from '@/lib/imageHistory';
 import { createClient } from '@/lib/supabase/server';
@@ -515,6 +515,30 @@ const clampCount = (v: unknown, fallback: number) => {
 // 읽어 사진을 받아오므로 화면에서 임의 주소를 넣어 서버가 대신 접속하게 할 수 없다.
 const MAX_SAVED_PHOTOS = 12;
 
+// 패키지만 만들 때는 색상별 메인 행이 생기지 않아 올린 원본 사진이 어디에도 남지 않는다. 그래서 패키지 메인 행의
+// style_spec.sources에 원본 사진 주소를 같이 저장해 두고, "이전에 올린 사진" 목록에서 다시 고를 수 있게 한다.
+function packageSourcePhotos(styleSpec: unknown): { color: string; url: string }[] {
+  const s = (styleSpec as any)?.sources;
+  if (!Array.isArray(s)) return [];
+  return s.filter((x) => x && typeof x.url === 'string' && x.url).map((x) => ({ color: String(x.color ?? ''), url: x.url }));
+}
+
+// 같은 사진은 같은 경로(내용 해시)에 올려서, 다시 만들 때마다 저장소가 늘지 않고 목록에도 중복으로 뜨지 않는다.
+async function saveSourcePhoto(
+  supabase: ReturnType<typeof createClient>,
+  projectId: string,
+  src: BatchSource
+): Promise<string | null> {
+  const hash = createHash('sha1').update(src.buffer).digest('hex').slice(0, 20);
+  const path = `thumbnails/${projectId}/src-${hash}.${extFromContentType(src.mimeType)}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, src.buffer, { contentType: src.mimeType, upsert: true });
+  if (error) {
+    console.error('[thumbnails] 원본 사진 저장 실패:', error.message);
+    return null;
+  }
+  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
 interface SavedPhotoRef {
   id: string;
   colorLabel: string | null;
@@ -546,16 +570,24 @@ async function loadSavedPhotoSources(
   const out = new Map<string, BatchSource>();
   const unique = Array.from(new Set(ids));
   if (unique.length === 0) return out;
-  const { data, error } = await supabase.from('thumbnail_images').select('id, input_image_url').in('id', unique);
+  // id는 행 id(메인 썸네일의 원본 사진) 또는 "행id#번호"(패키지 메인에 같이 저장해 둔 원본 사진 N번째)
+  const rowIds = Array.from(new Set(unique.map((id) => id.split('#')[0])));
+  const { data, error } = await supabase.from('thumbnail_images').select('*').in('id', rowIds);
   if (error) {
     console.error('[thumbnails] 저장된 사진 조회 실패:', error.message);
     return out;
   }
+  const rows = new Map<string, any>((data || []).map((r: any) => [r.id, r]));
   await Promise.all(
-    (data || []).map(async (row: { id: string; input_image_url: string | null }) => {
-      if (!row.input_image_url) return;
+    unique.map(async (id) => {
+      const [rowId, idx] = id.split('#');
+      const row = rows.get(rowId);
+      if (!row) return;
+      const url: string | null =
+        idx === undefined ? row.input_image_url : packageSourcePhotos(row.style_spec)[Number(idx)]?.url ?? null;
+      if (!url) return;
       try {
-        out.set(row.id, await fetchImageFromUrl(row.input_image_url));
+        out.set(id, await fetchImageFromUrl(url));
       } catch (e) {
         console.error('[thumbnails] 저장된 사진 받기 실패:', e);
       }
@@ -797,7 +829,16 @@ export async function generateThumbnailBatch(
           notes.push(`"${label}" 수량 배지를 붙이지 못했어요: ${e?.message || e}`);
         }
       }
-      const saved = await savePackageMain(supabase, projectId, label, composite, shown, badgeSpec);
+      // 패키지만 만들 때는 올린 원본 사진이 다른 곳에 저장되지 않으므로 패키지 메인 행에 같이 남긴다
+      // (일반 메인도 함께 만들 때는 그 메인 행이 원본 사진을 갖고 있어 중복 저장하지 않는다)
+      const sources: { color: string; url: string }[] = [];
+      if (packageOnly) {
+        for (let i = 0; i < items.length; i++) {
+          const url = await saveSourcePhoto(supabase, projectId, items[i].productImage);
+          if (url) sources.push({ color: resolved[i].color, url });
+        }
+      }
+      const saved = await savePackageMain(supabase, projectId, label, composite, shown, badgeSpec, sources);
       if ('error' in saved) return { label, p, error: saved.error };
       return { label, p, composite };
     } catch (e: any) {
@@ -992,7 +1033,8 @@ async function savePackageMain(
   label: string,
   composite: Buffer,
   shown: Buffer = composite, // 화면에 보이는 메인 (배지가 붙은 것). composite는 배지 없는 합성본
-  badgeSpec?: BadgeSpec
+  badgeSpec?: BadgeSpec,
+  sources: { color: string; url: string }[] = [] // 만들 때 쓴 원본 사진 (이전에 올린 사진 목록에서 다시 쓰기 위해)
 ): Promise<{ error: string } | { success: true; url: string }> {
   await supabase.from('thumbnail_images').delete().eq('project_id', projectId).eq('kind', 'main').eq('color_label', label);
   const imageId = randomUUID();
@@ -1022,8 +1064,12 @@ async function savePackageMain(
     effect_prompt: null,
     color_label: label,
   };
-  let { error: insertErr } = await supabase.from('thumbnail_images').insert(badgeSpec ? { ...row, style_spec: { badge: badgeSpec } } : row);
-  if (insertErr && badgeSpec && /style_spec|schema cache|column/i.test(insertErr.message)) {
+  const spec: Record<string, any> = {};
+  if (badgeSpec) spec.badge = badgeSpec;
+  if (sources.length > 0) spec.sources = sources;
+  const hasSpec = Object.keys(spec).length > 0;
+  let { error: insertErr } = await supabase.from('thumbnail_images').insert(hasSpec ? { ...row, style_spec: spec } : row);
+  if (insertErr && hasSpec && /style_spec|schema cache|column/i.test(insertErr.message)) {
     // style_spec 컬럼이 없으면 배지 설정만 빼고 저장한다 (이후 배지 수정은 기본값에서 시작)
     ({ error: insertErr } = await supabase.from('thumbnail_images').insert(row));
   }
