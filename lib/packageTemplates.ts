@@ -12,7 +12,7 @@ export interface Cell extends Box {
   scale: number; // 칸 안에서 상품이 차지하는 비율 (1 = 꽉 채움)
 }
 
-export type TemplateId = 'grid' | 'hero-side' | 'hero-bottom' | 'pyramid' | 'stagger' | 'single';
+export type TemplateId = 'grid' | 'hero-side' | 'hero-bottom' | 'pyramid' | 'stagger' | 'single' | 'duo';
 export type TemplateChoice = TemplateId | 'auto';
 
 export interface TemplateDef {
@@ -38,6 +38,23 @@ const cell = (x: number, y: number, w: number, h: number, scale = 1): Cell => ({
 // 같은 크기로 나열 (줄 수는 상품 수에 맞춰 자동). 마지막 줄이 모자라면 가운데로.
 function gridCells(n: number, box: Box): Cell[] {
   const cols = n <= 3 ? Math.max(1, n) : n <= 6 ? 3 : 4;
+  const rows = Math.ceil(n / cols);
+  const cw = box.w / cols;
+  const ch = box.h / rows;
+  const out: Cell[] = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    const inRow = r === rows - 1 ? n - r * cols : cols;
+    const off = ((cols - inRow) * cw) / 2;
+    out.push(cell(box.x + off + c * cw, box.y + r * ch, cw, ch, 1));
+  }
+  return out;
+}
+
+// 2열로 같은 크기를 쌓는다 (마지막 줄이 모자라면 가운데로). 가로로 넓은 상품(속옷·양말)을 줄 사이 빈틈 없이 크게 보여준다.
+function duoCells(n: number, box: Box): Cell[] {
+  const cols = 2;
   const rows = Math.ceil(n / cols);
   const cw = box.w / cols;
   const ch = box.h / rows;
@@ -115,6 +132,7 @@ export const PACKAGE_TEMPLATES: TemplateDef[] = [
   { id: 'hero-bottom', name: '대표 + 가로줄', desc: '대표 1개 크게, 나머지는 아래 가로로', min: 3, max: 6, best: '세로로 긴 상품 (병·텀블러·우산)', cells: heroBottomCells },
   { id: 'pyramid', name: '삼각 쌓기', desc: '위는 적게, 아래는 많게', min: 3, max: 6, best: '정사각에 가까운 상품 (박스·컵·소품)', cells: pyramidCells },
   { id: 'single', name: '대표 1개 + 수량 배지', desc: '상품 1개를 크게, 수량은 배지로 (쿠팡 가이드 예시 방식)', min: 2, max: 99, best: '(사용 안 함) 수량 배지가 필요한 방식이라 냉동식품 외에는 광고 가이드 위반', cells: singleCells },
+  { id: 'duo', name: '2열 쌓기', desc: '같은 크기를 2열로 크게 쌓아서', min: 3, max: 8, best: '가로로 넓은 상품 여러 개 (속옷·양말·지갑)', cells: duoCells },
   { id: 'stagger', name: '엇갈려 겹치기', desc: '위아래로 엇갈리게 겹쳐서', min: 2, max: 6, best: '납작한 상품 (티셔츠·양말·수건)', cells: staggerCells },
 ];
 
@@ -130,7 +148,7 @@ export const templateName = (id: string) => (id === 'auto' ? '자동 추천' : g
 // distinct = 서로 다른 색상(사진) 수. 한 색상만 여러 개면 "대표 1개 + 수량 배지"를 고른다.
 export function recommendTemplate(units: number, aspect = 1, distinct = 0): TemplateId {
   // 같은 상품 여러 개는 실제 개수만큼 같은 크기로 쌓아 보여준다 (수량 배지는 냉동식품에서만 허용되므로 글자로 수량을 알리지 않는다)
-  if (distinct === 1 && units >= 3 && units <= 6) return 'pyramid';
+  if (distinct === 1 && units >= 3 && units <= 8) return aspect >= 1.15 ? 'duo' : units <= 6 ? 'pyramid' : 'grid';
   if (units < 3) return 'grid';
   if (aspect >= 1.15) return 'hero-side';
   if (aspect <= 0.8) return 'hero-bottom';

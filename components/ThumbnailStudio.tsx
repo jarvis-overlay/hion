@@ -1509,7 +1509,7 @@ function ProjectEditor({
                           )}
                           {p.template === 'auto' && (
                             <span className="text-[11px] text-inkSoft">
-                              {p.items.length === 1 && packageUnitCount(p) >= 3 && packageUnitCount(p) <= 6
+                              {p.items.length === 1 && packageUnitCount(p) >= 3 && packageUnitCount(p) <= 8
                                 ? '한 색상 여러 개는 같은 크기로 개수만큼 쌓아서 만들어요 (글자 없이 개수로 수량 표시)'
                                 : packageUnitCount(p) < 3
                                   ? '2개 이하는 나열형으로 만들어요'
