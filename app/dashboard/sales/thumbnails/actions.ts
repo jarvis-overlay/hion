@@ -799,11 +799,12 @@ export async function generateThumbnailBatch(
     // 수량 배지는 사용자가 직접 켠 경우에만 (쿠팡 광고 이미지 가이드: 배지는 냉동식품만 허용, 그 외는 위반)
     const badgeOn = !!p.badge;
     const label = packageLabel({ items: resolved, additional: p.additional, template: p.template, flip: p.flip, badge: badgeOn });
-    const items: { productImage: BatchSource; quantity: number }[] = [];
+    const items: { productImage: BatchSource; quantity: number; colorHint?: string }[] = [];
     for (const it of p.items) {
       const g = allGroups.find(([l]) => l && sameColor(l, it.color));
       if (!g) return { label, p, error: `"${it.color}" 색상으로 표시한 사진이 없어요. 사진마다 색상을 적어주세요.` };
-      items.push({ productImage: g[1][0], quantity: it.qty });
+      // 색상 이름을 같이 넘겨서, 사진 한 장에 여러 색상이 있어도 이 색상 상품 1개만 뽑게 한다
+      items.push({ productImage: g[1][0], quantity: it.qty, colorHint: it.color });
     }
     try {
       const built = await generatePackageThumbnailDetailed(items, { template: p.template, flip: p.flip });
@@ -811,6 +812,7 @@ export async function generateThumbnailBatch(
       // 사진에서 상품이 잘려 보이거나 해상도가 낮으면 색상별로 알려준다 (쿠팡 규정: 상품 전체가 선명해야 함)
       built.itemProblems.forEach((prob, i) => {
         for (const msg of describeCutProblems(prob, `"${label}"의 ${p.items[i]?.color || i + 1} 사진`)) notes.push(msg);
+        if (prob.colorWarning) notes.push(`⚠ "${label}": ${prob.colorWarning}`);
       });
       // 수량 배지는 메인에만 붙인다 (추가 이미지의 상품 사진으로 쓰는 composite에 배지가 섞이면 상품으로 오인됨).
       // 쿠팡 규정(상품 95% 이상)상 배지 자리를 따로 비우지 않으므로, 상품을 가리지 않는 빈 모서리에만 붙인다.

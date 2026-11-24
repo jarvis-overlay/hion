@@ -269,6 +269,92 @@ async function removeWhiteBackground(imageBuffer: Buffer): Promise<Buffer> {
   return sharp(data, { raw: { width, height, channels } }).png().toBuffer();
 }
 
+// 누끼에서 "가장 큰 덩어리"와 비슷한 크기의 덩어리만 남기고 작은 조각(옆 상품이 크롭에 걸쳐 남은 부분, 얼룩)은 지운다.
+// 사진 한 장에 같은 상품의 여러 색상이 나란히 있을 때, 고른 1개만 남기려고 쓴다.
+export async function keepMainComponents(cutoutPng: Buffer, minRatio = 0.2): Promise<Buffer> {
+  const { data, info } = await sharp(cutoutPng).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels } = info;
+  const N = W * H;
+  const label = new Int32Array(N); // 0 = 미방문/배경
+  const sizes: number[] = [0];
+  const stack = new Int32Array(N);
+  const ON = 24; // 이 이상 불투명하면 상품 픽셀로 본다
+  for (let s = 0; s < N; s++) {
+    if (label[s] !== 0 || data[s * channels + 3] <= ON) continue;
+    const id = sizes.length;
+    let top = 0;
+    let count = 0;
+    stack[top++] = s;
+    label[s] = id;
+    while (top > 0) {
+      const p = stack[--top];
+      count++;
+      const x = p % W;
+      const y = (p - x) / W;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= H) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= W || (dx === 0 && dy === 0)) continue;
+          const q = ny * W + nx;
+          if (label[q] === 0 && data[q * channels + 3] > ON) {
+            label[q] = id;
+            stack[top++] = q;
+          }
+        }
+      }
+    }
+    sizes.push(count);
+  }
+  if (sizes.length <= 2) return cutoutPng; // 덩어리가 없거나 하나뿐
+  const largest = Math.max(...sizes);
+  const keep = sizes.map((n) => n >= largest * minRatio);
+  let removed = 0;
+  for (let p = 0; p < N; p++) {
+    const id = label[p];
+    if (id !== 0 && !keep[id]) {
+      data[p * channels + 3] = 0;
+      removed++;
+    } else if (id === 0) {
+      data[p * channels + 3] = 0; // 아주 옅은 반투명 얼룩도 정리
+    }
+  }
+  if (removed === 0 && sizes.length === 2) return cutoutPng;
+  return sharp(data, { raw: { width: W, height: H, channels } }).png().toBuffer();
+}
+
+// 색상 이름(예: "블랙", "다크그레이", "베이지") -> 누끼의 평균색이 그 이름과 비슷한지 확인한다.
+// 아는 이름만 검사하고(모르는 이름은 검사하지 않음), 어긋나면 안내 문구를, 맞거나 모르면 null을 돌려준다.
+export async function colorMismatchNote(colorLabel: string, cutoutPng: Buffer): Promise<string | null> {
+  const name = colorLabel.replace(/\s+/g, '').toLowerCase();
+  const { data, info } = await sharp(cutoutPng).ensureAlpha().resize({ width: 200, height: 200, fit: 'inside' }).raw().toBuffer({ resolveWithObject: true });
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < data.length; i += info.channels) {
+    if (data[i + 3] < 200) continue;
+    r += data[i];
+    g += data[i + 1];
+    b += data[i + 2];
+    n++;
+  }
+  if (n < 50) return null;
+  r /= n; g /= n; b /= n;
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const sat = mx === 0 ? 0 : (mx - mn) / mx;
+  let ok: boolean | null = null; // null = 모르는 색 이름
+  if (/(다크그레이|진회색|차콜|짙은회색|darkgr[ae]y|charcoal)/.test(name)) ok = lum >= 45 && lum <= 140 && sat < 0.22;
+  else if (/(블랙|검정|검은|black)/.test(name)) ok = lum < 80 && sat < 0.35;
+  else if (/(화이트|흰|하양|white)/.test(name)) ok = lum > 205 && sat < 0.15;
+  else if (/(그레이|회색|gr[ae]y)/.test(name)) ok = lum >= 80 && lum <= 200 && sat < 0.22;
+  else if (/(네이비|남색|navy)/.test(name)) ok = lum < 110 && b > r + 10;
+  else if (/(브라운|갈색|밤색|brown)/.test(name)) ok = r > b + 25 && lum < 160 && sat > 0.25;
+  else if (/(베이지|아이보리|크림|beige|ivory|cream)/.test(name)) ok = lum > 165 && sat < 0.35 && r >= b;
+  if (ok === null || ok) return null;
+  return `"${colorLabel}"로 지정했는데 뽑힌 상품의 색이 달라 보여요(평균색 rgb ${Math.round(r)},${Math.round(g)},${Math.round(b)}). 사진에서 다른 색을 골랐을 수 있으니 결과를 확인해 주세요. 맞지 않으면 그 색만 따로 찍은 사진을 올리면 정확해요.`;
+}
+
 // "상세페이지 제작" - 섹션 하나(첨부 이미지 + 키워드/분위기/설명)를
 // 근거로 상세페이지 한 장면을 만든다. 실측 결과 이미지 생성 모델이
 // 한글을 깨진 글자로 렌더링하는 문제가 프롬프트 지시만으로는 해결이
@@ -805,12 +891,20 @@ export async function isImageVisuallyUnchanged(before: Buffer, after: Buffer): P
 // 정확히 찾아서 그 영역만 크롭한다 - 옆에 있던 소품(책상 등)은
 // 크롭 단계에서 물리적으로 아예 잘려나가므로 이후 단계에서 다시
 // 나타날 수가 없다.
+// colorHint: 사진 한 장에 같은 상품의 여러 색상이 같이 찍혀 있을 때(예: 양말 5색), 그중 이 색상(옵션) 1개만 찾게 한다.
+function colorHintLine(colorHint?: string): string {
+  const c = (colorHint || '').trim();
+  if (!c) return '';
+  return `\n\n[색상 지정] 이 사진에는 같은 상품의 여러 색상(옵션)이 함께 있을 수 있습니다. 판매 옵션 이름은 "${c}"입니다. 사진에 이 색상의 상품이 있으면 **그 색상 상품 딱 1개**만 선택하세요 (다른 색상은 제외, 같은 색이 여러 개여도 1개). 옵션 이름이 색상이 아니거나 어느 것인지 알 수 없으면 가장 대표적인 상품 1개를 고르세요.`;
+}
+
 async function detectProductBoundingBox(
   imageBuffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  colorHint?: string
 ): Promise<{ xMin: number; yMin: number; xMax: number; yMax: number } | null> {
   const apiKey = requireEnv('GEMINI_API_KEY');
-  const prompt = `이 사진은 이커머스 상품 사진입니다. 사진 속에 여러 물건이 함께 있더라도, **실제로 판매하는 메인 상품 하나**의 위치를 찾아주세요 (옆에 같이 연출된 다른 가구·소품은 제외).
+  const prompt = `이 사진은 이커머스 상품 사진입니다. 사진 속에 여러 물건이 함께 있더라도, **실제로 판매하는 메인 상품 하나**의 위치를 찾아주세요 (옆에 같이 연출된 다른 가구·소품은 제외).${colorHintLine(colorHint)}
 
 반드시 아래 JSON 객체 형식으로만 응답하세요:
 {
@@ -909,11 +1003,15 @@ async function cropByBox(imageBuffer: Buffer, box: ProductBox | null, padRatio: 
 // 흰 배경)을 remove.bg에 넘기면 매팅이 훨씬 쉬워지고 정확해진다.
 async function cleanProductPhotoForCutout(
   imageBuffer: Buffer,
-  mimeType: string
+  mimeType: string,
+  colorHint?: string
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   const apiKey = requireEnv('GEMINI_API_KEY');
+  const colorNote = colorHint?.trim()
+    ? `\n\n(참고: 판매 옵션 이름은 "${colorHint.trim()}"입니다. 사진에 다른 색상 상품이 조금이라도 걸쳐 보이면 그것은 지우고, 이 색상 상품 1개만 남겨주세요. 상품의 색을 바꾸거나 다른 색 상품을 그려 넣지 마세요.)`
+    : '';
   const instruction =
-    '이 사진은 이커머스에서 실제로 판매하는 상품 하나를 촬영한 사진입니다. 아래 작업을 해주세요:\n\n1. 사진에서 **실제로 판매하는 메인 상품 하나만** 남기고, 함께 연출된 다른 가구·소품·장식(예: 상품 옆에 놓인 책상/테이블/화분 등)은 전부 지워주세요.\n2. 지운 자리와 나머지 배경은 전부 **순백색(#FFFFFF)**으로 채워주세요.\n3. **어떤 문자·숫자·기호도 남기지 마세요** - 한국어든 중국어든 영어든 로고든 워터마크든 전부 지워주세요.\n4. 남기는 상품 자체의 실제 형태·색상·디자인·비율은 절대 바꾸지 마세요.\n\n결과물은 "상품 하나 + 순백색 배경"이어야 합니다.';
+    '이 사진은 이커머스에서 실제로 판매하는 상품 하나를 촬영한 사진입니다. 아래 작업을 해주세요:\n\n1. 사진에서 **실제로 판매하는 메인 상품 하나만** 남기고, 함께 연출된 다른 가구·소품·장식(예: 상품 옆에 놓인 책상/테이블/화분 등)은 전부 지워주세요.\n2. 지운 자리와 나머지 배경은 전부 **순백색(#FFFFFF)**으로 채워주세요.\n3. **어떤 문자·숫자·기호도 남기지 마세요** - 한국어든 중국어든 영어든 로고든 워터마크든 전부 지워주세요.\n4. 남기는 상품 자체의 실제 형태·색상·디자인·비율은 절대 바꾸지 마세요.\n\n결과물은 "상품 하나 + 순백색 배경"이어야 합니다.' + colorNote;
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_GEN_MODEL}:generateContent?key=${apiKey}`,
@@ -985,6 +1083,7 @@ export interface ProductCutoutResult {
   cutout: Buffer;
   clipped: CutSide[]; // 상품이 잘려 보이는 쪽 (재시도 후에도 남은 것)
   lowRes: boolean; // 원본 해상도가 낮아 확대하면 흐려질 수 있음
+  colorWarning?: string; // 지정한 색상과 결과 상품의 색이 달라 보일 때의 안내
 }
 
 export function describeCutProblems(r: { clipped: CutSide[]; lowRes: boolean }, label = '사진'): string[] {
@@ -1000,18 +1099,25 @@ export function describeCutProblems(r: { clipped: CutSide[]; lowRes: boolean }, 
   return out;
 }
 
-async function buildProductCutout(productImage: { buffer: Buffer; mimeType: string }): Promise<ProductCutoutResult> {
-  const box = await detectProductBoundingBox(productImage.buffer, productImage.mimeType);
+async function buildProductCutout(
+  productImage: { buffer: Buffer; mimeType: string },
+  colorHint?: string
+): Promise<ProductCutoutResult> {
+  const hint = colorHint?.trim() || undefined;
+  const box = await detectProductBoundingBox(productImage.buffer, productImage.mimeType, hint);
   const make = async (pad: number) => {
     const cropped = await cropByBox(productImage.buffer, box, pad);
-    const cleaned = await cleanProductPhotoForCutout(cropped, productImage.mimeType);
-    const cutout = await removeWhiteBackground(cleaned.buffer);
+    const cleaned = await cleanProductPhotoForCutout(cropped, productImage.mimeType, hint);
+    let cutout = await removeWhiteBackground(cleaned.buffer);
+    // 색상을 지정한 경우(한 사진에 여러 색상이 같이 있을 수 있음): 옆 상품이 크롭에 걸쳐 남은 조각·얼룩은 지운다
+    if (hint) cutout = await keepMainComponents(cutout);
     return { cutout, sides: await touchedSides(cutout) };
   };
-  let best = await make(0.1);
+  // 색상 지정 시에는 옆 색상이 크롭에 안 들어오도록 여유를 좁게 잡는다
+  let best = await make(hint ? 0.04 : 0.1);
   if (best.sides.length > 0 && box) {
     try {
-      const wider = await make(0.3);
+      const wider = await make(hint ? 0.12 : 0.3);
       if (wider.sides.length < best.sides.length) best = wider;
     } catch {
       // 두 번째 시도가 실패하면 첫 결과를 그대로 쓴다
@@ -1024,7 +1130,16 @@ async function buildProductCutout(productImage: { buffer: Buffer; mimeType: stri
   } catch {
     lowRes = false;
   }
-  return { cutout: best.cutout, clipped: best.sides, lowRes };
+  // AI가 고른 상품이 지정한 색상과 다르면(다른 색을 골랐거나 색이 바뀜) 알린다
+  let colorWarning: string | undefined;
+  if (hint) {
+    try {
+      colorWarning = (await colorMismatchNote(hint, best.cutout)) || undefined;
+    } catch {
+      colorWarning = undefined;
+    }
+  }
+  return { cutout: best.cutout, clipped: best.sides, lowRes, colorWarning };
 }
 
 export interface GenerateThumbnailInput {
@@ -1326,10 +1441,10 @@ export async function generatePackageThumbnail(
 
 // itemProblems[i]: items[i] 사진에서 감지한 잘림/저화질 안내 (없으면 빈 배열)
 export async function generatePackageThumbnailDetailed(
-  items: { productImage: { buffer: Buffer; mimeType: string }; quantity: number }[],
+  items: { productImage: { buffer: Buffer; mimeType: string }; quantity: number; colorHint?: string }[],
   opts: { template?: TemplateChoice; flip?: boolean; badge?: boolean } = {}
-): Promise<{ buffer: Buffer; itemProblems: { clipped: CutSide[]; lowRes: boolean }[] }> {
-  const builts = await Promise.all(items.map((it) => buildProductCutout(it.productImage)));
+): Promise<{ buffer: Buffer; itemProblems: { clipped: CutSide[]; lowRes: boolean; colorWarning?: string }[] }> {
+  const builts = await Promise.all(items.map((it) => buildProductCutout(it.productImage, it.colorHint)));
   const cutouts = builts.map((b) => b.cutout);
   const units: Buffer[] = [];
   items.forEach((it, i) => {
@@ -1353,7 +1468,7 @@ export async function generatePackageThumbnailDetailed(
       : await composeTemplate(tpl, units, { flip: opts.flip });
   return {
     buffer: (await conformMainImage(raw)).buffer,
-    itemProblems: builts.map((b) => ({ clipped: b.clipped, lowRes: b.lowRes })),
+    itemProblems: builts.map((b) => ({ clipped: b.clipped, lowRes: b.lowRes, colorWarning: b.colorWarning })),
   };
 }
 
