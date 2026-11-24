@@ -114,7 +114,7 @@ export const PACKAGE_TEMPLATES: TemplateDef[] = [
   { id: 'hero-side', name: '대표 + 세로줄', desc: '대표 1개 크게, 나머지는 옆에 세로로', min: 3, max: 6, best: '가로로 넓은 상품 (속옷·양말·지갑)', cells: heroSideCells },
   { id: 'hero-bottom', name: '대표 + 가로줄', desc: '대표 1개 크게, 나머지는 아래 가로로', min: 3, max: 6, best: '세로로 긴 상품 (병·텀블러·우산)', cells: heroBottomCells },
   { id: 'pyramid', name: '삼각 쌓기', desc: '위는 적게, 아래는 많게', min: 3, max: 6, best: '정사각에 가까운 상품 (박스·컵·소품)', cells: pyramidCells },
-  { id: 'single', name: '대표 1개 + 수량 배지', desc: '상품 1개를 크게, 수량은 배지로 (쿠팡 가이드 예시 방식)', min: 2, max: 99, best: '같은 상품 여러 개 묶음 (한 색상) - 쿠팡 광고 이미지 가이드에 가장 안전', cells: singleCells },
+  { id: 'single', name: '대표 1개 + 수량 배지', desc: '상품 1개를 크게, 수량은 배지로 (쿠팡 가이드 예시 방식)', min: 2, max: 99, best: '(사용 안 함) 수량 배지가 필요한 방식이라 냉동식품 외에는 광고 가이드 위반', cells: singleCells },
   { id: 'stagger', name: '엇갈려 겹치기', desc: '위아래로 엇갈리게 겹쳐서', min: 2, max: 6, best: '납작한 상품 (티셔츠·양말·수건)', cells: staggerCells },
 ];
 
@@ -129,7 +129,8 @@ export const templateName = (id: string) => (id === 'auto' ? '자동 추천' : g
 // 수량과 상품 형태(가로/세로 비율 평균, 모르면 1)로 알맞은 템플릿을 고른다.
 // distinct = 서로 다른 색상(사진) 수. 한 색상만 여러 개면 "대표 1개 + 수량 배지"를 고른다.
 export function recommendTemplate(units: number, aspect = 1, distinct = 0): TemplateId {
-  if (distinct === 1 && units >= 2) return 'single';
+  // 같은 상품 여러 개는 실제 개수만큼 같은 크기로 쌓아 보여준다 (수량 배지는 냉동식품에서만 허용되므로 글자로 수량을 알리지 않는다)
+  if (distinct === 1 && units >= 3 && units <= 6) return 'pyramid';
   if (units < 3) return 'grid';
   if (aspect >= 1.15) return 'hero-side';
   if (aspect <= 0.8) return 'hero-bottom';
@@ -139,8 +140,9 @@ export function recommendTemplate(units: number, aspect = 1, distinct = 0): Temp
 // 고른 템플릿을 실제로 쓸 수 있는 것으로 바꾼다 (자동 추천 풀기, 수량이 안 맞으면 나열형)
 export function resolveTemplate(choice: TemplateChoice | undefined, units: number, aspect = 1, distinct = 0): TemplateId {
   const pick = !choice || choice === 'auto' ? (choice === 'auto' ? recommendTemplate(units, aspect, distinct) : 'grid') : choice;
-  // single은 상품 1개만 그리므로 색상이 하나일 때만 쓴다 (여러 색이면 다른 색이 빠짐)
-  if (pick === 'single' && distinct !== 1) return 'grid';
+  // single(대표 1개 + 수량 배지)은 수량을 글자 배지로만 알리는데, 쿠팡 광고 이미지 가이드는 수량 배지를 냉동식품만 허용해서
+  // 그 외 카테고리는 "텍스트 또는 상품과 무관한 요소" 위반으로 광고가 중지된다. 예전에 저장된 값이 와도 나열형으로 만든다.
+  if (pick === 'single') return 'grid';
   return templateFits(pick, units) ? pick : 'grid';
 }
 

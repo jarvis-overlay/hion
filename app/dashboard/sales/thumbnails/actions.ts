@@ -21,7 +21,7 @@ import {
   describeStagedMain,
   type ThumbnailPosition,
 } from '@/lib/imageProcessing';
-import { parsePackages, packageLabel, sameColor, isSingleLayout } from '@/lib/thumbnailPackage';
+import { parsePackages, packageLabel, sameColor } from '@/lib/thumbnailPackage';
 import { placeCountBadge } from '@/lib/packageCompose';
 import { parseBadgeEdit, parsePackageLabel, readBadgeSpec, type BadgeSpec } from '@/lib/badgeEdit';
 import { generateThumbnailCopies, sanitizeThumbnailCopy } from '@/lib/ai';
@@ -796,8 +796,8 @@ export async function generateThumbnailBatch(
   const packageResults = await mapLimit(packages, 2, async (p) => {
     // 색상 이름은 올린 사진의 라벨 표기로 통일한다 (공백/대소문자만 다른 입력도 같은 색으로 봄)
     const resolved = p.items.map((it) => ({ color: allGroups.find(([l]) => l && sameColor(l, it.color))?.[0] ?? it.color, qty: it.qty }));
-    // "대표 1개 + 수량 배지"는 수량을 배지로만 알리므로 배지를 꼭 붙인다
-    const badgeOn = !!p.badge || isSingleLayout(p);
+    // 수량 배지는 사용자가 직접 켠 경우에만 (쿠팡 광고 이미지 가이드: 배지는 냉동식품만 허용, 그 외는 위반)
+    const badgeOn = !!p.badge;
     const label = packageLabel({ items: resolved, additional: p.additional, template: p.template, flip: p.flip, badge: badgeOn });
     const items: { productImage: BatchSource; quantity: number }[] = [];
     for (const it of p.items) {

@@ -1457,7 +1457,7 @@ function ProjectEditor({
                             >
                               <option value="grid">나열형 (같은 크기로 나란히)</option>
                               <option value="auto">자동 추천 (수량·형태에 맞춰)</option>
-                              {PACKAGE_TEMPLATES.filter((t) => t.id !== 'grid').map((t) => (
+                              {PACKAGE_TEMPLATES.filter((t) => t.id !== 'grid' && t.id !== 'single').map((t) => (
                                 <option key={t.id} value={t.id} disabled={!templateFits(t.id, packageUnitCount(p)) || (t.id === 'single' && p.items.length !== 1)}>
                                   {t.name} ({t.min}~{t.max}개)
                                 </option>
@@ -1480,6 +1480,11 @@ function ProjectEditor({
                             />
                             <span>수량 배지({packageUnitCount(p)}개)</span>
                           </label>
+                          {p.badge && (
+                            <span className="text-[11px] text-red-600 font-semibold">
+                              ⚠ 쿠팡 광고 이미지 가이드는 수량 배지를 냉동식품만 허용해요. 그 외 상품은 "텍스트 또는 상품과 무관한 요소"로 광고가 중지돼요.
+                            </span>
+                          )}
                           {p.badge && (
                             <>
                               <select
@@ -1504,8 +1509,8 @@ function ProjectEditor({
                           )}
                           {p.template === 'auto' && (
                             <span className="text-[11px] text-inkSoft">
-                              {p.items.length === 1 && packageUnitCount(p) >= 2
-                                ? '한 색상 여러 개는 "대표 1개 + 수량 배지"로 만들어요 (쿠팡 가이드 예시 방식)'
+                              {p.items.length === 1 && packageUnitCount(p) >= 3 && packageUnitCount(p) <= 6
+                                ? '한 색상 여러 개는 같은 크기로 개수만큼 쌓아서 만들어요 (글자 없이 개수로 수량 표시)'
                                 : packageUnitCount(p) < 3
                                   ? '2개 이하는 나열형으로 만들어요'
                                   : '상품이 가로로 넓은지 세로로 긴지 보고 골라요'}
