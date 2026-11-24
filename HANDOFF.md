@@ -6,6 +6,12 @@
 
 이 PC = Windows `KW`(Tailscale 100.85.93.4, 사용자 계정 `user`, 프로젝트 `C:\Users\user\Desktop\py\hion`). 아래 "원격 접속" 절들에 나오는 `DESKTOP-2NH6PEF`(100.103.130.85, jarvis)는 **다른 윈도우 PC**다. 운영 서버는 **맥북**(`gim-ug-ui-MacBookPro`, 계정 `wook`, `https://hion.cc`)이고 `git push`(main) = 운영 배포다. (이 세션 초반에 내가 "운영은 Vercel"이라고 잘못 적었던 것을 사용자가 정정했고 문서도 고쳤다.)
 
+### ▶ 개발 체계 변경 (2026-11-25, 이 세션)
+- 회사용 키트(`claude-dev-system-kit-personal.zip`)를 hion용으로 개인화해 `tools/dev-system/`에 넣음. 기존 `/build`와 `.claude/agents/`(5개)는 삭제하고 `/dev`·`/resume`·`/handover`·`/project-setup` + 에이전트 4개(`dev-planner`·`dev-implementer`·`dev-reviewer`·`dev-verifier`)로 대체. 규칙은 `CLAUDE.md` "개발 체계".
+- 가드 훅은 프로젝트 `.claude/dev-system.json`(`allow_main_push: true`)을 읽어 main 푸시를 허용(강제 푸시·`--no-verify`·`git add -A`·시크릿 스테이징은 계속 차단). 이 파일이 없는 프로젝트는 main 푸시가 차단됨.
+- **아직 안 한 것**: 각 PC(jarvis·wook)의 `~/.claude`에 설치(`python tools/dev-system/install.py --dry-run` 후 설치 → 새 세션). 임시 폴더 설치·재설치·제거와 가드 시험(43+7건)만 확인했고, 실제 `/dev` 실행·에이전트 호출은 설치 후 처음 써 봐야 확인됨. 변경은 아직 커밋·푸시 전.
+- 인수인계는 계속 상세하게 유지(이력 축소·이관 안 함). `/resume`은 맨 위 "지금 상태·남은 일"부터 읽음.
+
 ### ▶ 지금 상태·남은 일 (2026-11-25 기준, 새 창에서 이어가기용)
 - `main` = origin 동기화, 마지막 코드 커밋 `e772ca3`(맥북 배포 반영은 미확인 — 필요하면 사용자가 맥북에서 `tail -30 /Users/wook/.pm2/autodeploy.log`).
 - 이번 흐름 요약: 쿠팡 광고 "이미지 가이드 위반" 반려 → 진짜 사유는 수량 배지(냉동식품 전용 예외) → 배지 기본 끔 + 경고, `single` 숨김 → 한 색상 여러 개는 `duo`(2열 쌓기, 세로로 긴 상품이 아니면 aspect>=**0.9** 기준, `4f6ca8d`) → 원본 사진 저장(`style_spec.sources`) → 색상 라벨 힌트로 사진 속 해당 색 1개만 뽑기(`e772ca3`). (0-e의 1.15는 옛 값, 현재 0.9.)

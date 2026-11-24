@@ -21,12 +21,12 @@ Next.js 14 App Router + Supabase. **운영 서버는 맥북**(`https://hion.cc`,
 2. `node node_modules/typescript/bin/tsc --noEmit -p .` (web-push 오류는 무시)
 3. 복사한 패키지와 `tsconfig.tsbuildinfo` 삭제
 
-## 개발 체계 (에이전트 협업)
-큰 기능·구조 변경·반복되는 버그는 `/build <요청>` 으로 아래 순서를 따른다 (`.claude/commands/build.md`).
-기획 검증 → 설계/효율 검토 → 개발 → 교차 검증(코드 검수 + 사용자 관점 QA) → 지적 반영 → 완료 보고.
-한 줄 수정·문구 변경 같은 작은 일은 바로 처리한다.
-
-에이전트(`.claude/agents/`): `planner`(기획 검증), `architect`(설계·효율), `developer`(구현), `reviewer`(코드 검수), `qa`(사용자 관점 검증).
-- 서로의 결과를 그대로 믿지 않는다: 검수/QA가 지적하면 개발이 고치고 다시 검증한다(최대 3회).
+## 개발 체계 (개인용 개발부서 키트: `tools/dev-system/`)
+`/resume`(시작) → `/dev <요청>` → `/handover`(종료). 설치는 PC마다 `python tools/dev-system/install.py` (설명: `tools/dev-system/README.md`). 새 세션을 열어야 보인다.
+- 규모 S(한 줄·문구)는 에이전트 없이 직접 수정 + `tsc`. M은 `dev-planner`→`dev-implementer`→`dev-reviewer`. L(AI 생성 로직·결제·인증·스키마·외부 시스템)은 계획 승인 + 높음 지적은 `dev-verifier`(opus) 교차 검증.
+- 리뷰어는 구현자 설명 없이 `git diff`와 완료 기준만 본다. 타입 검사(위 "검증 규칙")는 리뷰어가 돌린다.
+- 이 프로젝트는 `.claude/dev-system.json`의 `allow_main_push`로 main 푸시를 허용한다(푸시=배포). 강제 푸시·`--no-verify`·`git add -A`·시크릿 스테이징은 가드 훅이 계속 막는다. 큰·위험한 변경은 위 규칙대로 feature 브랜치 + Preview 후 머지.
+- `/handover`는 `HANDOFF.md`를 **상세하게** 갱신한다(이력을 줄이지 않음). `/resume`은 그중 맨 위 "지금 상태·남은 일"부터 읽는다.
+- **세션 시작 시(어느 PC든) 먼저 `python tools/dev-system/install.py --check`를 실행**한다. "다름/없음"이면 사용자에게 알리고, 승인받아 `python tools/dev-system/install.py`로 설치/갱신한 뒤 "새 세션을 열어야 반영된다"고 안내한다. (사용자가 PC를 옮겨도 잊지 않게 하는 장치. `/resume`도 같은 확인을 한다.)
 - 결과 보고는 "무엇을 만들었나 / 확인한 것 / 확인 못 한 것(실제 API·화면)"을 구분해 정직하게 쓴다.
 - 실제 Gemini/Supabase 동작은 이 PC에서 검증할 수 없다. 못 본 것은 본 것처럼 말하지 않는다.
