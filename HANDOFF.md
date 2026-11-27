@@ -151,6 +151,7 @@
 - 실제 로그인 화면·Supabase 저장·Gemini·Bright Data는 로컬에서 못 본다. 못 본 것은 보고서에 "확인 못 함"으로 쓴다.
 
 ### 메모리에만 있던 내용 (이 문서로 옮김)
+- **사용자는 PowerShell/터미널 명령을 쓰지 않는다(여러 번 강조, 2026-11-27).** 명령어를 붙여넣으라고 안내하지 말고, 내가 직접 실행하거나 웹 화면 클릭 절차로 안내하거나, 맥북 작업은 맥북 Claude Code에게 시킬 말(요청문)로 바꿔 준다.
 - **DB 변경**: Supabase CLI 마이그레이션만 쓴다(`migration new` → SQL 작성 → `db push --remote`, 파일은 커밋). `supabase/PENDING_MIGRATIONS.md`와 `supabase/*.sql` 낱개 파일은 2026-11-05 이전 기록이라 참고용. 에이전트 모드에서 운영 DB를 바꾸는 명령은 `--yes`가 필요하고 사용자 승인을 먼저 받는다.
 - **운영 구조**: 운영은 맥북(`https://hion.cc`, pm2 + Cloudflare Tunnel). `origin/main`만 90초마다 감시해 자동 배포, feature 브랜치는 운영에 영향 없음. 상세는 `PROCESS_ARCHITECTURE.md`, `SETUP_MACOS_SELFHOST.md`.
 - **2026-11-05 기록 이후 상태를 확인 못 한 항목**: ① Google Cloud OAuth redirect URI와 Supabase Auth redirect URL에 `https://hion.cc/...` 추가 여부, ② 맥북 `.env.local`의 `NEXT_PUBLIC_APP_URL`이 `hion.vercel.app`이 아닌 `hion.cc`인지(카카오 알림 링크에 영향), ③ Vercel 프로젝트 정리 여부(요금). 해결됐다면 이 줄을 지운다.
