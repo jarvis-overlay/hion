@@ -94,7 +94,7 @@ async function unlockerMarkdown(
           res.ok
             ? '쿠팡이 페이지를 막았거나 내용이 비어 있어요 (캡차 가능성). 잠시 뒤 다시 눌러보세요'
             : res.status === 401 || res.status === 403
-              ? `Bright Data 인증 실패 (HTTP ${res.status}): 서버의 BRIGHTDATA_API_KEY가 틀렸거나 만료·정지됐을 수 있어요. 관리자가 Bright Data 키와 계정 상태(잔액)를 확인해야 해요. 그동안은 비교 상품을 직접 추가해 주세요`
+              ? `Bright Data 인증 실패 (HTTP ${res.status}): 서버에 넣어 둔 Bright Data 키가 틀렸거나 만료·정지됐을 수 있어요. 관리자가 Bright Data 키와 계정 상태(잔액)를 확인해야 해요. 그동안은 비교 상품을 직접 추가해 주세요`
               : res.status === 402
                 ? 'Bright Data 잔액이 부족해요. 충전 후 다시 시도하거나 비교 상품을 직접 추가해 주세요'
                 : `Bright Data 요청 실패 (HTTP ${res.status})`
